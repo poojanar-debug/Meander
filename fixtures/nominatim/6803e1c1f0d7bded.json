@@ -1,0 +1,156 @@
+{
+  "_meander_provenance": "recorded",
+  "_meander_recorded_at": "2026-08-04T12:07:05.648799+00:00",
+  "_meander_note": "Written by backend/fixtures.py. Secrets are redacted and excluded from the request signature.",
+  "request": {
+    "method": "GET",
+    "url": "https://nominatim.openstreetmap.org/search",
+    "params": {
+      "q": "Vondelpark, Amsterdam",
+      "format": "jsonv2",
+      "limit": 6,
+      "addressdetails": 0
+    },
+    "json": null,
+    "data": {},
+    "content": null,
+    "headers": {
+      "Accept": "application/json"
+    }
+  },
+  "response": {
+    "status": 200,
+    "headers": {
+      "content-type": "application/json; charset=utf-8",
+      "date": "Tue, 04 Aug 2026 12:07:05 GMT"
+    },
+    "json": [
+      {
+        "place_id": 156572806,
+        "licence": "Data \u00a9 OpenStreetMap contributors, ODbL 1.0. http://osm.org/copyright",
+        "osm_type": "relation",
+        "osm_id": 17080648,
+        "lat": "52.3571974",
+        "lon": "4.8641190",
+        "category": "leisure",
+        "type": "park",
+        "place_rank": 24,
+        "importance": 0.4424389152612867,
+        "addresstype": "park",
+        "name": "Vondelpark",
+        "display_name": "Vondelpark, Zuid, Amsterdam, Noord-Holland, Nederland",
+        "boundingbox": [
+          "52.3525805",
+          "52.3618299",
+          "4.8550184",
+          "4.8821453"
+        ]
+      },
+      {
+        "place_id": 156294087,
+        "licence": "Data \u00a9 OpenStreetMap contributors, ODbL 1.0. http://osm.org/copyright",
+        "osm_type": "way",
+        "osm_id": 4480497,
+        "lat": "52.3573317",
+        "lon": "4.8594966",
+        "category": "highway",
+        "type": "pedestrian",
+        "place_rank": 26,
+        "importance": 0.053416015106431645,
+        "addresstype": "road",
+        "name": "Vondelpark",
+        "display_name": "Vondelpark, Zuid, Amsterdam, Noord-Holland, Nederland, 1054 LD, Nederland",
+        "boundingbox": [
+          "52.3551640",
+          "52.3587945",
+          "4.8554823",
+          "4.8654872"
+        ]
+      },
+      {
+        "place_id": 156761366,
+        "licence": "Data \u00a9 OpenStreetMap contributors, ODbL 1.0. http://osm.org/copyright",
+        "osm_type": "way",
+        "osm_id": 161587173,
+        "lat": "52.3552466",
+        "lon": "4.8593522",
+        "category": "highway",
+        "type": "pedestrian",
+        "place_rank": 26,
+        "importance": 0.053416015106431645,
+        "addresstype": "road",
+        "name": "Vondelpark",
+        "display_name": "Vondelpark, Zuid, Amsterdam, Noord-Holland, Nederland, 1075 AP, Nederland",
+        "boundingbox": [
+          "52.3551106",
+          "52.3558918",
+          "4.8569799",
+          "4.8616442"
+        ]
+      },
+      {
+        "place_id": 155889144,
+        "licence": "Data \u00a9 OpenStreetMap contributors, ODbL 1.0. http://osm.org/copyright",
+        "osm_type": "way",
+        "osm_id": 164216614,
+        "lat": "52.3606998",
+        "lon": "4.8737064",
+        "category": "highway",
+        "type": "pedestrian",
+        "place_rank": 26,
+        "importance": 0.053416015106431645,
+        "addresstype": "road",
+        "name": "Vondelpark",
+        "display_name": "Vondelpark, Museumkwartier, Oud-Zuid, Zuid, Amsterdam, Noord-Holland, Nederland, 1054 GS, Nederland",
+        "boundingbox": [
+          "52.3598220",
+          "52.3608383",
+          "4.8720162",
+          "4.8755778"
+        ]
+      },
+      {
+        "place_id": 157114336,
+        "licence": "Data \u00a9 OpenStreetMap contributors, ODbL 1.0. http://osm.org/copyright",
+        "osm_type": "way",
+        "osm_id": 118432709,
+        "lat": "52.3579538",
+        "lon": "4.8679924",
+        "category": "highway",
+        "type": "pedestrian",
+        "place_rank": 26,
+        "importance": 0.053416015106431645,
+        "addresstype": "road",
+        "name": "Vondelpark",
+        "display_name": "Vondelpark, Museumkwartier, Oud-Zuid, Zuid, Amsterdam, Noord-Holland, Nederland, 1071 GM, Nederland",
+        "boundingbox": [
+          "52.3579124",
+          "52.3581953",
+          "4.8673437",
+          "4.8686036"
+        ]
+      },
+      {
+        "place_id": 155843766,
+        "licence": "Data \u00a9 OpenStreetMap contributors, ODbL 1.0. http://osm.org/copyright",
+        "osm_type": "way",
+        "osm_id": 168278611,
+        "lat": "52.3582657",
+        "lon": "4.8694629",
+        "category": "highway",
+        "type": "pedestrian",
+        "place_rank": 26,
+        "importance": 0.053416015106431645,
+        "addresstype": "road",
+        "name": "Vondelpark",
+        "display_name": "Vondelpark, Museumkwartier, Oud-Zuid, Zuid, Amsterdam, Noord-Holland, Nederland, 1071 AA, Nederland",
+        "boundingbox": [
+          "52.3581148",
+          "52.3584061",
+          "4.8690547",
+          "4.8698748"
+        ]
+      }
+    ]
+  }
+}

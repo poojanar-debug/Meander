@@ -12,7 +12,7 @@ import hashlib
 import os
 import threading
 from collections import Counter
-from datetime import date, datetime, timezone
+from datetime import UTC, date, datetime
 from typing import Any
 
 # Regenerated on every process start. Restarting the backend deliberately
@@ -24,12 +24,12 @@ class Metrics:
     def __init__(self) -> None:
         self._lock = threading.Lock()
         self._counters: Counter[str] = Counter()
-        self._day: date = datetime.now(timezone.utc).date()
+        self._day: date = datetime.now(UTC).date()
         self._sessions_today: set[bytes] = set()
-        self._started_at = datetime.now(timezone.utc)
+        self._started_at = datetime.now(UTC)
 
     def _roll_day_locked(self) -> None:
-        today = datetime.now(timezone.utc).date()
+        today = datetime.now(UTC).date()
         if today != self._day:
             self._day = today
             self._sessions_today = set()
@@ -46,7 +46,7 @@ class Metrics:
         ``ip`` and ``user_agent`` are consumed here and immediately discarded;
         they are never stored, logged, or returned.
         """
-        material = f"{ip or ''}|{user_agent or ''}".encode("utf-8")
+        material = f"{ip or ''}|{user_agent or ''}".encode()
         digest = hashlib.blake2b(material, key=_SESSION_SALT, digest_size=16).digest()
         with self._lock:
             self._roll_day_locked()
@@ -73,7 +73,7 @@ class Metrics:
                 "daily_routes_served": self._counters["daily_routes_served"],
                 "unique_sessions_today": len(self._sessions_today),
                 "uptime_s": int(
-                    (datetime.now(timezone.utc) - self._started_at).total_seconds()
+                    (datetime.now(UTC) - self._started_at).total_seconds()
                 ),
             }
 

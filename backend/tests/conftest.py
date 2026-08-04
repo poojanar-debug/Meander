@@ -12,8 +12,9 @@ from __future__ import annotations
 
 import os
 import socket
+from collections.abc import Iterator
 from pathlib import Path
-from typing import Any, Iterator
+from typing import Any
 
 import pytest
 
@@ -77,6 +78,29 @@ def tmp_fixture_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator
     fx.reset_budget_singleton()
     yield d
     fx.reset_budget_singleton()
+
+
+@pytest.fixture(autouse=True)
+def _clean_process_state() -> Iterator[None]:
+    """Counters and rate-limit buckets are process-wide; reset them per test."""
+    from backend.main import limiter
+    from backend.metrics import metrics
+
+    metrics.reset()
+    limiter.reset()
+    yield
+    metrics.reset()
+    limiter.reset()
+
+
+@pytest.fixture
+def api_client(tmp_cache_db: Path):
+    from fastapi.testclient import TestClient
+
+    from backend.main import app
+
+    with TestClient(app) as client:
+        yield client
 
 
 @pytest.fixture

@@ -1,0 +1,156 @@
+{
+  "_meander_provenance": "recorded",
+  "_meander_recorded_at": "2026-08-04T12:07:04.112950+00:00",
+  "_meander_note": "Written by backend/fixtures.py. Secrets are redacted and excluded from the request signature.",
+  "request": {
+    "method": "GET",
+    "url": "https://nominatim.openstreetmap.org/search",
+    "params": {
+      "q": "Euston Road, London",
+      "format": "jsonv2",
+      "limit": 6,
+      "addressdetails": 0
+    },
+    "json": null,
+    "data": {},
+    "content": null,
+    "headers": {
+      "Accept": "application/json"
+    }
+  },
+  "response": {
+    "status": 200,
+    "headers": {
+      "content-type": "application/json; charset=utf-8",
+      "date": "Tue, 04 Aug 2026 12:07:04 GMT"
+    },
+    "json": [
+      {
+        "place_id": 280672938,
+        "licence": "Data \u00a9 OpenStreetMap contributors, ODbL 1.0. http://osm.org/copyright",
+        "osm_type": "node",
+        "osm_id": 6414086721,
+        "lat": "51.5247178",
+        "lon": "-0.1385303",
+        "category": "railway",
+        "type": "station",
+        "place_rank": 30,
+        "importance": 0.4793384785404797,
+        "addresstype": "railway",
+        "name": "Warren Street",
+        "display_name": "Warren Street, Euston Road, Fitzrovia, London Borough of Camden, Greater London, England, W1T 5PE, United Kingdom",
+        "boundingbox": [
+          "51.5197178",
+          "51.5297178",
+          "-0.1435303",
+          "-0.1335303"
+        ]
+      },
+      {
+        "place_id": 277220192,
+        "licence": "Data \u00a9 OpenStreetMap contributors, ODbL 1.0. http://osm.org/copyright",
+        "osm_type": "way",
+        "osm_id": 207527808,
+        "lat": "51.5240298",
+        "lon": "-0.1424911",
+        "category": "highway",
+        "type": "trunk",
+        "place_rank": 26,
+        "importance": 0.39416088441914005,
+        "addresstype": "road",
+        "name": "Euston Road",
+        "display_name": "Euston Road, Fitzrovia, London Borough of Camden, Greater London, England, W1T 6AD, United Kingdom",
+        "boundingbox": [
+          "51.5239846",
+          "51.5241520",
+          "-0.1431271",
+          "-0.1418650"
+        ]
+      },
+      {
+        "place_id": 280427430,
+        "licence": "Data \u00a9 OpenStreetMap contributors, ODbL 1.0. http://osm.org/copyright",
+        "osm_type": "way",
+        "osm_id": 367808660,
+        "lat": "51.5303473",
+        "lon": "-0.1231159",
+        "category": "highway",
+        "type": "trunk",
+        "place_rank": 26,
+        "importance": 0.39416088441914005,
+        "addresstype": "road",
+        "name": "Euston Road",
+        "display_name": "Euston Road, King's Cross, London Borough of Camden, Greater London, England, NW1 2SA, United Kingdom",
+        "boundingbox": [
+          "51.5302167",
+          "51.5304785",
+          "-0.1234154",
+          "-0.1228167"
+        ]
+      },
+      {
+        "place_id": 280221383,
+        "licence": "Data \u00a9 OpenStreetMap contributors, ODbL 1.0. http://osm.org/copyright",
+        "osm_type": "way",
+        "osm_id": 501243983,
+        "lat": "51.5267510",
+        "lon": "-0.1325473",
+        "category": "highway",
+        "type": "trunk",
+        "place_rank": 26,
+        "importance": 0.39416088441914005,
+        "addresstype": "road",
+        "name": "Euston Road",
+        "display_name": "Euston Road, St Pancras, London Borough of Camden, Greater London, England, NW1 2EF, United Kingdom",
+        "boundingbox": [
+          "51.5267078",
+          "51.5267942",
+          "-0.1326653",
+          "-0.1324293"
+        ]
+      },
+      {
+        "place_id": 277221816,
+        "licence": "Data \u00a9 OpenStreetMap contributors, ODbL 1.0. http://osm.org/copyright",
+        "osm_type": "way",
+        "osm_id": 825182593,
+        "lat": "51.5283108",
+        "lon": "-0.1281921",
+        "category": "highway",
+        "type": "trunk",
+        "place_rank": 26,
+        "importance": 0.39416088441914005,
+        "addresstype": "road",
+        "name": "Euston Road",
+        "display_name": "Euston Road, St Pancras, London Borough of Camden, Greater London, England, WC1H 9AX, United Kingdom",
+        "boundingbox": [
+          "51.5282742",
+          "51.5283475",
+          "-0.1282788",
+          "-0.1281055"
+        ]
+      },
+      {
+        "place_id": 280066512,
+        "licence": "Data \u00a9 OpenStreetMap contributors, ODbL 1.0. http://osm.org/copyright",
+        "osm_type": "way",
+        "osm_id": 49934847,
+        "lat": "51.5262705",
+        "lon": "-0.1336542",
+        "category": "highway",
+        "type": "trunk",
+        "place_rank": 26,
+        "importance": 0.39416088441914005,
+        "addresstype": "road",
+        "name": "Euston Road",
+        "display_name": "Euston Road, St Pancras, London Borough of Camden, Greater London, England, NW1 2BE, United Kingdom",
+        "boundingbox": [
+          "51.5262446",
+          "51.5262963",
+          "-0.1337370",
+          "-0.1335714"
+        ]
+      }
+    ]
+  }
+}

@@ -1,0 +1,51 @@
+{
+  "_meander_provenance": "recorded",
+  "_meander_recorded_at": "2026-08-04T12:07:02.473793+00:00",
+  "_meander_note": "Written by backend/fixtures.py. Secrets are redacted and excluded from the request signature.",
+  "request": {
+    "method": "GET",
+    "url": "https://nominatim.openstreetmap.org/search",
+    "params": {
+      "q": "Hyde Park, London",
+      "format": "jsonv2",
+      "limit": 6,
+      "addressdetails": 0
+    },
+    "json": null,
+    "data": {},
+    "content": null,
+    "headers": {
+      "Accept": "application/json"
+    }
+  },
+  "response": {
+    "status": 200,
+    "headers": {
+      "content-type": "application/json; charset=utf-8",
+      "date": "Tue, 04 Aug 2026 12:07:02 GMT"
+    },
+    "json": [
+      {
+        "place_id": 281310877,
+        "licence": "Data \u00a9 OpenStreetMap contributors, ODbL 1.0. http://osm.org/copyright",
+        "osm_type": "way",
+        "osm_id": 372975520,
+        "lat": "51.5074889",
+        "lon": "-0.1622074",
+        "category": "leisure",
+        "type": "park",
+        "place_rank": 24,
+        "importance": 0.5871863729641426,
+        "addresstype": "park",
+        "name": "Hyde Park",
+        "display_name": "Hyde Park, Knightsbridge, City of Westminster, Greater London, England, United Kingdom",
+        "boundingbox": [
+          "51.5018452",
+          "51.5129842",
+          "-0.1748251",
+          "-0.1512785"
+        ]
+      }
+    ]
+  }
+}

@@ -34,9 +34,11 @@ from __future__ import annotations
 import hashlib
 import json
 import threading
-from datetime import datetime, timezone
+from collections.abc import Iterator, Mapping
+from contextlib import contextmanager
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any
 from urllib.parse import urlsplit
 
 import httpx
@@ -103,7 +105,7 @@ def _canonical(value: Any) -> Any:
     """Order-independent representation, so dict iteration order cannot change a hash."""
     if isinstance(value, Mapping):
         return {k: _canonical(value[k]) for k in sorted(value, key=str)}
-    if isinstance(value, (list, tuple)):
+    if isinstance(value, list | tuple):
         return [_canonical(v) for v in value]
     if isinstance(value, float) and value.is_integer():
         # 6.0 and 6 must not produce different fixtures.
@@ -197,13 +199,13 @@ class LiveCallBudget:
             log.warning("budget_file_unreadable", extra={"error": str(exc)})
             return {}
         counts = raw.get("live_calls", {})
-        return {k: int(v) for k, v in counts.items() if isinstance(v, (int, float))}
+        return {k: int(v) for k, v in counts.items() if isinstance(v, int | float)}
 
     def _save(self) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         payload = {
             "note": "Machine-local live-call counters. Gitignored. Delete to reset.",
-            "updated_at": datetime.now(timezone.utc).isoformat(),
+            "updated_at": datetime.now(UTC).isoformat(),
             "caps": self.caps,
             "live_calls": self._state,
         }
@@ -363,7 +365,7 @@ def write_fixture(
 
     envelope: dict[str, Any] = {
         "_meander_provenance": provenance,
-        "_meander_recorded_at": datetime.now(timezone.utc).isoformat(),
+        "_meander_recorded_at": datetime.now(UTC).isoformat(),
         "_meander_note": (
             "Written by backend/fixtures.py. Secrets are redacted and excluded "
             "from the request signature."
@@ -374,7 +376,9 @@ def write_fixture(
             "params": _redact(params, SECRET_QUERY_PARAMS),
             "json": json_body,
             "data": _redact(data, SECRET_QUERY_PARAMS),
-            "content": content.decode("utf-8", "replace") if isinstance(content, bytes) else content,
+            "content": (
+                content.decode("utf-8", "replace") if isinstance(content, bytes) else content
+            ),
             "headers": _redact(headers, SECRET_HEADERS),
         },
         "response": {
@@ -442,6 +446,23 @@ async def aclose_client() -> None:
 
 def current_mode() -> str:
     return settings.fixture_mode
+
+
+# Provenance stamped on fixtures written by fetch(). Only the synthetic-fixture
+# generator changes this, and only because a hand-built response must be
+# labelled as one for its whole life.
+_record_provenance = PROVENANCE_RECORDED
+
+
+@contextmanager
+def recording_as(provenance: str) -> Iterator[None]:
+    global _record_provenance
+    previous = _record_provenance
+    _record_provenance = provenance
+    try:
+        yield
+    finally:
+        _record_provenance = previous
 
 
 async def fetch(
@@ -525,6 +546,7 @@ async def fetch(
             content=content,
             headers=headers,
             response=response,
+            provenance=_record_provenance,
         )
         _assert_no_secret_in_fixture(path)
     else:
@@ -534,7 +556,9 @@ async def fetch(
             extra={"service": service, "sig": sig, "status": response.status_code},
         )
 
-    response.headers[PROVENANCE_HEADER] = PROVENANCE_LIVE
+    response.headers[PROVENANCE_HEADER] = (
+        PROVENANCE_SYNTHETIC if _record_provenance == PROVENANCE_SYNTHETIC else PROVENANCE_LIVE
+    )
     return response
 
 

@@ -132,7 +132,7 @@ The suite runs entirely offline. It never opens a socket.
 
 `POST /api/routes` · `GET /api/geocode?q=` · `GET /api/health` · `POST /api/report-barrier`
 
-The full contract lands in `docs/API.md` — see [PROGRESS.md](PROGRESS.md) for where that is.
+Full contract, including the streaming shape and the blocked-route cases: [docs/API.md](docs/API.md).
 
 ---
 

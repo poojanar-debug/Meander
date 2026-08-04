@@ -7,21 +7,61 @@ the response always states which scoring path produced its numbers.
 
 from __future__ import annotations
 
+import hashlib
 import importlib.util
+import json
+from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from typing import Any, AsyncIterator
+from typing import Any
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Query, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 
 from . import __version__
 from .cache import get_cache
 from .config import STRICT_STARTUP, settings
 from .logging_setup import configure_logging, get_logger
 from .metrics import metrics
+from .models import (
+    CacheInfo,
+    GeocodeResponse,
+    Route,
+    RouteRequest,
+    RoutesResponse,
+    Scores,
+    effective_mode,
+)
+from .ratelimit import RateLimiter
+from .routing import (
+    PRESETS,
+    NoRouteFound,
+    RawRoute,
+    RoutingError,
+    geometry_for_wire,
+)
 
 configure_logging(settings.log_level)
 log = get_logger(__name__)
+
+limiter = RateLimiter(
+    capacity=settings.per_ip_bucket_capacity,
+    refill_per_min=settings.per_ip_refill_per_min,
+    daily_ceiling=settings.global_daily_route_ceiling,
+)
+
+# Placeholder scores are flat and identical across routes on purpose. A varying
+# number would look like a measurement; a flat one plus
+# scoring_method:"placeholder" cannot be mistaken for one.
+PLACEHOLDER_SCORE = 0.5
+PLACEHOLDER_CONFIDENCE = 0.0
+PLACEHOLDER_NOTE = (
+    "Scenery and accessibility scoring is not yet running on this route. "
+    "The numbers shown are placeholders, not measurements."
+)
+
+# ~110 m. Two requests from the same street corner should share a cached answer.
+CACHE_COORD_DECIMALS = 3
 
 
 def clip_available() -> bool:
@@ -93,6 +133,234 @@ app.add_middleware(
 )
 
 
+def _error(kind: str, message: str, status: int) -> JSONResponse:
+    return JSONResponse(status_code=status, content={"error": {"kind": kind, "message": message}})
+
+
+def _client_ip(request: Request) -> str | None:
+    """Read the client address for rate limiting only.
+
+    The value is passed straight into a salted digest and never stored, logged
+    or returned.
+    """
+    forwarded = request.headers.get("x-forwarded-for")
+    if forwarded:
+        return forwarded.split(",")[0].strip()
+    return request.client.host if request.client else None
+
+
+# ---------------------------------------------------------------------------
+# routes
+# ---------------------------------------------------------------------------
+
+
+def route_cache_key(req: RouteRequest) -> str:
+    """Rounded inputs only — never a raw user coordinate."""
+    origin = (
+        round(req.origin.lat, CACHE_COORD_DECIMALS),
+        round(req.origin.lon, CACHE_COORD_DECIMALS),
+    )
+    dest = (
+        (round(req.destination.lat, CACHE_COORD_DECIMALS),
+         round(req.destination.lon, CACHE_COORD_DECIMALS))
+        if req.destination
+        else None
+    )
+    material = json.dumps(
+        {
+            "origin": origin,
+            "destination": dest,
+            "minutes": req.minutes,
+            "mode": req.mode,
+            "objectives": list(req.resolved_objectives()),
+            "version": __version__,
+        },
+        sort_keys=True,
+    )
+    return hashlib.sha256(material.encode()).hexdigest()[:24]
+
+
+def _placeholder_route(route_id: str, label: str, raw: RawRoute) -> Route:
+    return Route(
+        id=route_id,
+        label=label,
+        status="ok",
+        geometry=geometry_for_wire(raw),
+        duration_min=round(raw.duration_min, 1),
+        distance_m=round(raw.distance_m),
+        mode=raw.mode,
+        scores=Scores(nature=PLACEHOLDER_SCORE, air=PLACEHOLDER_SCORE, shade=PLACEHOLDER_SCORE),
+        scoring_method="placeholder",
+        confidence=PLACEHOLDER_CONFIDENCE,
+        synthetic_upstream=raw.synthetic_upstream,
+        confidence_note=PLACEHOLDER_NOTE,
+    )
+
+
+def _blocked_route(route_id: str, label: str, mode: str, note: str) -> Route:
+    return Route(
+        id=route_id,
+        label=label,
+        status="blocked",
+        geometry=[],
+        duration_min=0.0,
+        distance_m=0.0,
+        mode=mode,  # type: ignore[arg-type]
+        scores=Scores(nature=0.0, air=0.0, shade=0.0),
+        scoring_method="placeholder",
+        confidence=0.0,
+        status_note=note,
+    )
+
+
+async def _build_routes(req: RouteRequest) -> tuple[list[Route], str | None]:
+    """Route every requested objective, degrading rather than failing.
+
+    A preset that cannot be routed becomes a ``blocked`` result. Only an
+    entirely empty set is an error.
+    """
+    from .models import ROUTE_LABELS
+
+    mode = effective_mode(req.mode, req.minutes)
+    origin = req.origin.to_latlon()
+    destination = req.destination.to_latlon() if req.destination else None
+    objectives = req.resolved_objectives()
+
+    routes: list[Route] = []
+    fastest_duration: float | None = None
+    failures: list[RoutingError] = []
+
+    # fastest first when present: nature's duration cap is relative to it.
+    ordered = sorted(objectives, key=lambda o: 0 if o == "fastest" else 1)
+
+    for objective in ordered:
+        label = ROUTE_LABELS.get(objective, objective.title())
+        preset_fn = PRESETS.get(objective)
+        if preset_fn is None:
+            # Objectives beyond the implemented three (quiet/shade/air) are not
+            # silently dropped — the UI is told they are not available yet.
+            routes.append(
+                _blocked_route(objective, label, mode,
+                               f"The {label.lower()} objective is not implemented yet.")
+            )
+            continue
+
+        try:
+            if objective == "nature":
+                raw = await preset_fn(origin, destination, req.minutes, mode, fastest_duration)
+            else:
+                raw = await preset_fn(origin, destination, req.minutes, mode)
+        except NoRouteFound as exc:
+            log.info("preset_unroutable", extra={"objective": objective, "kind": exc.kind})
+            metrics.incr("routes_blocked_total")
+            routes.append(_blocked_route(objective, label, mode, exc.human_message))
+            failures.append(exc)
+            continue
+        except RoutingError as exc:
+            log.warning("preset_failed", extra={"objective": objective, "kind": exc.kind})
+            metrics.incr("upstream_failures_total")
+            failures.append(exc)
+            if objective == "fastest":
+                # Without the baseline there is nothing to show at all.
+                raise
+            routes.append(_blocked_route(objective, label, mode, exc.human_message))
+            continue
+
+        if objective == "fastest":
+            fastest_duration = raw.duration_min
+        routes.append(_placeholder_route(objective, label, raw))
+
+    if not any(r.status == "ok" for r in routes):
+        raise failures[0] if failures else NoRouteFound("No route could be found from there.")
+
+    # Preserve the caller's requested order in the response.
+    order = {o: i for i, o in enumerate(objectives)}
+    routes.sort(key=lambda r: order.get(r.id, 99))
+
+    reason = None
+    ok_routes = [r for r in routes if r.status == "ok"]
+    if ok_routes and all(r.duration_min > req.minutes for r in ok_routes):
+        reason = (
+            f"Every route found is longer than your {req.minutes}-minute budget. "
+            "The shortest option is shown first."
+        )
+    return routes, reason
+
+
+@app.post("/api/routes")
+async def post_routes(req: RouteRequest, request: Request, response: Response) -> Any:
+    metrics.incr("route_requests_total")
+    metrics.note_session(_client_ip(request), request.headers.get("user-agent"))
+
+    decision = limiter.check(_client_ip(request))
+    if not decision.allowed:
+        metrics.incr("rate_limited_total")
+        log.info("rate_limited", extra={"reason": decision.reason})
+        return JSONResponse(
+            status_code=429,
+            content={"error": {"kind": decision.reason, "message": decision.message}},
+            headers={"Retry-After": str(max(1, decision.retry_after_s))},
+        )
+
+    cache = get_cache()
+    key = route_cache_key(req)
+    cached = cache.get_route(key)
+    if cached is not None:
+        metrics.incr("cache_hits_total")
+        limiter.refund(_client_ip(request))
+        response.headers["X-Meander-Cache"] = "hit"
+        return cached
+
+    metrics.incr("cache_misses_total")
+
+    try:
+        routes, reason = await _build_routes(req)
+    except RoutingError as exc:
+        metrics.incr("upstream_failures_total")
+        return _error(exc.kind, exc.human_message, exc.status_code)
+
+    metrics.incr("daily_routes_served")
+    payload = RoutesResponse(
+        routes=routes,
+        best_departure=None,
+        reason=reason,
+        cache=CacheInfo(segments_scored=cache.segment_count(), hit_rate=_hit_rate()),
+    ).model_dump()
+
+    cache.put_route(key, payload, settings.route_cache_ttl_s)
+    response.headers["X-Meander-Cache"] = "miss"
+    return payload
+
+
+def _hit_rate() -> float:
+    snap = metrics.snapshot()
+    hits, misses = snap["cache_hits_total"], snap["cache_misses_total"]
+    total = hits + misses
+    return round(hits / total, 3) if total else 0.0
+
+
+# ---------------------------------------------------------------------------
+# geocode
+# ---------------------------------------------------------------------------
+
+
+@app.get("/api/geocode", response_model=GeocodeResponse)
+async def geocode(q: str = Query(min_length=2, max_length=120)) -> Any:
+    from .routing import GeocodeError
+    from .routing import geocode_search as search
+
+    try:
+        results = await search(q)
+    except GeocodeError as exc:
+        return _error("geocode", exc.human_message, exc.status_code)
+    return GeocodeResponse(results=results)
+
+
+# ---------------------------------------------------------------------------
+# health
+# ---------------------------------------------------------------------------
+
+
 @app.get("/api/health")
 def health() -> dict[str, Any]:
     from .fixtures import budget_snapshot, fixture_inventory
@@ -108,4 +376,10 @@ def health() -> dict[str, Any]:
         "live_call_budget": budget_snapshot(),
         "fixtures": fixture_inventory(),
         "counters": metrics.snapshot(),
+        "rate_limit": {
+            "per_ip_capacity": settings.per_ip_bucket_capacity,
+            "per_ip_refill_per_min": settings.per_ip_refill_per_min,
+            "daily_ceiling": settings.global_daily_route_ceiling,
+            "served_today": limiter.served_today(),
+        },
     }

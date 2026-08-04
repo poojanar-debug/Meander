@@ -1,0 +1,114 @@
+{
+  "_meander_provenance": "recorded",
+  "_meander_recorded_at": "2026-08-04T12:06:58.370835+00:00",
+  "_meander_note": "Written by backend/fixtures.py. Secrets are redacted and excluded from the request signature.",
+  "request": {
+    "method": "GET",
+    "url": "https://nominatim.openstreetmap.org/search",
+    "params": {
+      "q": "Colombo Fort, Sri Lanka",
+      "format": "jsonv2",
+      "limit": 6,
+      "addressdetails": 0
+    },
+    "json": null,
+    "data": {},
+    "content": null,
+    "headers": {
+      "Accept": "application/json"
+    }
+  },
+  "response": {
+    "status": 200,
+    "headers": {
+      "content-type": "application/json; charset=utf-8",
+      "date": "Tue, 04 Aug 2026 12:06:58 GMT"
+    },
+    "json": [
+      {
+        "place_id": 253903316,
+        "licence": "Data \u00a9 OpenStreetMap contributors, ODbL 1.0. http://osm.org/copyright",
+        "osm_type": "way",
+        "osm_id": 232514810,
+        "lat": "6.9337271",
+        "lon": "79.8500803",
+        "category": "railway",
+        "type": "station",
+        "place_rank": 30,
+        "importance": 0.28779482241276744,
+        "addresstype": "railway",
+        "name": "Colombo Fort",
+        "display_name": "Colombo Fort, Olcott Mawatha, L B Gate, Fort, Slave Island, Colombo, Colombo District, Western Province, 01100, Sri Lanka",
+        "boundingbox": [
+          "6.9336361",
+          "6.9338171",
+          "79.8496907",
+          "79.8504697"
+        ]
+      },
+      {
+        "place_id": 255311655,
+        "licence": "Data \u00a9 OpenStreetMap contributors, ODbL 1.0. http://osm.org/copyright",
+        "osm_type": "node",
+        "osm_id": 2407528062,
+        "lat": "6.9336070",
+        "lon": "79.8507168",
+        "category": "railway",
+        "type": "stop",
+        "place_rank": 30,
+        "importance": 7.168307011516011e-05,
+        "addresstype": "railway",
+        "name": "Colombo Fort",
+        "display_name": "Colombo Fort, Olcott Mawatha, L B Gate, Fort, Slave Island, Colombo, Colombo District, Western Province, 01100, Sri Lanka",
+        "boundingbox": [
+          "6.9335570",
+          "6.9336570",
+          "79.8506668",
+          "79.8507668"
+        ]
+      },
+      {
+        "place_id": 255310948,
+        "licence": "Data \u00a9 OpenStreetMap contributors, ODbL 1.0. http://osm.org/copyright",
+        "osm_type": "node",
+        "osm_id": 10605451599,
+        "lat": "6.9332535",
+        "lon": "79.8566929",
+        "category": "highway",
+        "type": "bus_stop",
+        "place_rank": 30,
+        "importance": 7.168307011516011e-05,
+        "addresstype": "highway",
+        "name": "Colombo Fort",
+        "display_name": "Colombo Fort, Olcott Mawatha, Kehelwatte, Slave Island, Colombo, Colombo District, Western Province, 01100, Sri Lanka",
+        "boundingbox": [
+          "6.9332035",
+          "6.9333035",
+          "79.8566429",
+          "79.8567429"
+        ]
+      },
+      {
+        "place_id": 255442274,
+        "licence": "Data \u00a9 OpenStreetMap contributors, ODbL 1.0. http://osm.org/copyright",
+        "osm_type": "node",
+        "osm_id": 2648621425,
+        "lat": "6.9332985",
+        "lon": "79.8501276",
+        "category": "railway",
+        "type": "stop",
+        "place_rank": 30,
+        "importance": 7.168307011516011e-05,
+        "addresstype": "railway",
+        "name": "Colombo Fort",
+        "display_name": "Colombo Fort, D. R. Wijewardene Mawatha, L B Gate, Fort, Slave Island, Colombo, Colombo District, Western Province, 01100, Sri Lanka",
+        "boundingbox": [
+          "6.9332485",
+          "6.9333485",
+          "79.8500776",
+          "79.8501776"
+        ]
+      }
+    ]
+  }
+}

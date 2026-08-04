@@ -108,3 +108,80 @@ budget; these predate `fixtures.py`.
   ordinary `httpx.Response` API and cannot forget to unwrap.
 
 **Deviations:** none.
+
+---
+
+## Phase C — Routing · 2026-08-04
+
+**Done**
+
+- `backend/geometry.py` — geometric primitives (haversine, cumulative distance, bearing, sampling,
+  turn angles, loop closure, GeoJSON conversion). numpy only. Scoring lands in Phase F.
+- `backend/routing.py` — GraphHopper client with the three presets, round trips, error shaping,
+  and the single coordinate converter. Nominatim geocoding lives here too.
+- `backend/models.py` — the wire contract as pydantic models.
+- `backend/ratelimit.py` — per-IP token bucket plus a global daily ceiling.
+- `POST /api/routes`, `GET /api/geocode`, whole-route cache, `X-Meander-Cache` header.
+- `scripts/make_synthetic_fixtures.py` and `backend/record_fixtures.py`.
+- `docs/API.md`.
+
+**Verified**
+
+- 139 tests pass with sockets blocked.
+- Three presets differ measurably on **four** locations, not the two required:
+
+  | scenario | fastest | nature | accessible |
+  |---|---|---|---|
+  | Colombo Fort → Viharamahadevi (foot, 25 min) | 37.2 min / 3010 m | 52.7 min / 3755 m (×1.42) | 40.7 min / 3133 m |
+  | Euston Rd → Hyde Park (foot, 40 min) | 38.3 min / 3100 m | 54.3 min / 3868 m (×1.42) | 41.9 min / 3227 m |
+  | Hyde Park loop (foot, 35 min) | 32.6 min / 2641 m | 40.9 min / 2912 m (×1.25) | 34.2 min / 2635 m |
+  | Vondelpark loop (bike, 60 min) | 52.4 min / 13195 m | 65.5 min / 14522 m (×1.25) | 55.1 min / 13188 m |
+
+- Round-trip loops return to the origin (`test_round_trip_returns_to_the_origin`, < 150 m closure).
+- Nature stays inside the 1.6× duration cap on every scenario.
+- 429 fires on per-IP exhaustion **and** on the daily ceiling, each with its own message and a
+  `Retry-After` header.
+- A cache hit refunds the rate-limit token — verified by test, because charging for a cache hit
+  would throttle users for work the server never did.
+- The `accessible` preset returning no route is a `200` with `status: "blocked"`, and the other two
+  routes are unaffected.
+
+**Live API calls used:** GraphHopper 0 (of 80). Nominatim 5 (of 40) — real geocode fixtures for the
+five test locations.
+
+**Decisions**
+
+- **Geocoding uses Nominatim, not GraphHopper.** GraphHopper's geocoder spends from the same
+  500-credit/day pool as routing, which is the scarce resource; Nominatim is keyless and free. The
+  shared client already sends a real User-Agent, which Nominatim's usage policy requires.
+- **The accessible custom model excludes only *known-bad* tags, never missing ones.** Excluding
+  `surface == MISSING` is the literal reading of the spec's hard constraint, but most of the world
+  is untagged, so it returns no route almost anywhere and the feature becomes useless. Instead:
+  known-bad values are rejected by the router outright, and untagged ways are routed and then
+  marked UNKNOWN by `accessibility.py`, counted against `confidence`, and **never reported as
+  accessible**. There is a test (`test_accessible_model_does_not_exclude_untagged_ways`) pinning
+  this, and Phase H adds the tests pinning the UNKNOWN side. This is the single most important
+  design decision in the project and it is deliberately not a silent one.
+- Nature climbs a `distance_influence` ladder of 20 → 45 → 90, stopping at the first result inside
+  the 1.6× cap, rather than returning an over-budget route. On the synthetic fixtures rung 1 always
+  suffices (ratios 1.25–1.42).
+- `round_trip.seed` is fixed at 42. A varying seed means a stable input produces a different route
+  every time, the whole-route cache never hits, and every page reload spends three credits.
+- Round-trip distance comes from deliberately conservative speeds (foot 75 m/min, bike 220,
+  car 550). Overshooting costs the user their actual time budget.
+- Added two fields not in the original contract: `synthetic_upstream` (a route built from a
+  hand-authored fixture must never look like a measurement) and `status_note` (the contract has
+  nowhere to say *why* a route is blocked when the reason is not a geographic blocker).
+- Added `backend/models.py` and `backend/ratelimit.py`, which are not in the spec's file list.
+  Rate limiting is specified as living in `main.py`; extracting the bucket keeps it unit-testable
+  without a TestClient. No new third-party dependency was added.
+- A preset that fails to route degrades to `status: "blocked"` rather than failing the whole
+  request. Only `fastest` failing is fatal, because without the baseline there is nothing to show.
+
+**Deviations**
+
+- GraphHopper fixtures are **synthetic**, not recorded — there is no API key on this machine
+  (BLOCKED.md #1). They use GraphHopper's real response schema and plausible geometry, so every
+  parsing, scoring and accessibility path is exercised, but each one is stamped
+  `"_meander_provenance": "synthetic"`, `/api/health` reports the count, and every route derived
+  from one carries `synthetic_upstream: true` with `scoring_method: "placeholder"`.
