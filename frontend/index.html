@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="color-scheme" content="light" />
+    <meta
+      name="description"
+      content="Meander finds three routes from where you are and how long you have: the fastest, the greenest, and one that holds to real accessibility constraints."
+    />
+    <title>Meander — routes for the time you have</title>
+  </head>
+  <body>
+    <div id="root"></div>
+    <noscript>
+      <p style="padding: 1.5rem; font-family: system-ui, sans-serif; max-width: 40rem">
+        Meander needs JavaScript to draw routes on a map. The API it runs on is a plain
+        HTTP interface, though — <code>POST /api/routes</code> returns the same three routes
+        as JSON, and every route carries a full text description.
+      </p>
+    </noscript>
+    <script type="module" src="/src/main.jsx"></script>
+  </body>
+</html>

@@ -178,10 +178,85 @@ five test locations.
 - A preset that fails to route degrades to `status: "blocked"` rather than failing the whole
   request. Only `fastest` failing is fatal, because without the baseline there is nothing to show.
 
-**Deviations**
+**Deviations (Phase C)**
 
 - GraphHopper fixtures are **synthetic**, not recorded — there is no API key on this machine
   (BLOCKED.md #1). They use GraphHopper's real response schema and plausible geometry, so every
   parsing, scoring and accessibility path is exercised, but each one is stamped
   `"_meander_provenance": "synthetic"`, `/api/health` reports the count, and every route derived
   from one carries `synthetic_upstream: true` with `scoring_method: "placeholder"`.
+
+---
+
+## Phase D — Frontend · 2026-08-04
+
+**Done**
+
+- Vite + React (JavaScript, not TypeScript) + MapLibre GL, structured as the handoff specifies:
+  `App.jsx` (all state), `api/client.js`, `api/mock.js`, seven components, `lib/format.js`,
+  `lib/dash.js`.
+- Streaming client: parses `text/event-stream` and pushes each route into state as it lands,
+  falling back transparently to whole-document JSON. Routes merge by `id`, so the narration pass
+  updates a card instead of appending a duplicate.
+- Debounce table implemented as specified — dial 400 ms, mode 120 ms, objective chip 120 ms, place
+  pick immediate — with an `AbortController` per request. **The previous result stays rendered and
+  interactive during a refetch;** only the banner changes.
+- MapLibre: one `geojson` source and a `case-`/`line-` layer pair per route, selection applied with
+  `setPaintProperty` rather than by re-adding layers, `fitBounds` on selection with padding 70 (40
+  when narrow) and `duration: 0` under `prefers-reduced-motion`.
+- All six objectives with distinct colour **and** dash pattern; max three selected, never zero.
+- `api/mock.js` gated on `VITE_MOCK_API === '1'`, with the header stating in visible text that the
+  build is on fixtures. Emits four progress events over ~2.2 s, one route every ~420 ms, then a
+  narration pass at +700 ms, and includes the required blocked-accessible fixture with
+  `confidence: 0.41` and two blockers.
+
+**Verified in a real browser, against mocks, with the backend never started**
+
+- `npm run build` succeeds.
+- Full flow works end to end: type a place → arrow-key the listbox → Enter picks it → routes
+  stream in → cards and map populate.
+- **Keyboard:** tab order runs skip-link → controls → dial → mode → six chips → map → three route
+  selectors → footer, with nothing unreachable. Combobox `ArrowDown`/`ArrowUp`/`Escape`/`Enter`
+  verified by dispatching properly-keyed events and asserting `aria-activedescendant` and
+  `aria-selected` move with the highlight.
+- **Target size:** every interactive element in the app measures ≥ 44 × 44 px, checked by script.
+  MapLibre's own 29 px zoom buttons are enlarged to 44 px in CSS rather than left as the one
+  exception.
+- **The map is not load-bearing:** with `display: none` on `MapView`, the results panel still
+  contains every duration, distance, all three scores, the scoring method, the confidence
+  sentence, rest stops, both blockers and the narration.
+- **Live region** announces route arrival (count, routable count, each label + duration +
+  distance) and selection changes (label, duration, distance, confidence sentence), debounced
+  350 ms so a dial drag cannot spam it.
+- **Derived mode updates on the drag itself**, before any network call:
+  `aria-valuetext` goes from "35 minutes, walking" to "150 minutes, driving" on the change event.
+- **375 px:** `scrollWidth === clientWidth`, so no horizontal scrolling; the 860 px breakpoint
+  stacks the layout as specified.
+
+**Live API calls used:** 0.
+
+**Two real defects found by testing in the browser and fixed**
+
+1. `RouteCard` wrapped the whole card in a `<button>` containing `<p>`, `<dl>` and `<ul>`. That is
+   invalid HTML, and screen readers flatten such a button's contents into a single unreadable
+   label — the card is the accessibility story for this app, so this was the worst possible place
+   for it. Restructured: the card is an `<li>`, and the selector is one button holding only
+   phrasing content. Pointer users can still click anywhere on the card. Asserted by a DOM check
+   that no `<button>` contains block or interactive content.
+2. Rest-stop pluralisation produced "2 benchs" and "1 drinking water". Added a name table for the
+   OSM amenity types plus an `-es` rule, so it now reads "2 benches and 1 drinking water tap".
+
+**Decisions**
+
+- **Fonts are not fetched.** Newsreader and IBM Plex Sans are named first in the stack with
+  system serif/sans fallbacks, rather than loaded from Google Fonts. Loading a webfont from a
+  third party would leak every visitor's IP to that third party, and the app's headline promise is
+  that it does not do that. The visual system degrades to a system serif where the fonts are not
+  installed locally.
+- MapLibre is split into its own Rollup chunk: it is 1 MB and never changes, so a UI edit should
+  not invalidate it in the browser cache.
+- Footer and map-attribution links are inline in a sentence and cannot be 44 px tall without
+  wrecking the prose; WCAG 2.2 exempts inline targets for that reason. They are padded to ~39 px
+  and the exception is recorded here rather than left silent.
+- The map degrades explicitly: if WebGL is unavailable or the style host is blocked, a visible
+  message says so and points at the list, which already carries the whole answer.
