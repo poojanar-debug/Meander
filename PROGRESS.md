@@ -961,3 +961,97 @@ clean the working copy. Hooks live in `scripts/git-hooks/`.
 
 **Live API calls:** GraphHopper self-hosted ~40 (unmetered), Overpass 5,
 Open-Meteo 10, Nominatim 0.
+
+---
+
+## Launch phases 1–3 · What the audit got right, and two things it did not
+
+### Phase 1 — the launch blockers
+
+Seven fixes, each with its own commit and tests. The three that mattered most:
+
+**The self-hosted flag.** `graphhopper_is_self_hosted()` sniffed the hostname,
+which is right on a laptop and wrong the moment the router has a real name.
+Four behaviours hang off it and none fails loudly; the dangerous one is that
+`path_details()` drops `smoothness`, so the accessible model silently stops
+excluding IMPASSABLE surfaces. Now `MEANDER_GRAPHHOPPER_SELF_HOSTED`, with the
+sniff only as the default. conftest pins it in the same commit — the fixture
+signature depends on it, and getting that wrong fails the whole suite on
+`no_fixture`. Verified by running the suite with a hostile environment
+exported: 411 passed, byte-identical.
+
+**Nature with no baseline.** `{"objectives": ["nature"]}` is a valid public
+request, and it made `route_nature` receive `fastest=None`, which switches off
+*both* its bars — the 1.6× cap and the greenness floor. Every candidate becomes
+acceptable and the winner ships labelled Nature with no note. Fixed by routing
+a baseline whenever nature is asked for.
+
+**Time to first route: 3.96 s → 0.03 s.** The audit read this as "the objective
+loop is sequential, parallelise it". Measuring says routing was never the cost:
+a self-hosted router answers a whole foot route in 24 ms, so all eight requests
+together are ~0.2 s. The cost is the *shared* enrichment pass, and it sat
+between routing and the first route event. Each route is now emitted twice —
+immediately, then again enriched — using the merge-by-id the client already
+had for narration. `enrichment_pending` says so, because `rest_stops` cannot be
+null and `[]` would mean "we looked and found none".
+
+### Phase 2 — production hardening
+
+The rate limiter was defeated by one header: `X-Forwarded-For.split(",")[0]` is
+the value the *client* sent. Now read from the right, `parts[-hops]`, defaulting
+to zero trusted hops. 50 requests each inventing a different XFF now map to one
+bucket.
+
+`/healthz` and `/readyz` split from `/api/health`, verified by suspending the
+router with SIGSTOP: liveness stayed 200 throughout, readiness went 503 and
+came back. Readiness deliberately does **not** use `missing_keys()`, which
+names MAPILLARY_TOKEN and ANTHROPIC_API_KEY — neither is needed to serve a
+route, and wiring readiness to it would 503 a healthy instance for ever.
+
+One finding worth recording because I got it wrong first: **Starlette's
+GZipMiddleware does not leave streaming responses alone.** I wrote a comment
+claiming it did; the test returned `content-encoding: gzip` on a
+text/event-stream response. That would have silently undone the whole of Phase
+1.5. ConditionalGZip decides on the request's Accept header.
+
+### Phase 3 — the graph, which is the entire bill
+
+|                      | demo    | countries |
+|----------------------|---------|-----------|
+| download             | ~370 MB | ~3.5 GB   |
+| merged extract       | 346 MB  | 3.5 GB    |
+| graph on disk        | 620 MB  | 6.6 GB    |
+| import               | 96 s    | ~31 min   |
+| minimum serve heap   | **2 GB** (1 GB OOMs) | 20 GB |
+| cold start to route  | 1.1 s   | —         |
+| first route          | 44 ms   | —         |
+
+**Contraction hierarchies are gone**, and the measurement is why: CH is
+incompatible with a custom model, so it only ever served `fastest`. Dropping it
+costs 4 ms on that one preset (5.1 → 9.2 ms) and saves 22% of the graph and 40%
+of the import. Four milliseconds against a request budget dominated by Overpass
+at seconds.
+
+**RAM_STORE vs MMAP for elevation is a no-op**, which is not what I expected.
+Boot 1.1 s both ways, flexible route 12.5 vs 12.3 ms, RSS 1051 vs 1073 MB.
+Elevation is consumed at import time and baked into the graph; at serve time
+the setting does nothing. The audit's suggestion that RAM_STORE is "probably
+the wrong call on a memory-billed container" does not hold.
+
+**What surprised me.** Both real bugs in this phase were found by *running* the
+script, not by reading it. `/usr/libexec/java_home -v 21` returns a Java 8 home
+when no JDK 21 is registered — it ignores the version filter — so discovery
+that trusted it turned a working machine into "Java 8 is too old". And
+Geofabrik answers **HTTP 200 with an HTML page** for a region path that does
+not exist, so `curl -f` succeeds and a 12 KB HTML document lands named
+`.osm.pbf`; it died three steps later inside osmium. The checksum guard I had
+just written treated "no published checksum" as a warning and stepped past it.
+It now treats it as the failure it is.
+
+**What I did not do.** Docker is not installed on this machine. The two
+Dockerfiles, the entrypoint and the compose stack are written and reviewed but
+have never been built or run. Everything above the container boundary was
+exercised for real.
+
+**Live API calls:** GraphHopper self-hosted ~120 (unmetered), Overpass ~12,
+Open-Meteo ~25, Geofabrik 4 extracts.
