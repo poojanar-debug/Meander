@@ -38,10 +38,63 @@ GRAPHHOPPER_URL = os.environ.get(
 )
 
 
-def graphhopper_is_self_hosted() -> bool:
-    """A self-hosted server needs no API key and has no plan restrictions."""
+SELF_HOSTED_ENV = "MEANDER_GRAPHHOPPER_SELF_HOSTED"
+
+_LOOPBACK_HOSTS = frozenset({"localhost", "127.0.0.1", "0.0.0.0", "::1"})
+
+
+def _hostname_looks_self_hosted() -> bool:
     host = GRAPHHOPPER_URL.split("//", 1)[-1].split("/", 1)[0].split(":", 1)[0].lower()
-    return host in {"localhost", "127.0.0.1", "0.0.0.0", "::1"} or host.endswith(".local")
+    return host in _LOOPBACK_HOSTS or host.endswith(".local")
+
+
+def graphhopper_is_self_hosted() -> bool:
+    """Is the routing server one we run ourselves?
+
+    Four unrelated behaviours hang off this answer, and **none of them fails
+    loudly when it is wrong**:
+
+    1. ``path_details()`` requests ``smoothness`` only when self-hosted, because
+       the hosted API has no such encoded value and referencing one that does
+       not exist fails the whole request. Get this wrong in the False direction
+       and the accessible custom model silently stops excluding IMPASSABLE
+       surfaces — one of the five hard constraints stops firing, the app keeps
+       answering, and its answers get quietly less safe.
+    2. ``Settings.missing_keys()`` stops demanding ``GRAPHHOPPER_KEY``, so with
+       ``MEANDER_STRICT_STARTUP=1`` a wrong answer refuses to boot against a
+       perfectly good router.
+    3. ``build_request_body()`` sets ``ch.disable`` for round trips, because a
+       self-hosted server with CH prepared answers "algorithm=round_trip cannot
+       be used with CH". Only the *fastest* round trip is affected — the other
+       two presets carry a custom model and get ``ch.disable`` regardless — and
+       a fastest failure is re-raised, so the whole request dies.
+    4. ``route_nature()`` searches all six loop candidates and picks on merit
+       when unmetered, but only the first two with an early break when it thinks
+       it is paying per call. So this flag changes **which route the user gets**,
+       not merely how the server is operated.
+
+    Hostname sniffing was the original answer and it is wrong the moment the
+    router lives anywhere real — a private ALB, ECS Service Connect,
+    ``graphhopper.meander.internal``, a VPC address. That is exactly the
+    deployment this repository is heading for, so the flag is now explicit and
+    the sniff is only the default when nothing is configured. Local development
+    keeps working with no configuration at all.
+    """
+    raw = os.environ.get(SELF_HOSTED_ENV)
+    if raw is not None and raw.strip():
+        return raw.strip().lower() in {"1", "true", "yes", "on"}
+    return _hostname_looks_self_hosted()
+
+
+def self_hosted_resolution() -> dict[str, object]:
+    """How the flag was decided, for one startup log line and /api/health."""
+    raw = os.environ.get(SELF_HOSTED_ENV)
+    explicit = raw is not None and raw.strip() != ""
+    return {
+        "self_hosted": graphhopper_is_self_hosted(),
+        "source": "env" if explicit else "hostname",
+        "endpoint_host": GRAPHHOPPER_URL.split("//", 1)[-1].split("/", 1)[0],
+    }
 GRAPHHOPPER_GEOCODE_URL = "https://graphhopper.com/api/1/geocode"
 MAPILLARY_URL = "https://graph.mapillary.com/images"
 OVERPASS_URL = "https://overpass-api.de/api/interpreter"

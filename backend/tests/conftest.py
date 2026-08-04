@@ -25,6 +25,14 @@ import pytest
 # misses. Per-test overrides go through the `fixture_mode` fixture instead.
 os.environ["MEANDER_FIXTURES"] = "replay"
 os.environ["MEANDER_GRAPHHOPPER_URL"] = "https://graphhopper.com/api/1/route"
+# Pinned for the same reason and in the same breath as the URL: this flag
+# decides path_details(), path_details() is inside the request body, and the
+# body is what a fixture is keyed on. It is pinned to "0" specifically because
+# that is what the hostname sniff resolved to for the URL above when every
+# committed fixture was recorded — flipping it invalidates all of them at once
+# and the suite fails wholesale on no_fixture rather than on anything that
+# points at the cause. PROGRESS.md logs this as self-hosting defect #6.
+os.environ["MEANDER_GRAPHHOPPER_SELF_HOSTED"] = "0"
 os.environ.pop("MEANDER_PATH_DETAILS", None)
 os.environ.setdefault("MEANDER_LOG_LEVEL", "WARNING")
 # open_clip otherwise contacts the Hugging Face hub to revalidate the CLIP

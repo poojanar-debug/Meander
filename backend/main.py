@@ -22,7 +22,7 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from . import __version__
 from .accessibility import VERY_LOW_CONFIDENCE_THRESHOLD, assess_route
 from .cache import get_cache
-from .config import STRICT_STARTUP, settings
+from .config import STRICT_STARTUP, path_details, self_hosted_resolution, settings
 from .enrich import (
     AirQuality,
     EnrichContext,
@@ -112,6 +112,11 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     missing = _check_startup()
     cache = get_cache()
     purged = cache.purge_expired_routes()
+    # Logged explicitly because four behaviours hang off it and none of them
+    # fails loudly when it is wrong — most importantly, a False here drops the
+    # smoothness hard constraint and the app just gets quietly less safe. See
+    # config.graphhopper_is_self_hosted().
+    resolution = self_hosted_resolution()
     log.info(
         "startup",
         extra={
@@ -121,6 +126,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             "missing_keys": missing,
             "routes_purged": purged,
             "cache_stats": cache.stats(),
+            "graphhopper_self_hosted": resolution["self_hosted"],
+            "graphhopper_flag_source": resolution["source"],
+            "path_details": path_details(),
         },
     )
     yield
@@ -690,6 +698,12 @@ def health() -> dict[str, Any]:
         "routing": {
             "endpoint": GRAPHHOPPER_URL,
             "self_hosted": self_hosted,
+            # "hostname" here on a deployed instance means nobody set
+            # MEANDER_GRAPHHOPPER_SELF_HOSTED and the answer was guessed from
+            # the URL. If the router is behind a real name that guess is False,
+            # and smoothness — a hard accessibility constraint — is silently
+            # absent from path_details below.
+            "self_hosted_source": self_hosted_resolution()["source"],
             "custom_models_available": self_hosted,
             "path_details": path_details(),
         },
