@@ -358,6 +358,11 @@ async def _generate(scenario: Scenario, force: bool) -> list[str]:
                     "POST", GRAPHHOPPER_URL, json_body=body,
                     headers={"Content-Type": "application/json"},
                     cost=0, service="graphhopper",
+                    # Explicit, because this script forces `live` mode (to skip
+                    # the fixture read and regenerate) and `live` no longer
+                    # persists — a deployed instance must write nothing.
+                    # Writing fixtures is this script's entire purpose.
+                    persist=True,
                 )
                 assert response.status_code == 200
                 written.append(f"{scenario.slug}/{preset}")

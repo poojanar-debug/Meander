@@ -558,18 +558,32 @@ async def fetch(
     headers: Mapping[str, Any] | None = None,
     cost: int = 1,
     service: str | None = None,
-    persist: bool = True,
+    persist: bool | None = None,
 ) -> httpx.Response:
     """Fetch through the record/replay layer.
 
     ``cost`` is how many live calls this request consumes from the service
     budget — GraphHopper charges roughly three credits per route request.
 
-    ``persist=False`` still counts the call against the budget but never writes
-    a fixture. It exists for binary payloads: committing megabytes of street
-    imagery would bloat the repository, and those responses do not need
-    replaying because the expensive thing derived from them — the CLIP score —
-    is itself persisted, in data/cache.db.
+    ``persist`` decides whether a successful response is written to
+    ``fixtures/``:
+
+    ``None``   default — write only when the mode is ``record``. A deployed
+               instance runs in ``live`` mode and must write nothing: it used to
+               write a fixture **and read the file straight back** to assert no
+               secret had leaked, so every upstream call cost two synchronous
+               disk operations on a single-worker event loop, grew the disk
+               without bound, and persisted third-party response bodies with no
+               retention policy. Nothing ever read them — in live mode the read
+               path was skipped on the happy path.
+    ``False``  never write, even when recording. For binary payloads: committing
+               megabytes of street imagery would bloat the repository, and those
+               responses need no replaying because the expensive thing derived
+               from them — the CLIP score — is persisted in data/cache.db.
+    ``True``   always write. Only scripts/make_synthetic_fixtures.py, which
+               forces ``live`` mode against a MockTransport precisely so it can
+               regenerate fixtures that already exist. Writing is that script's
+               entire purpose, so it says so at the call site.
     """
     service = service or service_for_url(url)
     sig = signature(
@@ -627,7 +641,13 @@ async def fetch(
         headers=dict(headers) if headers else None,
     )
 
-    if response.status_code < 400 and persist:
+    if response.status_code >= 400:
+        # Recording a 4xx/5xx would permanently replay an outage or a bad key.
+        log.warning(
+            "live_call_error_not_recorded",
+            extra={"service": service, "sig": sig, "status": response.status_code},
+        )
+    elif (mode == "record") if persist is None else persist:
         path = write_fixture(
             service,
             sig,
@@ -642,12 +662,6 @@ async def fetch(
             provenance=_record_provenance,
         )
         _assert_no_secret_in_fixture(path)
-    else:
-        # Recording a 4xx/5xx would permanently replay an outage or a bad key.
-        log.warning(
-            "live_call_error_not_recorded",
-            extra={"service": service, "sig": sig, "status": response.status_code},
-        )
 
     response.headers[PROVENANCE_HEADER] = (
         PROVENANCE_SYNTHETIC if _record_provenance == PROVENANCE_SYNTHETIC else PROVENANCE_LIVE
