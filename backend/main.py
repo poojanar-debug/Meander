@@ -21,8 +21,12 @@ from typing import Any
 
 from fastapi import FastAPI, Query, Request, Response
 from fastapi.concurrency import run_in_threadpool
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
+from starlette.datastructures import Headers
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from . import __version__
 from .accessibility import VERY_LOW_CONFIDENCE_THRESHOLD, assess_route
@@ -90,6 +94,9 @@ SYNTHETIC_NOTE = (
 
 # ~110 m. Two requests from the same street corner should share a cached answer.
 CACHE_COORD_DECIMALS = 3
+
+# Every legitimate request is two coordinates and a few scalars.
+MAX_BODY_BYTES = 64 * 1024
 
 
 def clip_available() -> bool:
@@ -207,6 +214,91 @@ app.add_middleware(
     expose_headers=["Retry-After", "X-Meander-Cache", "X-Request-Id"],
     max_age=600,
 )
+
+
+class ConditionalGZip:
+    """GZip everything except a stream.
+
+    Starlette's GZipMiddleware does **not** leave streaming responses alone —
+    measured here, it happily returned `content-encoding: gzip` on a
+    text/event-stream response. Compression buffers, and a buffered stream is
+    not a stream: the whole point of the SSE path is that a route reaches the
+    browser at 30 ms instead of 12 s.
+
+    Decided on the *request's* Accept header rather than the response's content
+    type, because by the time a content type is known the response wrapper has
+    already been installed.
+    """
+
+    def __init__(self, app: Any, **kwargs: Any) -> None:
+        self.app = app
+        self.gzip = GZipMiddleware(app, **kwargs)
+
+    async def __call__(self, scope: Any, receive: Any, send: Any) -> None:
+        if scope["type"] == "http":
+            accept = Headers(scope=scope).get("accept", "")
+            if "text/event-stream" in accept:
+                await self.app(scope, receive, send)
+                return
+        await self.gzip(scope, receive, send)
+
+
+app.add_middleware(ConditionalGZip, minimum_size=1024, compresslevel=5)
+
+
+@app.exception_handler(RequestValidationError)
+async def validation_error(request: Request, exc: RequestValidationError) -> JSONResponse:
+    """One error shape for the whole API.
+
+    FastAPI's default is {"detail": [...]} while everything else here answers
+    {"error": {"kind", "message"}}, so the frontend carried a special case for
+    exactly one status code — and docs/API.md documented the FastAPI shape,
+    which meant the documented contract and the real one disagreed depending on
+    which endpoint you read.
+    """
+    first = (exc.errors() or [{}])[0]
+    location = ".".join(str(p) for p in first.get("loc", ()) if p != "body")
+    message = first.get("msg", "That request was not valid.")
+    return JSONResponse(
+        status_code=422,
+        content={
+            "error": {
+                "kind": "invalid_request",
+                "message": f"{location}: {message}" if location else message,
+            }
+        },
+    )
+
+
+@app.exception_handler(StarletteHTTPException)
+async def http_error(request: Request, exc: StarletteHTTPException) -> JSONResponse:
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={"error": {"kind": "http_error", "message": str(exc.detail)}},
+        headers=getattr(exc, "headers", None),
+    )
+
+
+@app.middleware("http")
+async def limit_body_size(request: Request, call_next: Any) -> Response:
+    """Reject an oversized body before it is parsed.
+
+    Every legitimate request here is two coordinates and a handful of scalars —
+    a few hundred bytes. Without a ceiling, an unauthenticated caller can make
+    the service buffer as much as it likes.
+    """
+    declared = request.headers.get("content-length")
+    if declared and declared.isdigit() and int(declared) > MAX_BODY_BYTES:
+        return JSONResponse(
+            status_code=413,
+            content={
+                "error": {
+                    "kind": "payload_too_large",
+                    "message": "That request body is too large.",
+                }
+            },
+        )
+    return await call_next(request)
 
 
 @app.middleware("http")
@@ -910,7 +1002,6 @@ async def _stream(req: RouteRequest, cache_key: str) -> AsyncIterator[str]:
 
             if event["type"] == "done":
                 finished = event["payload"]
-                metrics.incr("daily_routes_served")
                 await run_in_threadpool(
                     get_cache().put_route, cache_key, finished, settings.route_cache_ttl_s
                 )
@@ -1005,7 +1096,6 @@ async def post_routes(req: RouteRequest, request: Request, response: Response) -
     if payload is None:
         return _error("upstream", "No route could be produced for that request.", 502)
 
-    metrics.incr("daily_routes_served")
     await run_in_threadpool(cache.put_route, key, payload, settings.route_cache_ttl_s)
     response.headers["X-Meander-Cache"] = "miss"
     return payload
@@ -1024,7 +1114,24 @@ def _hit_rate() -> float:
 
 
 @app.get("/api/geocode", response_model=GeocodeResponse)
-async def geocode(q: str = Query(min_length=2, max_length=120)) -> Any:
+async def geocode(request: Request, q: str = Query(min_length=2, max_length=120)) -> Any:
+    """Place search, proxied to Nominatim.
+
+    Rate-limited like everything else. It was previously unauthenticated **and
+    unlimited**, and Nominatim's usage policy is one request per second enforced
+    by banning the offending IP — which here is this service's egress address,
+    so one script pointed at /api/geocode gets place search banned for every
+    user of the deployment, not for the script.
+    """
+    decision = limiter.check(_client_ip(request))
+    if not decision.allowed:
+        metrics.incr("rate_limited_total")
+        return JSONResponse(
+            status_code=429,
+            content={"error": {"kind": decision.reason, "message": decision.message}},
+            headers={"Retry-After": str(max(1, decision.retry_after_s))},
+        )
+
     from .routing import GeocodeError
     from .routing import geocode_search as search
 

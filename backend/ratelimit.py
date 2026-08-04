@@ -14,6 +14,8 @@ import os
 import threading
 import time
 from dataclasses import dataclass, field
+from datetime import UTC, datetime, timedelta
+from datetime import time as dt_time
 
 _BUCKET_SALT = os.urandom(32)
 
@@ -51,7 +53,15 @@ class RateLimiter:
 
     _buckets: dict[str, _Bucket] = field(default_factory=dict)
     _lock: threading.Lock = field(default_factory=threading.Lock)
-    _day_started: float = field(default_factory=time.time)
+    # The UTC date, not a stopwatch started when the process did.
+    #
+    # A rolling 24-hour window anchored at process start means every deploy,
+    # crash or scale event hands the service a fresh daily quota — and on ECS
+    # that is a far more likely occurrence than the two-task case. It also made
+    # the ceiling unpredictable: "resets at midnight" is something an operator
+    # can reason about, "resets 24 hours after whenever this container last
+    # started" is not.
+    _day: str = field(default_factory=lambda: datetime.now(UTC).date().isoformat())
     _served_today: int = 0
 
     def _evict_locked(self, now: float) -> None:
@@ -66,19 +76,27 @@ class RateLimiter:
             for k, _ in ordered[: len(ordered) // 2]:
                 del self._buckets[k]
 
-    def _roll_day_locked(self, now: float) -> None:
-        if now - self._day_started >= 86_400:
-            self._day_started = now
+    def _roll_day_locked(self) -> None:
+        today = datetime.now(UTC).date().isoformat()
+        if today != self._day:
+            self._day = today
             self._served_today = 0
+
+    @staticmethod
+    def _seconds_to_midnight_utc() -> int:
+        now = datetime.now(UTC)
+        midnight = datetime.combine(
+            now.date() + timedelta(days=1), dt_time.min, tzinfo=UTC
+        )
+        return max(1, int((midnight - now).total_seconds()))
 
     def check(self, ip: str | None, now: float | None = None) -> Decision:
         """Consume one token. Does not raise; the caller shapes the response."""
         now = time.monotonic() if now is None else now
-        wall = time.time()
         key = client_digest(ip)
 
         with self._lock:
-            self._roll_day_locked(wall)
+            self._roll_day_locked()
 
             if self._served_today >= self.daily_ceiling:
                 return Decision(
@@ -88,7 +106,7 @@ class RateLimiter:
                         "Meander has used up its routing allowance for today. It runs on a free "
                         "tier with a fixed daily quota. Please try again tomorrow."
                     ),
-                    retry_after_s=int(86_400 - (wall - self._day_started)),
+                    retry_after_s=self._seconds_to_midnight_utc(),
                 )
 
             bucket = self._buckets.get(key)
@@ -135,11 +153,20 @@ class RateLimiter:
             self._served_today = max(0, self._served_today - 1)
 
     def served_today(self) -> int:
+        """The single enforced "routes served today" number.
+
+        There used to be two of these on two different clocks — this one on a
+        window from process start, and metrics.daily_routes_served on the UTC
+        date — reachable through three accessors, with only this one actually
+        checked against the ceiling. The other has been removed rather than
+        reconciled: two counters that agree by coincidence are worse than one.
+        """
         with self._lock:
+            self._roll_day_locked()
             return self._served_today
 
     def reset(self) -> None:
         with self._lock:
             self._buckets.clear()
             self._served_today = 0
-            self._day_started = time.time()
+            self._day = datetime.now(UTC).date().isoformat()

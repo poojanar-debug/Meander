@@ -13,7 +13,7 @@ from urllib.parse import urlsplit
 
 import httpx
 
-from .config import OSM_DEV_API_URL
+from .config import OSM_DEV_API_URL, settings
 from .fixtures import BudgetExhausted, FixtureMissing, fetch
 from .logging_setup import get_logger
 from .models import BarrierReport
@@ -50,9 +50,24 @@ def note_text(report: BarrierReport) -> str:
 
 
 async def submit_barrier(report: BarrierReport) -> int | None:
-    """Create an OSM note on the development server. Returns its id if given."""
+    """Create an OSM note on the development server. Returns its id if given.
+
+    ``OSM_DEV_TOKEN`` is an OAuth 2.0 bearer token for the development server.
+    It was read by config.py and then never sent, so this endpoint existed but
+    could not authenticate — a half-wired write path to a public database,
+    which is worse than not having one.
+
+    Anonymous notes are permitted by the OSM API, so the token is optional
+    rather than required: without it a note is filed unattributed, with it the
+    note is attributed to that account. The header is only ever added for the
+    development host, which assert_development_server has already checked.
+    """
     url = f"{OSM_DEV_API_URL}/notes"
     assert_development_server(url)
+
+    headers = {"Accept": "application/json"}
+    if settings.osm_dev_token:
+        headers["Authorization"] = f"Bearer {settings.osm_dev_token}"
 
     try:
         response = await fetch(
@@ -63,7 +78,7 @@ async def submit_barrier(report: BarrierReport) -> int | None:
                 "lon": round(report.lon, 6),
                 "text": note_text(report),
             },
-            headers={"Accept": "application/json"},
+            headers=headers,
             cost=1,
             service="osm_dev",
         )

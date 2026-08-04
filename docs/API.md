@@ -125,13 +125,22 @@ do not append.** Clients that do not ask for SSE get the whole document at once.
 
 ### Errors
 
+**Every** error uses the `{"error": {"kind", "message"}}` envelope, including validation failures.
+FastAPI's own `{"detail": [...]}` shape is normalised by an exception handler, so a client needs one
+code path rather than one plus a special case for 422.
+
 | status | `kind` | when |
 |---|---|---|
-| `422` | — | Validation failure (FastAPI's own shape). |
-| `429` | `per_ip` / `daily_ceiling` | Rate limited. `Retry-After` header is set. |
+| `413` | `payload_too_large` | Request body over 64 KB. |
+| `422` | `invalid_request` | Validation failure. `message` is `"<field>: <reason>"`. |
+| `422` | `no_route` | Nothing routable near the origin, or no connection between the points. |
+| `429` | `per_ip` / `daily_ceiling` | Rate limited. `Retry-After` header is set, and is readable cross-origin. |
 | `502` | `upstream` / `network` | The routing service failed or was unreachable. |
 | `503` | `auth` / `budget` / `no_fixture` | The server is misconfigured or out of budget. Not the caller's fault, and the message says so. |
-| `422` | `no_route` | Nothing routable near the origin, or no connection between the points. |
+
+Over SSE the status line has already been sent, so an error arrives as an event instead:
+`{"type": "error", "kind": ..., "message": ...}`. Two kinds only occur there — `internal` for an
+unexpected server-side failure, and `shutting_down` when the instance is restarting mid-request.
 
 ### Rate limits
 

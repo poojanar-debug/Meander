@@ -33,7 +33,6 @@ class Metrics:
         if today != self._day:
             self._day = today
             self._sessions_today = set()
-            self._counters["daily_routes_served"] = 0
 
     def incr(self, name: str, amount: int = 1) -> None:
         with self._lock:
@@ -52,11 +51,6 @@ class Metrics:
             self._roll_day_locked()
             self._sessions_today.add(digest)
 
-    def daily_routes_served(self) -> int:
-        with self._lock:
-            self._roll_day_locked()
-            return self._counters["daily_routes_served"]
-
     def snapshot(self) -> dict[str, Any]:
         with self._lock:
             self._roll_day_locked()
@@ -70,7 +64,6 @@ class Metrics:
                 "upstream_failures_total": self._counters["upstream_failures_total"],
                 "narration_failures_total": self._counters["narration_failures_total"],
                 "enrichment_failures_total": self._counters["enrichment_failures_total"],
-                "daily_routes_served": self._counters["daily_routes_served"],
                 "unique_sessions_today": len(self._sessions_today),
                 "uptime_s": int(
                     (datetime.now(UTC) - self._started_at).total_seconds()

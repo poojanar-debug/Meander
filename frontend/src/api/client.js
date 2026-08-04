@@ -52,12 +52,13 @@ async function toApiError(res) {
   let message = `The server returned ${res.status}.`
   try {
     const body = await res.json()
+    // One shape for every status. The backend used to answer 422 with
+    // FastAPI's own {"detail": [...]} while everything else was
+    // {"error": {kind, message}}, so this carried a special case for exactly
+    // one status code. An exception handler now normalises it server-side.
     if (body?.error?.message) {
       message = body.error.message
       kind = body.error.kind ?? kind
-    } else if (Array.isArray(body?.detail) && body.detail[0]?.msg) {
-      message = `That request was not valid: ${body.detail[0].msg}`
-      kind = 'validation'
     }
   } catch {
     // A non-JSON error body is not itself an error; the status line is enough.
