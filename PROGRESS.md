@@ -752,3 +752,34 @@ told the reader to `git add -f` a file that is not gitignored.
   down in this log and in the README rather than buried.
 
 All four are in BLOCKED.md or the README limitations section, with the commands to resolve them.
+
+---
+
+## Consolidation and publication · 2026-08-04
+
+**Done**
+
+- `.claude/` added to `.gitignore` and `.claude/launch.json` removed from tracking. That folder is
+  agent scratch, and `.claude/worktrees/` holds checkouts of this very repository — committing it
+  would have nested the repo inside itself. Nothing the project needs lived there; the dev-server
+  commands it configured are already in the README.
+- `main` fast-forwarded to the work branch, so all sixteen commits and the eleven phase tags are
+  preserved rather than squashed. The build history *is* part of the deliverable: each phase tag
+  marks a state where the tests passed.
+- Pushed to `github.com/poojanar-debug/Meander` — `main` plus `phase-a` … `phase-k`.
+
+**Verified before pushing**
+
+The repository is **public**, so the pre-push check was run against exactly what would become
+visible, not against the working tree:
+
+- no key-shaped strings in any tracked file (`sk-ant-`, `sk-…`, `MLY|`, `AIza…`, `ghp_`, JWTs)
+- no `.env` added in any commit on any branch, ever — `.env.example` is the only `.env*` in history
+- every secret parameter and header in all 49 fixtures reads `<redacted>`
+- 367 tests pass, 2 skipped, run from the main folder rather than the worktree
+- `git status` clean in the main folder, confirming `.claude/worktrees/` is ignored
+
+**Final shape:** 121 tracked files — 35 Python modules and 9,124 lines, 16 frontend source files,
+49 fixtures (18 synthetic GraphHopper, 31 recorded live from Nominatim, Open-Meteo and Overpass).
+
+**Deviations:** none. Nothing was deployed; `DEPLOY.md` remains a manual step.
