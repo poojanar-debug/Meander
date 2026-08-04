@@ -24,7 +24,10 @@ from .routing import GRAPHHOPPER_CREDIT_COST, route_accessible, route_fastest, r
 
 log = get_logger(__name__)
 
-SERVICES = ("graphhopper", "nominatim")
+SERVICES = ("graphhopper", "nominatim", "enrichment")
+
+# Overpass bans on sustained load. This is deliberately generous.
+OVERPASS_PAUSE_S = 45
 
 
 def _scenarios():
@@ -69,7 +72,7 @@ async def _record_graphhopper(force: bool) -> int:
                     await route_accessible(origin, dest, scenario.minutes, scenario.mode)
             # A recording run must survive one bad scenario: the point is to
             # capture as many fixtures as the budget allows in a single pass.
-            except Exception as exc:
+            except Exception as exc:  # noqa: BLE001 — an offline run must not abort part-way
                 log.warning("record_failed", extra={"scenario": scenario.slug, "preset": name,
                                                     "error": type(exc).__name__})
                 print(f"  ! {scenario.slug}/{name}: {type(exc).__name__}: {exc}")
@@ -97,13 +100,56 @@ async def _record_nominatim(force: bool) -> int:
         try:
             results = await geocode_search(q)
         # One unresolvable place name must not abandon the remaining queries.
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 — an offline run must not abort part-way
             print(f"  ! {q}: {type(exc).__name__}: {exc}")
             continue
         recorded += 1
         print(f"  + {q} -> {len(results)} results")
         # Nominatim asks for at most one request per second.
         await asyncio.sleep(1.1)
+    return recorded
+
+
+async def _record_enrichment(force: bool) -> int:
+    """Record the Overpass and Open-Meteo calls the request path actually makes.
+
+    Recording them per-route would produce the wrong fixtures: enrichment runs
+    once per request over the union of every route's geometry, so that is the
+    query whose signature has to exist.
+    """
+    from .main import _build_routes
+    from .models import Point, RouteRequest
+
+    scenarios = _scenarios()
+    recorded = 0
+    for scenario in scenarios:
+        origin_loc = TEST_LOCATIONS_BY_SLUG[scenario.origin_slug]
+        request = RouteRequest(
+            origin=Point(lat=origin_loc.lat, lon=origin_loc.lon),
+            destination=(
+                Point(
+                    lat=TEST_LOCATIONS_BY_SLUG[scenario.destination_slug].lat,
+                    lon=TEST_LOCATIONS_BY_SLUG[scenario.destination_slug].lon,
+                )
+                if scenario.destination_slug
+                else None
+            ),
+            minutes=scenario.minutes,
+            mode=scenario.mode,
+        )
+        try:
+            _routes, _reason, context = await _build_routes(request)
+        # One scenario failing must not abandon the rest of the pass.
+        except Exception as exc:  # noqa: BLE001 — an offline run must not abort part-way
+            print(f"  ! {scenario.slug}: {type(exc).__name__}: {exc}", file=sys.stderr)
+            continue
+
+        stops = "unreachable" if context.rest_stop_nodes is None else len(context.rest_stop_nodes)
+        print(f"  + {scenario.slug}: {stops} amenity nodes, "
+              f"air={context.air.aqi if context.air else None}, shade={context.shade_score}")
+        recorded += 1
+        # Overpass rate-limits aggressively; give it room between queries.
+        await asyncio.sleep(OVERPASS_PAUSE_S)
     return recorded
 
 
@@ -130,6 +176,9 @@ async def main_async(services: list[str], force: bool) -> int:
     if "nominatim" in services:
         print("Recording Nominatim…")
         total += await _record_nominatim(force)
+    if "enrichment" in services:
+        print("Recording enrichment (Overpass + Open-Meteo)…")
+        total += await _record_enrichment(force)
 
     print(f"\nDone. {total} requests recorded.")
     print("Budget now:", fx.budget_snapshot())

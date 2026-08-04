@@ -1,0 +1,122 @@
+{
+  "_meander_provenance": "recorded",
+  "_meander_recorded_at": "2026-08-04T12:59:33.152240+00:00",
+  "_meander_note": "Written by backend/fixtures.py. Secrets are redacted and excluded from the request signature.",
+  "request": {
+    "method": "GET",
+    "url": "https://air-quality-api.open-meteo.com/v1/air-quality",
+    "params": {
+      "latitude": 52.393,
+      "longitude": 4.89,
+      "hourly": "pm2_5,european_aqi",
+      "forecast_days": 1
+    },
+    "json": null,
+    "data": {},
+    "content": null,
+    "headers": {
+      "Accept": "application/json"
+    }
+  },
+  "response": {
+    "status": 200,
+    "headers": {
+      "date": "Tue, 04 Aug 2026 12:59:33 GMT",
+      "content-type": "application/json; charset=utf-8"
+    },
+    "json": {
+      "latitude": 52.4,
+      "longitude": 4.8999996,
+      "generationtime_ms": 0.26285648345947266,
+      "utc_offset_seconds": 0,
+      "timezone": "GMT",
+      "timezone_abbreviation": "GMT",
+      "elevation": -2.0,
+      "hourly_units": {
+        "time": "iso8601",
+        "pm2_5": "\u03bcg/m\u00b3",
+        "european_aqi": "EAQI"
+      },
+      "hourly": {
+        "time": [
+          "2026-08-04T00:00",
+          "2026-08-04T01:00",
+          "2026-08-04T02:00",
+          "2026-08-04T03:00",
+          "2026-08-04T04:00",
+          "2026-08-04T05:00",
+          "2026-08-04T06:00",
+          "2026-08-04T07:00",
+          "2026-08-04T08:00",
+          "2026-08-04T09:00",
+          "2026-08-04T10:00",
+          "2026-08-04T11:00",
+          "2026-08-04T12:00",
+          "2026-08-04T13:00",
+          "2026-08-04T14:00",
+          "2026-08-04T15:00",
+          "2026-08-04T16:00",
+          "2026-08-04T17:00",
+          "2026-08-04T18:00",
+          "2026-08-04T19:00",
+          "2026-08-04T20:00",
+          "2026-08-04T21:00",
+          "2026-08-04T22:00",
+          "2026-08-04T23:00"
+        ],
+        "pm2_5": [
+          24.3,
+          25.6,
+          26.2,
+          27.6,
+          30.4,
+          31.2,
+          34.7,
+          24.2,
+          14.4,
+          12.8,
+          10.8,
+          10.2,
+          10.6,
+          10.5,
+          11.4,
+          11.3,
+          11.6,
+          12.2,
+          12.6,
+          12.5,
+          10.8,
+          9.5,
+          6.9,
+          6.1
+        ],
+        "european_aqi": [
+          30,
+          32,
+          34,
+          38,
+          35,
+          34,
+          32,
+          34,
+          35,
+          36,
+          52,
+          59,
+          60,
+          61,
+          60,
+          60,
+          52,
+          44,
+          41,
+          40,
+          39,
+          36,
+          36,
+          35
+        ]
+      }
+    }
+  }
+}

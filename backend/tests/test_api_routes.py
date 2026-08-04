@@ -65,12 +65,100 @@ def test_nature_score_ranks_the_nature_route_above_the_fastest(api_client) -> No
     assert by_id["nature"]["scores"]["air"] > by_id["fastest"]["scores"]["air"]
 
 
-def test_unmeasured_scores_are_null_not_zero(api_client) -> None:
-    """Zero shade is a claim about a place; "not measured" is not the same claim."""
+def test_a_measured_score_is_a_fraction_and_an_unmeasured_one_is_null(api_client) -> None:
+    """Zero shade is a claim about a place; "not measured" is not the same claim,
+    so an unmeasurable score must come back null rather than 0.0."""
     routes = api_client.post("/api/routes", json=_body()).json()["routes"]
     ok = [r for r in routes if r["status"] == "ok"]
 
-    assert ok and all(r["scores"]["shade"] is None for r in ok)
+    assert ok
+    for route in ok:
+        for value in route["scores"].values():
+            assert value is None or 0.0 <= value <= 1.0
+
+
+# --- graceful degradation --------------------------------------------------
+#
+# The hard rule from the specification: /api/routes must return a usable
+# response even when scoring and enrichment both fail. These tests kill each
+# upstream in turn and assert the API still answers.
+
+ENRICHMENT_ENTRY_POINTS = [
+    "fetch_rest_stop_nodes",
+    "fetch_air_quality",
+    "fetch_cloud_cover",
+    "best_departure",
+]
+
+
+@pytest.mark.parametrize("name", ENRICHMENT_ENTRY_POINTS)
+def test_killing_one_enrichment_service_still_returns_200(api_client, monkeypatch, name) -> None:
+    from backend import enrich
+
+    async def explode(*args, **kwargs):
+        raise RuntimeError(f"{name} is down")
+
+    monkeypatch.setattr(enrich, name, explode)
+
+    response = api_client.post("/api/routes", json=_body())
+    assert response.status_code == 200
+    assert [r["id"] for r in response.json()["routes"]] == ["fastest", "nature", "accessible"]
+
+
+def test_killing_every_enrichment_service_at_once_still_returns_200(api_client, monkeypatch) -> None:
+    from backend import enrich
+
+    async def explode(*args, **kwargs):
+        raise RuntimeError("everything is down")
+
+    for name in ENRICHMENT_ENTRY_POINTS:
+        monkeypatch.setattr(enrich, name, explode)
+
+    payload = api_client.post("/api/routes", json=_body()).json()
+    ok = [r for r in payload["routes"] if r["status"] == "ok"]
+
+    assert len(ok) >= 2
+    assert payload["best_departure"] is None
+    assert all(r["rest_stops"] == [] for r in ok)
+
+
+def test_killing_scoring_still_returns_200(api_client, monkeypatch) -> None:
+    """Degrade to geometry-only, then to nothing, but never to an error."""
+    from backend import main
+
+    def explode(*args, **kwargs):
+        raise RuntimeError("scoring is down")
+
+    monkeypatch.setattr(main, "clip_term_for_route", explode)
+
+    assert api_client.post("/api/routes", json=_body()).status_code == 200
+
+
+def test_killing_the_accessibility_engine_still_returns_200(api_client, monkeypatch) -> None:
+    from backend import main
+
+    def explode(*args, **kwargs):
+        raise RuntimeError("accessibility is down")
+
+    monkeypatch.setattr(main, "assess_route", explode)
+
+    response = api_client.post("/api/routes", json=_body())
+    assert response.status_code == 200
+    for route in response.json()["routes"]:
+        # With no assessment there is no coverage figure to report.
+        assert route["confidence"] == 0.0
+
+
+def test_narration_failure_leaves_narration_null(api_client, monkeypatch) -> None:
+    from backend import narrate
+
+    async def explode(*args, **kwargs):
+        raise RuntimeError("narration is down")
+
+    monkeypatch.setattr(narrate, "narrate", explode)
+
+    routes = api_client.post("/api/routes", json=_body()).json()["routes"]
+    assert all(r["narration"] is None for r in routes)
 
 
 def test_a_blocked_route_reports_no_scores_at_all(api_client) -> None:

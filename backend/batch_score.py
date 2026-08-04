@@ -50,7 +50,7 @@ async def _points_for_location(slug: str, minutes: int) -> list[LatLon]:
             route = await router(origin, None, minutes, "foot")
         # A location that will not route is a reason to skip it, not to abandon
         # the whole run — the next location may be fine.
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 — an offline run must not abort part-way
             log.warning("batch_route_failed",
                         extra={"location": slug, "preset": name, "error": type(exc).__name__})
             print(f"  ! {slug}/{name}: {type(exc).__name__}: {exc}", file=sys.stderr)

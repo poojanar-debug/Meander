@@ -7,6 +7,7 @@ the response always states which scoring path produced its numbers.
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import importlib.util
 import json
@@ -22,6 +23,13 @@ from . import __version__
 from .accessibility import assess_route
 from .cache import get_cache
 from .config import STRICT_STARTUP, settings
+from .enrich import (
+    AirQuality,
+    EnrichContext,
+    enrich_context,
+    rest_stops_on_route,
+)
+from .enrich import RestStop as EnrichRestStop
 from .geometry import score_geometry
 from .logging_setup import configure_logging, get_logger
 from .metrics import metrics
@@ -29,6 +37,7 @@ from .models import (
     Blocker,
     CacheInfo,
     GeocodeResponse,
+    RestStop,
     Route,
     RouteRequest,
     RoutesResponse,
@@ -54,6 +63,10 @@ limiter = RateLimiter(
     daily_ceiling=settings.global_daily_route_ceiling,
 )
 
+UNASSESSED_NOTE = (
+    "Accessibility could not be assessed for this route at all. "
+    "Treat all of it as unverified."
+)
 SYNTHETIC_NOTE = (
     "This route was built from demonstration data, not a live routing response. "
     "Every number on it is a placeholder, not a measurement."
@@ -180,7 +193,14 @@ def route_cache_key(req: RouteRequest) -> str:
     return hashlib.sha256(material.encode()).hexdigest()[:24]
 
 
-def _scored_route(route_id: str, label: str, raw: RawRoute) -> Route:
+def _scored_route(
+    route_id: str,
+    label: str,
+    raw: RawRoute,
+    rest_stops: list[EnrichRestStop] | None = None,
+    air: AirQuality | None = None,
+    shade: float | None = None,
+) -> Route:
     """Turn a routed path into a wire Route, scored as well as it honestly can be.
 
     A route built from a hand-authored fixture keeps `scoring_method:
@@ -190,16 +210,24 @@ def _scored_route(route_id: str, label: str, raw: RawRoute) -> Route:
     """
     # Cache read only — this never imports torch, and returns nothing for any
     # region batch_score.py has not pre-warmed.
-    clip = clip_term_for_route(raw.points)
-    scores = score_geometry(
-        raw.points, raw.elevations or None, raw.details, clip_score=clip.score
+    clip = _guard("clip_lookup", clip_term_for_route, raw.points)
+    clip_score = clip.score if clip is not None else None
+    scores = _guard(
+        "geometry_scoring",
+        score_geometry,
+        raw.points,
+        raw.elevations or None,
+        raw.details,
+        clip_score=clip_score,
     )
-    access = assess_route(raw.points, raw.elevations or None, raw.details)
+    access = _guard("accessibility", assess_route, raw.points, raw.elevations or None, raw.details)
     synthetic = raw.synthetic_upstream
 
-    if synthetic:
+    if synthetic or scores is None:
+        # A failed scoring run has produced no measurement, and "placeholder" is
+        # exactly what the contract calls a number that is not one.
         method = "placeholder"
-    elif clip.score is not None:
+    elif clip_score is not None:
         method = "clip"
     else:
         method = "geometry_only"
@@ -207,10 +235,10 @@ def _scored_route(route_id: str, label: str, raw: RawRoute) -> Route:
     # Hard constraints reject only the accessible preset. On the other two the
     # same findings are reported as information: someone walking may well take a
     # route with three steps in it, and should still be told they are there.
-    blocked = route_id == "accessible" and access.is_blocked
+    blocked = route_id == "accessible" and access is not None and access.is_blocked
     blockers = [
         Blocker(type=f.type, lat=f.lat, lon=f.lon, description=f.description)
-        for f in access.findings
+        for f in (access.findings if access else [])
     ]
 
     return Route(
@@ -221,20 +249,60 @@ def _scored_route(route_id: str, label: str, raw: RawRoute) -> Route:
         duration_min=round(raw.duration_min, 1),
         distance_m=round(raw.distance_m),
         mode=raw.mode,
-        # shade is null until enrich.py computes a real sun position — zero
-        # shade would be a claim about the place rather than an absence of data.
-        scores=Scores(nature=scores.nature, air=scores.air, shade=None),
+        # A null score means "not measured", which is a different statement
+        # from zero and is rendered as such.
+        scores=Scores(
+            nature=scores.nature if scores else None,
+            air=_blend_air(air, scores.air if scores else None),
+            shade=shade,
+        ),
         scoring_method=method,
         # A coverage figure computed over invented tags is not a coverage
         # figure. Synthetic routes report no confidence at all.
-        confidence=0.0 if synthetic else access.coverage,
+        confidence=0.0 if (synthetic or access is None) else access.coverage,
         blockers=blockers,
+        rest_stops=[
+            RestStop(lat=s.lat, lon=s.lon, type=s.type, at_m=s.at_m)
+            for s in (rest_stops or [])
+        ],
         synthetic_upstream=synthetic,
-        confidence_note=SYNTHETIC_NOTE if synthetic else access.sentence(),
+        confidence_note=(
+            SYNTHETIC_NOTE if synthetic else (access.sentence() if access else UNASSESSED_NOTE)
+        ),
         status_note=(
             "Hard accessibility constraints reject this route." if blocked else None
         ),
     )
+
+
+def _guard(stage: str, fn: Any, *args: Any, **kwargs: Any) -> Any:
+    """Run an optional scoring step, returning ``None`` if it fails.
+
+    The specification's hard rule is that /api/routes returns a usable response
+    even when scoring and enrichment both fail. Degrading is explicit and
+    logged; nothing is swallowed silently.
+    """
+    try:
+        return fn(*args, **kwargs)
+    except Exception as exc:  # noqa: BLE001 — deliberate: nothing here may fail a request
+        log.warning("scoring_degraded", extra={"stage": stage, "error": type(exc).__name__})
+        metrics.incr("upstream_failures_total")
+        return None
+
+
+def _blend_air(measured: AirQuality | None, road_proxy: float | None) -> float | None:
+    """Combine a regional air-quality measurement with local traffic exposure.
+
+    The Open-Meteo reading is a real measurement but covers a whole area, so on
+    its own it gives all three routes the same number. The road-class proxy is
+    route-specific but is only a proxy. Together: the regional level, modulated
+    by how much traffic this particular route runs alongside.
+    """
+    if measured is None:
+        return road_proxy
+    if road_proxy is None:
+        return measured.score
+    return round(measured.score * (0.55 + 0.45 * road_proxy), 4)
 
 
 def _blocked_route(route_id: str, label: str, mode: str, note: str) -> Route:
@@ -253,7 +321,33 @@ def _blocked_route(route_id: str, label: str, mode: str, note: str) -> Route:
     )
 
 
-async def _build_routes(req: RouteRequest) -> tuple[list[Route], str | None]:
+async def _attach_narration(routes: list[Route]) -> None:
+    """Fill in `narration` where it can be. Mutates `routes` in place.
+
+    Narration is the least important field in the response and must never be
+    able to fail a request or hold one open, so every call is guarded and the
+    whole pass is skipped when no key is configured.
+    """
+    from . import narrate as narrate_module
+
+    if not settings.anthropic_api_key:
+        return
+
+    async def one(route: Route) -> None:
+        try:
+            route.narration = await narrate_module.narrate(
+                narrate_module.narration_request_for(route, route.rest_stops)
+            )
+        except Exception as exc:  # noqa: BLE001 — narration may never fail a request
+            log.warning("narration_degraded", extra={"error": type(exc).__name__})
+            metrics.incr("narration_failures_total")
+
+    await asyncio.gather(*(one(r) for r in routes), return_exceptions=True)
+
+
+async def _build_routes(
+    req: RouteRequest,
+) -> tuple[list[Route], str | None, EnrichContext]:
     """Route every requested objective, degrading rather than failing.
 
     A preset that cannot be routed becomes a ``blocked`` result. Only an
@@ -267,6 +361,7 @@ async def _build_routes(req: RouteRequest) -> tuple[list[Route], str | None]:
     objectives = req.resolved_objectives()
 
     routes: list[Route] = []
+    routed: list[tuple[str, str, RawRoute]] = []
     fastest_duration: float | None = None
     failures: list[RoutingError] = []
 
@@ -308,13 +403,30 @@ async def _build_routes(req: RouteRequest) -> tuple[list[Route], str | None]:
 
         if objective == "fastest":
             fastest_duration = raw.duration_min
-        route = _scored_route(objective, label, raw)
+        routed.append((objective, label, raw))
+
+    # Enrichment runs once for the whole request, over every route's geometry.
+    # It is entirely best-effort: every field below may be None, and the
+    # response says `null` rather than inventing a number.
+    context = EnrichContext()
+    if routed:
+        context = await enrich_context([r.points for _, _, r in routed], req.depart_at)
+
+    for objective, label, raw in routed:
+        stops = (
+            rest_stops_on_route(raw.points, context.rest_stop_nodes)
+            if context.rest_stop_nodes is not None
+            else None
+        )
+        route = _scored_route(objective, label, raw, stops, context.air, context.shade_score)
         if route.status == "blocked":
             metrics.incr("routes_blocked_total")
         routes.append(route)
 
     if not any(r.status == "ok" for r in routes):
         raise failures[0] if failures else NoRouteFound("No route could be found from there.")
+
+    await _attach_narration(routes)
 
     # Preserve the caller's requested order in the response.
     order = {o: i for i, o in enumerate(objectives)}
@@ -327,7 +439,7 @@ async def _build_routes(req: RouteRequest) -> tuple[list[Route], str | None]:
             f"Every route found is longer than your {req.minutes}-minute budget. "
             "The shortest option is shown first."
         )
-    return routes, reason
+    return routes, reason, context
 
 
 @app.post("/api/routes")
@@ -357,7 +469,7 @@ async def post_routes(req: RouteRequest, request: Request, response: Response) -
     metrics.incr("cache_misses_total")
 
     try:
-        routes, reason = await _build_routes(req)
+        routes, reason, context = await _build_routes(req)
     except RoutingError as exc:
         metrics.incr("upstream_failures_total")
         return _error(exc.kind, exc.human_message, exc.status_code)
@@ -365,8 +477,10 @@ async def post_routes(req: RouteRequest, request: Request, response: Response) -
     metrics.incr("daily_routes_served")
     payload = RoutesResponse(
         routes=routes,
-        best_departure=None,
-        reason=reason,
+        best_departure=(
+            context.departure.when.isoformat() if context.departure else None
+        ),
+        reason=reason or (context.departure.reason if context.departure else None),
         cache=CacheInfo(segments_scored=cache.segment_count(), hit_rate=_hit_rate()),
     ).model_dump()
 

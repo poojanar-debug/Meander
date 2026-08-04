@@ -511,3 +511,79 @@ with `HF_HUB_OFFLINE=1` so it never repeats it.
   the 8% limit", which is self-contradictory and undermines the one thing the message must do.
 
 **Deviations:** none.
+
+---
+
+## Phase I — Enrichment + narration · 2026-08-04
+
+**Done**
+
+- `backend/enrich.py`:
+  - **Solar position** computed locally (NOAA algorithm), not fetched. It is pure arithmetic, so
+    calling an API for it would spend budget and add a failure mode to something that cannot fail.
+  - The spec's two formulas verbatim: `golden_hour = max(0, cos(azimuth − heading))` inside the
+    0–15° elevation band, `shade_need = max(0, sin(elevation))`.
+  - **Air quality** from Open-Meteo's European AQI, mapped to a 0–1 score.
+  - **Rest stops** from Overpass — benches, drinking water, toilets, shelters — filtered to a 35 m
+    corridor around the polyline and reported with their distance along the route.
+  - **Best departure**: 15-minute steps across six hours, scored on air quality, how much shade is
+    wanted against the cloud cover, and whether the light will be low and along the route.
+- `backend/narrate.py` — Anthropic call, given only the facts already in the response and
+  instructed never to invent a landmark. Absent key means `narration` stays `null`.
+- All of it wired into `/api/routes`, with enrichment fetched **once per request** over the union
+  of every route's geometry rather than once per route.
+
+**Verified — 351 tests**
+
+- **The DoD case.** `test_killing_one_enrichment_service_still_returns_200` kills each of the four
+  enrichment entry points in turn; another kills all four at once; two more kill scoring and the
+  accessibility engine. Every one still returns `200` with three routes.
+- **Those tests found a real gap.** The degradation guarantee was not actually implemented — an
+  exception from any enrichment or scoring stage propagated straight out of `/api/routes` as a 500.
+  Fixed with explicit, logged guards in `enrich_context` and `_scored_route`; a failed scoring run
+  now yields null scores and `scoring_method: "placeholder"`, and a failed assessment yields
+  confidence 0 with "could not be assessed at all".
+- **The sun tests found a real bug.** `test_the_sun_is_due_south_at_local_solar_noon` returned
+  2.6° instead of 180°. NOAA's formula gives `cos(180 − azimuth)`, not `cos(azimuth)`; dropping the
+  180 put the noon sun due *north*, which would have inverted every shade and golden-hour figure in
+  the app. Now checked against London midsummer (61.9°), midwinter (15.1°), sunrise in the east,
+  sunset in the west, and a near-overhead tropical sun.
+- **Live end to end**, from recorded fixtures:
+
+  | Hyde Park loop, foot, 35 min | nature | air | shade | rest stops |
+  |---|---|---|---|---|
+  | fastest | 0.338 | 0.514 | 0.751 | 10 |
+  | nature | 0.785 | 0.678 | 0.751 | 9 |
+  | accessible | 0.383 | 0.629 | 0.751 | 8 |
+
+  `best_departure: 2026-08-04T19:15Z`, reason *"The light will be low and along your way, and air
+  quality is good."*
+
+**Live API calls used:** Open-Meteo 21 of 100, Overpass 13 of 50, Nominatim 5 of 40. GraphHopper 0,
+Mapillary 0, Anthropic 0.
+
+**Overpass really does rate-limit as aggressively as the brief warned.** Roughly half the queries
+came back 429 or 5xx on first attempt. The back-off is to give up on that request rather than
+retry into a longer ban, and the recorder pauses 45 s between queries; getting nine usable fixtures
+took several passes. The app's behaviour under that failure is the interesting part, and it is
+correct: rest stops come back `null`, everything else is unaffected, and the response is still 200.
+
+**Decisions**
+
+- **`null` and `0` are kept strictly apart.** `fetch_rest_stop_nodes` returns `None` for "could not
+  look" and `[]` for "looked, found none". Conflating them would report a bench-less route as
+  verified. The same rule governs every score.
+- **Air is a blend**, not one or the other: `measured × (0.55 + 0.45 × road_class_proxy)`. The
+  Open-Meteo reading is a real measurement but regional, so alone it gives all three routes an
+  identical number; the road-class proxy is route-specific but only a proxy. Together they say
+  "the regional level, modulated by how much traffic this route runs alongside". Formula recorded
+  here because it is a judgement, not a measurement.
+- Enrichment is fetched once per request over the union bounding box. Three Overpass queries per
+  page load would earn a ban within minutes.
+- Narration is skipped entirely without a key, runs concurrently across routes, and is guarded
+  twice over. It is the least important field in the response and must never hold a request open.
+- `BLE001` was added to the ruff rule set, so every blind `except Exception` in the codebase is now
+  either annotated with why it must be blind or is a lint failure. There are seven, all deliberate:
+  two degradation guards and five in offline scripts that must not abort part-way through a run.
+
+**Deviations:** none.

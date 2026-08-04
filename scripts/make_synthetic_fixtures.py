@@ -380,7 +380,7 @@ async def _report(scenario: Scenario) -> str:
                 route = await fn(origin_pt, dest_pt, scenario.minutes, scenario.mode)
         # This is the generator's own report, not a request path: a preset that
         # is deliberately unroutable must print as such rather than abort.
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 — an offline run must not abort part-way
             lines.append(f"    {name:<11} blocked: {type(exc).__name__}")
             continue
         if name == "fastest":

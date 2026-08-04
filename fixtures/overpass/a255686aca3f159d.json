@@ -1,0 +1,2432 @@
+{
+  "_meander_provenance": "recorded",
+  "_meander_recorded_at": "2026-08-04T12:51:36.960500+00:00",
+  "_meander_note": "Written by backend/fixtures.py. Secrets are redacted and excluded from the request signature.",
+  "request": {
+    "method": "POST",
+    "url": "https://overpass-api.de/api/interpreter",
+    "params": {},
+    "json": null,
+    "data": {
+      "data": "[out:json][timeout:25];node[\"amenity\"~\"^(bench|drinking_water|toilets|shelter)$\"](52.35623,4.84555,52.39603,4.90931);out body 200;"
+    },
+    "content": null,
+    "headers": {
+      "Content-Type": "application/x-www-form-urlencoded"
+    }
+  },
+  "response": {
+    "status": 200,
+    "headers": {
+      "date": "Tue, 04 Aug 2026 12:51:36 GMT",
+      "content-type": "application/json"
+    },
+    "json": {
+      "version": 0.6,
+      "generator": "Overpass API 0.7.62.11 87bfad18",
+      "osm3s": {
+        "timestamp_osm_base": "2026-08-04T12:50:30Z",
+        "copyright": "The data included in this document is from www.openstreetmap.org. The data is made available under ODbL."
+      },
+      "elements": [
+        {
+          "type": "node",
+          "id": 278609736,
+          "lat": 52.3589253,
+          "lon": 4.8845506,
+          "tags": {
+            "amenity": "toilets",
+            "charge": "1.00 EUR",
+            "fee": "yes"
+          }
+        },
+        {
+          "type": "node",
+          "id": 559516374,
+          "lat": 52.3876916,
+          "lon": 4.8753297,
+          "tags": {
+            "amenity": "toilets",
+            "fee": "no",
+            "female": "yes",
+            "male": "yes",
+            "unisex": "yes",
+            "wheelchair": "yes"
+          }
+        },
+        {
+          "type": "node",
+          "id": 936546307,
+          "lat": 52.3634213,
+          "lon": 4.8727157,
+          "tags": {
+            "amenity": "drinking_water",
+            "fountain": "bubbler",
+            "operator": "Waternet",
+            "operator:wikidata": "Q2137469",
+            "operator:wikipedia": "nl:Waternet (bedrijf)",
+            "toilets:wheelchair": "no",
+            "wheelchair": "yes"
+          }
+        },
+        {
+          "type": "node",
+          "id": 990082034,
+          "lat": 52.393561,
+          "lon": 4.9028238,
+          "tags": {
+            "amenity": "bench"
+          }
+        },
+        {
+          "type": "node",
+          "id": 1222424002,
+          "lat": 52.380964,
+          "lon": 4.8697381,
+          "tags": {
+            "amenity": "bench",
+            "backrest": "yes",
+            "check_date": "2021-01-06"
+          }
+        },
+        {
+          "type": "node",
+          "id": 1222424007,
+          "lat": 52.3810927,
+          "lon": 4.8696807,
+          "tags": {
+            "amenity": "bench",
+            "backrest": "yes"
+          }
+        },
+        {
+          "type": "node",
+          "id": 1222424041,
+          "lat": 52.3811548,
+          "lon": 4.8696669,
+          "tags": {
+            "amenity": "bench",
+            "backrest": "yes",
+            "check_date": "2021-01-06"
+          }
+        },
+        {
+          "type": "node",
+          "id": 1222424095,
+          "lat": 52.3810176,
+          "lon": 4.8697242,
+          "tags": {
+            "amenity": "bench",
+            "backrest": "yes"
+          }
+        },
+        {
+          "type": "node",
+          "id": 1250800937,
+          "lat": 52.3679475,
+          "lon": 4.8961071,
+          "tags": {
+            "amenity": "bench",
+            "backrest": "yes",
+            "check_date": "2021-06-06"
+          }
+        },
+        {
+          "type": "node",
+          "id": 1250800968,
+          "lat": 52.3676356,
+          "lon": 4.8960476,
+          "tags": {
+            "amenity": "bench",
+            "backrest": "yes",
+            "check_date": "2021-06-06"
+          }
+        },
+        {
+          "type": "node",
+          "id": 1310911758,
+          "lat": 52.362024,
+          "lon": 4.8962206,
+          "tags": {
+            "access": "yes",
+            "amenity": "toilets",
+            "changing_table": "no",
+            "fee": "no",
+            "female": "no",
+            "male": "yes",
+            "toilets:position": "urinal",
+            "wheelchair": "no"
+          }
+        },
+        {
+          "type": "node",
+          "id": 1310974822,
+          "lat": 52.3713846,
+          "lon": 4.8954225,
+          "tags": {
+            "amenity": "toilets",
+            "changing_table": "no",
+            "check_date": "2026-07-15",
+            "check_date:wheelchair": "2026-07-15",
+            "fee": "no",
+            "note": "Urinal for men only",
+            "wheelchair": "no"
+          }
+        },
+        {
+          "type": "node",
+          "id": 1328346479,
+          "lat": 52.3705983,
+          "lon": 4.873139,
+          "tags": {
+            "amenity": "drinking_water",
+            "bottle": "no",
+            "operator": "Waternet",
+            "operator:wikidata": "Q2137469",
+            "operator:wikipedia": "nl:Waternet (bedrijf)",
+            "wheelchair": "yes"
+          }
+        },
+        {
+          "type": "node",
+          "id": 1338094256,
+          "lat": 52.3700086,
+          "lon": 4.8510607,
+          "tags": {
+            "amenity": "drinking_water",
+            "operator": "Waternet",
+            "operator:wikidata": "Q2137469",
+            "operator:wikipedia": "nl:Waternet (bedrijf)"
+          }
+        },
+        {
+          "type": "node",
+          "id": 1343117039,
+          "lat": 52.3563646,
+          "lon": 4.8559215,
+          "tags": {
+            "amenity": "drinking_water",
+            "bottle": "no",
+            "fountain": "bubbler",
+            "operator": "Waternet",
+            "operator:wikidata": "Q2137469",
+            "operator:wikipedia": "nl:Waternet (bedrijf)",
+            "wheelchair": "yes"
+          }
+        },
+        {
+          "type": "node",
+          "id": 1343117042,
+          "lat": 52.3702054,
+          "lon": 4.8468359,
+          "tags": {
+            "amenity": "drinking_water",
+            "bottle": "no",
+            "operator": "Waternet",
+            "operator:wikidata": "Q2137469"
+          }
+        },
+        {
+          "type": "node",
+          "id": 1343117051,
+          "lat": 52.3603559,
+          "lon": 4.8752529,
+          "tags": {
+            "amenity": "drinking_water",
+            "fountain": "drinking",
+            "name": "Vondelfontein",
+            "operator": "Waternet",
+            "operator:wikidata": "Q2137469",
+            "operator:wikipedia": "nl:Waternet (bedrijf)",
+            "wheelchair": "no",
+            "wikidata": "Q15883569",
+            "wikimedia_commons": "Category:Vondelfontein",
+            "wikipedia": "nl:Vondelfontein"
+          }
+        },
+        {
+          "type": "node",
+          "id": 1346637519,
+          "lat": 52.3675472,
+          "lon": 4.9090206,
+          "tags": {
+            "amenity": "drinking_water",
+            "bottle": "yes",
+            "man_made": "water_tap",
+            "operator": "Waternet",
+            "operator:wikidata": "Q2137469",
+            "operator:wikipedia": "nl:Waternet (bedrijf)",
+            "wheelchair": "yes"
+          }
+        },
+        {
+          "type": "node",
+          "id": 1348513825,
+          "lat": 52.3598053,
+          "lon": 4.8496246,
+          "tags": {
+            "amenity": "drinking_water",
+            "operator": "Waternet",
+            "operator:wikidata": "Q2137469",
+            "operator:wikipedia": "nl:Waternet (bedrijf)"
+          }
+        },
+        {
+          "type": "node",
+          "id": 1415725027,
+          "lat": 52.3642484,
+          "lon": 4.8831552,
+          "tags": {
+            "amenity": "drinking_water",
+            "man_made": "water_tap",
+            "operator": "Waternet",
+            "operator:wikidata": "Q2137469",
+            "operator:wikipedia": "nl:Waternet (bedrijf)",
+            "wheelchair": "yes"
+          }
+        },
+        {
+          "type": "node",
+          "id": 1446337448,
+          "lat": 52.3590135,
+          "lon": 4.8834715,
+          "tags": {
+            "amenity": "drinking_water",
+            "fountain": "bubbler",
+            "operator": "Waternet",
+            "operator:wikidata": "Q2137469",
+            "operator:wikipedia": "nl:Waternet (bedrijf)",
+            "wheelchair": "yes"
+          }
+        },
+        {
+          "type": "node",
+          "id": 1495919343,
+          "lat": 52.3564715,
+          "lon": 4.8802621,
+          "tags": {
+            "amenity": "toilets",
+            "leaf_type": "broadleaved",
+            "natural": "tree",
+            "wheelchair": "yes"
+          }
+        },
+        {
+          "type": "node",
+          "id": 1503399448,
+          "lat": 52.3745077,
+          "lon": 4.884891,
+          "tags": {
+            "access": "yes",
+            "amenity": "toilets",
+            "check_date:wheelchair": "2025-08-15",
+            "fee": "no",
+            "female": "no",
+            "male": "yes",
+            "supervised": "no",
+            "toilets:position": "urinal",
+            "wheelchair": "no"
+          }
+        },
+        {
+          "type": "node",
+          "id": 1595406785,
+          "lat": 52.3627938,
+          "lon": 4.8702779,
+          "tags": {
+            "amenity": "bench",
+            "backrest": "yes",
+            "check_date": "2021-08-07"
+          }
+        },
+        {
+          "type": "node",
+          "id": 1595406787,
+          "lat": 52.362856,
+          "lon": 4.8705669,
+          "tags": {
+            "amenity": "bench",
+            "backrest": "yes",
+            "check_date": "2021-08-07"
+          }
+        },
+        {
+          "type": "node",
+          "id": 1640661345,
+          "lat": 52.3739049,
+          "lon": 4.8982205,
+          "tags": {
+            "amenity": "toilets",
+            "check_date": "2024-08-15",
+            "drinking_water": "no",
+            "fee": "no",
+            "female": "no",
+            "male": "yes",
+            "opening_hours": "24/7",
+            "supervised": "no",
+            "toilets:disposal": "pitlatrine",
+            "toilets:position": "urinal",
+            "wheelchair": "no"
+          }
+        },
+        {
+          "type": "node",
+          "id": 1686119420,
+          "lat": 52.3643754,
+          "lon": 4.8897359,
+          "tags": {
+            "amenity": "toilets",
+            "changing_table": "no",
+            "check_date": "2025-03-15",
+            "fee": "no",
+            "female": "no",
+            "male": "yes",
+            "opening_hours": "24/7",
+            "supervised": "no",
+            "toilets:disposal": "flush",
+            "toilets:position": "urinal",
+            "wheelchair": "no"
+          }
+        },
+        {
+          "type": "node",
+          "id": 1712794371,
+          "lat": 52.3865459,
+          "lon": 4.8723887,
+          "tags": {
+            "access": "yes",
+            "amenity": "drinking_water",
+            "bottle": "yes",
+            "covered": "no",
+            "fee": "no",
+            "indoor": "no",
+            "man_made": "water_tap",
+            "operator": "Waternet",
+            "operator:wikidata": "Q2137469",
+            "seasonal": "no",
+            "source": "http://join-the-pipe.org/",
+            "wheelchair": "yes"
+          }
+        },
+        {
+          "type": "node",
+          "id": 1736979828,
+          "lat": 52.3659133,
+          "lon": 4.8554652,
+          "tags": {
+            "amenity": "drinking_water",
+            "fountain": "bubbler",
+            "operator": "Waternet",
+            "operator:wikidata": "Q2137469"
+          }
+        },
+        {
+          "type": "node",
+          "id": 1741573066,
+          "lat": 52.3653491,
+          "lon": 4.8684795,
+          "tags": {
+            "amenity": "drinking_water",
+            "fountain": "bubbler",
+            "operator": "Waternet",
+            "operator:wikidata": "Q2137469",
+            "operator:wikipedia": "nl:Waternet (bedrijf)",
+            "wheelchair": "yes"
+          }
+        },
+        {
+          "type": "node",
+          "id": 1741573975,
+          "lat": 52.3628715,
+          "lon": 4.8618235,
+          "tags": {
+            "amenity": "drinking_water",
+            "bottle": "no",
+            "fountain": "bubbler",
+            "operator": "Waternet",
+            "operator:wikidata": "Q2137469",
+            "operator:wikipedia": "nl:Waternet (bedrijf)",
+            "wheelchair": "yes"
+          }
+        },
+        {
+          "type": "node",
+          "id": 1742779044,
+          "lat": 52.3618502,
+          "lon": 4.8521564,
+          "tags": {
+            "amenity": "drinking_water",
+            "bottle": "no",
+            "operator": "Waternet",
+            "operator:wikidata": "Q2137469",
+            "operator:wikipedia": "nl:Waternet (bedrijf)"
+          }
+        },
+        {
+          "type": "node",
+          "id": 1742784325,
+          "lat": 52.3735089,
+          "lon": 4.8460747,
+          "tags": {
+            "amenity": "drinking_water",
+            "operator": "Waternet",
+            "operator:wikidata": "Q2137469"
+          }
+        },
+        {
+          "type": "node",
+          "id": 1749775740,
+          "lat": 52.3742507,
+          "lon": 4.8503847,
+          "tags": {
+            "amenity": "drinking_water",
+            "man_made": "water_tap",
+            "operator": "Waternet",
+            "operator:wikidata": "Q2137469"
+          }
+        },
+        {
+          "type": "node",
+          "id": 1749784221,
+          "lat": 52.3718387,
+          "lon": 4.8604656,
+          "tags": {
+            "amenity": "drinking_water",
+            "fountain": "bubbler",
+            "operator": "Waternet",
+            "operator:wikidata": "Q2137469",
+            "operator:wikipedia": "nl:Waternet (bedrijf)",
+            "wheelchair": "yes"
+          }
+        },
+        {
+          "type": "node",
+          "id": 1749791141,
+          "lat": 52.3724875,
+          "lon": 4.8652509,
+          "tags": {
+            "amenity": "drinking_water",
+            "bottle": "no",
+            "operator": "Waternet",
+            "operator:wikidata": "Q2137469",
+            "operator:wikipedia": "nl:Waternet (bedrijf)"
+          }
+        },
+        {
+          "type": "node",
+          "id": 1749811547,
+          "lat": 52.3778361,
+          "lon": 4.8789892,
+          "tags": {
+            "access": "yes",
+            "amenity": "drinking_water",
+            "bottle": "no",
+            "fee": "no",
+            "fountain": "bubbler",
+            "operator": "Waternet",
+            "operator:wikidata": "Q2137469",
+            "operator:wikipedia": "nl:Waternet (bedrijf)",
+            "panoramax": "7ca9d736-acbb-4560-a969-23a30081aa9c"
+          }
+        },
+        {
+          "type": "node",
+          "id": 1749820212,
+          "lat": 52.3820099,
+          "lon": 4.8806643,
+          "tags": {
+            "amenity": "drinking_water",
+            "bottle": "no",
+            "man_made": "water_tap",
+            "operator": "Waternet",
+            "operator:wikidata": "Q2137469",
+            "operator:wikipedia": "nl:Waternet (bedrijf)"
+          }
+        },
+        {
+          "type": "node",
+          "id": 1749824179,
+          "lat": 52.3831834,
+          "lon": 4.8712643,
+          "tags": {
+            "amenity": "drinking_water",
+            "bottle": "no",
+            "fountain": "bubbler",
+            "operator": "Waternet",
+            "operator:wikidata": "Q2137469",
+            "wheelchair": "yes"
+          }
+        },
+        {
+          "type": "node",
+          "id": 1749826301,
+          "lat": 52.3873443,
+          "lon": 4.8755888,
+          "tags": {
+            "access": "yes",
+            "amenity": "drinking_water",
+            "bottle": "yes",
+            "covered": "no",
+            "fee": "no",
+            "indoor": "no",
+            "man_made": "water_tap",
+            "operator": "Waternet",
+            "operator:wikidata": "Q2137469",
+            "seasonal": "no",
+            "wheelchair": "yes"
+          }
+        },
+        {
+          "type": "node",
+          "id": 1749832285,
+          "lat": 52.3886393,
+          "lon": 4.8770685,
+          "tags": {
+            "amenity": "drinking_water",
+            "fountain": "bubbler",
+            "operator": "Waternet",
+            "operator:wikidata": "Q2137469",
+            "wheelchair": "yes"
+          }
+        },
+        {
+          "type": "node",
+          "id": 1749834834,
+          "lat": 52.3906253,
+          "lon": 4.8730805,
+          "tags": {
+            "amenity": "drinking_water",
+            "operator": "Waternet",
+            "operator:wikidata": "Q2137469"
+          }
+        },
+        {
+          "type": "node",
+          "id": 1749842937,
+          "lat": 52.3866594,
+          "lon": 4.8889482,
+          "tags": {
+            "amenity": "drinking_water",
+            "fountain": "bubbler",
+            "operator": "Waternet",
+            "operator:wikidata": "Q2137469",
+            "operator:wikipedia": "nl:Waternet (bedrijf)"
+          }
+        },
+        {
+          "type": "node",
+          "id": 1749844128,
+          "lat": 52.3838027,
+          "lon": 4.8887095,
+          "tags": {
+            "amenity": "drinking_water",
+            "fee": "no",
+            "fountain": "bubbler",
+            "operator": "Waternet",
+            "operator:wikidata": "Q2137469",
+            "operator:wikipedia": "nl:Waternet (bedrijf)"
+          }
+        },
+        {
+          "type": "node",
+          "id": 1749931379,
+          "lat": 52.3649934,
+          "lon": 4.8741578,
+          "tags": {
+            "amenity": "drinking_water",
+            "fountain": "bubbler",
+            "operator": "Waternet",
+            "operator:wikidata": "Q2137469",
+            "operator:wikipedia": "nl:Waternet (bedrijf)"
+          }
+        },
+        {
+          "type": "node",
+          "id": 1751592819,
+          "lat": 52.3622159,
+          "lon": 4.8977654,
+          "tags": {
+            "amenity": "drinking_water",
+            "bottle": "no",
+            "fountain": "bubbler",
+            "operator": "Waternet",
+            "operator:wikidata": "Q2137469",
+            "operator:wikipedia": "nl:Waternet (bedrijf)",
+            "wheelchair": "yes"
+          }
+        },
+        {
+          "type": "node",
+          "id": 1751597358,
+          "lat": 52.3670656,
+          "lon": 4.9056961,
+          "tags": {
+            "amenity": "drinking_water",
+            "bottle": "no",
+            "fountain": "bubbler",
+            "operator": "Waternet",
+            "operator:wikidata": "Q2137469",
+            "operator:wikipedia": "nl:Waternet (bedrijf)"
+          }
+        },
+        {
+          "type": "node",
+          "id": 1757304846,
+          "lat": 52.3812503,
+          "lon": 4.8513608,
+          "tags": {
+            "access": "yes",
+            "amenity": "drinking_water",
+            "bottle": "yes",
+            "operator": "Waternet",
+            "operator:wikidata": "Q2137469",
+            "wheelchair": "yes"
+          }
+        },
+        {
+          "type": "node",
+          "id": 1758602011,
+          "lat": 52.381351,
+          "lon": 4.8705901,
+          "tags": {
+            "amenity": "drinking_water",
+            "fountain": "bubbler",
+            "operator": "Waternet",
+            "operator:wikidata": "Q2137469",
+            "wheelchair": "yes"
+          }
+        },
+        {
+          "type": "node",
+          "id": 1782015790,
+          "lat": 52.3603437,
+          "lon": 4.8743005,
+          "tags": {
+            "amenity": "bench",
+            "backrest": "yes"
+          }
+        },
+        {
+          "type": "node",
+          "id": 1782015800,
+          "lat": 52.3597151,
+          "lon": 4.8725403,
+          "tags": {
+            "amenity": "bench",
+            "armrest": "no",
+            "backrest": "yes",
+            "check_date": "2021-06-08",
+            "material": "wood",
+            "seats": "4"
+          }
+        },
+        {
+          "type": "node",
+          "id": 1782015803,
+          "lat": 52.3602687,
+          "lon": 4.8743255,
+          "tags": {
+            "amenity": "bench",
+            "backrest": "yes"
+          }
+        },
+        {
+          "type": "node",
+          "id": 1782015805,
+          "lat": 52.3604485,
+          "lon": 4.8729593,
+          "tags": {
+            "amenity": "bench",
+            "backrest": "yes",
+            "check_date": "2021-06-08"
+          }
+        },
+        {
+          "type": "node",
+          "id": 1782015808,
+          "lat": 52.3596726,
+          "lon": 4.8726584,
+          "tags": {
+            "amenity": "bench",
+            "armrest": "no",
+            "backrest": "yes",
+            "check_date": "2021-06-08",
+            "material": "wood",
+            "seats": "4"
+          }
+        },
+        {
+          "type": "node",
+          "id": 1782015813,
+          "lat": 52.3606269,
+          "lon": 4.8737272,
+          "tags": {
+            "amenity": "bench",
+            "backrest": "yes",
+            "check_date": "2021-06-08"
+          }
+        },
+        {
+          "type": "node",
+          "id": 1782037364,
+          "lat": 52.3599158,
+          "lon": 4.8730336,
+          "tags": {
+            "amenity": "bench",
+            "armrest": "no",
+            "backrest": "yes",
+            "material": "wood",
+            "seats": "4"
+          }
+        },
+        {
+          "type": "node",
+          "id": 1782046394,
+          "lat": 52.3590967,
+          "lon": 4.8700376,
+          "tags": {
+            "amenity": "bench",
+            "backrest": "yes"
+          }
+        },
+        {
+          "type": "node",
+          "id": 1782046400,
+          "lat": 52.3589871,
+          "lon": 4.869933,
+          "tags": {
+            "amenity": "bench",
+            "backrest": "yes"
+          }
+        },
+        {
+          "type": "node",
+          "id": 1782056497,
+          "lat": 52.3569171,
+          "lon": 4.8609005,
+          "tags": {
+            "amenity": "bench",
+            "backrest": "yes"
+          }
+        },
+        {
+          "type": "node",
+          "id": 1782056502,
+          "lat": 52.3572512,
+          "lon": 4.8606966,
+          "tags": {
+            "amenity": "bench",
+            "backrest": "yes",
+            "check_date": "2025-01-07"
+          }
+        },
+        {
+          "type": "node",
+          "id": 1782385388,
+          "lat": 52.357256,
+          "lon": 4.8673217,
+          "tags": {
+            "amenity": "bench",
+            "backrest": "yes",
+            "check_date": "2025-06-16"
+          }
+        },
+        {
+          "type": "node",
+          "id": 1782385410,
+          "lat": 52.357582,
+          "lon": 4.8672171,
+          "tags": {
+            "amenity": "bench",
+            "backrest": "yes",
+            "check_date": "2025-06-16"
+          }
+        },
+        {
+          "type": "node",
+          "id": 1782396267,
+          "lat": 52.3575131,
+          "lon": 4.869281,
+          "tags": {
+            "amenity": "bench",
+            "backrest": "yes",
+            "check_date": "2021-01-16"
+          }
+        },
+        {
+          "type": "node",
+          "id": 1782396273,
+          "lat": 52.3565057,
+          "lon": 4.862888,
+          "tags": {
+            "amenity": "bench",
+            "backrest": "yes"
+          }
+        },
+        {
+          "type": "node",
+          "id": 1782409491,
+          "lat": 52.3566531,
+          "lon": 4.858819,
+          "tags": {
+            "amenity": "bench",
+            "backrest": "yes"
+          }
+        },
+        {
+          "type": "node",
+          "id": 1819065977,
+          "lat": 52.3733151,
+          "lon": 4.8938491,
+          "tags": {
+            "amenity": "toilets",
+            "changing_table": "yes",
+            "name": "Bijenkorf 5e etage",
+            "toilets:disposal": "flush",
+            "toilets:wheelchair": "yes",
+            "wheelchair": "yes"
+          }
+        },
+        {
+          "type": "node",
+          "id": 1892316859,
+          "lat": 52.3746095,
+          "lon": 4.8526935,
+          "tags": {
+            "amenity": "bench",
+            "backrest": "yes"
+          }
+        },
+        {
+          "type": "node",
+          "id": 1969188196,
+          "lat": 52.3853374,
+          "lon": 4.8515692,
+          "tags": {
+            "amenity": "shelter",
+            "bin": "no"
+          }
+        },
+        {
+          "type": "node",
+          "id": 2053188330,
+          "lat": 52.374468,
+          "lon": 4.8989226,
+          "tags": {
+            "amenity": "toilets",
+            "check_date": "2021-11-28",
+            "fee": "no",
+            "female": "no",
+            "male": "yes",
+            "supervised": "no",
+            "wheelchair": "no"
+          }
+        },
+        {
+          "type": "node",
+          "id": 2079956037,
+          "lat": 52.356252,
+          "lon": 4.8651193,
+          "tags": {
+            "amenity": "bench",
+            "backrest": "yes"
+          }
+        },
+        {
+          "type": "node",
+          "id": 2079956039,
+          "lat": 52.3564213,
+          "lon": 4.8660943,
+          "tags": {
+            "amenity": "bench",
+            "backrest": "yes",
+            "check_date": "2025-06-16"
+          }
+        },
+        {
+          "type": "node",
+          "id": 2079956042,
+          "lat": 52.356514,
+          "lon": 4.8664864,
+          "tags": {
+            "amenity": "bench",
+            "backrest": "yes",
+            "check_date": "2025-06-16"
+          }
+        },
+        {
+          "type": "node",
+          "id": 2079956044,
+          "lat": 52.3565334,
+          "lon": 4.8671886,
+          "tags": {
+            "amenity": "bench",
+            "backrest": "yes",
+            "check_date": "2025-06-16"
+          }
+        },
+        {
+          "type": "node",
+          "id": 2079956056,
+          "lat": 52.3566947,
+          "lon": 4.8677064,
+          "tags": {
+            "amenity": "bench",
+            "backrest": "yes",
+            "check_date": "2025-06-16"
+          }
+        },
+        {
+          "type": "node",
+          "id": 2079956058,
+          "lat": 52.3570378,
+          "lon": 4.8685573,
+          "tags": {
+            "amenity": "bench",
+            "backrest": "yes"
+          }
+        },
+        {
+          "type": "node",
+          "id": 2079956059,
+          "lat": 52.3575729,
+          "lon": 4.8705354,
+          "tags": {
+            "amenity": "bench",
+            "backrest": "yes",
+            "check_date": "2021-01-10"
+          }
+        },
+        {
+          "type": "node",
+          "id": 2079956062,
+          "lat": 52.3577935,
+          "lon": 4.8711679,
+          "tags": {
+            "amenity": "bench",
+            "backrest": "yes",
+            "check_date": "2021-01-10"
+          }
+        },
+        {
+          "type": "node",
+          "id": 2079956069,
+          "lat": 52.3605368,
+          "lon": 4.875459,
+          "tags": {
+            "amenity": "bench",
+            "backrest": "yes",
+            "check_date": "2021-03-18",
+            "material": "wood"
+          }
+        },
+        {
+          "type": "node",
+          "id": 2105912050,
+          "lat": 52.3589209,
+          "lon": 4.9083275,
+          "tags": {
+            "amenity": "drinking_water",
+            "fountain": "bottle_refill",
+            "name": "Join The Pipe",
+            "operator": "Join The Pipe",
+            "operator:website": "https://join-the-pipe.org",
+            "operator:wikidata": "Q138113959"
+          }
+        },
+        {
+          "type": "node",
+          "id": 2105991812,
+          "lat": 52.364193,
+          "lon": 4.8690096,
+          "tags": {
+            "amenity": "bench",
+            "backrest": "yes",
+            "check_date": "2021-03-27",
+            "colour": "blue",
+            "material": "wood",
+            "seats": "4"
+          }
+        },
+        {
+          "type": "node",
+          "id": 2167122150,
+          "lat": 52.362696,
+          "lon": 4.8880787,
+          "tags": {
+            "amenity": "bench",
+            "backrest": "yes",
+            "check_date": "2025-03-15",
+            "river:waterway_distance": "2.550",
+            "seamark:bridge:category": "fixed",
+            "seamark:bridge:clearance_height": "2.5",
+            "seamark:bridge:clearance_width": "6.5",
+            "seamark:name": "Amsterdam, brug in de Nieuwe Spiegelstraat",
+            "seamark:type": "bridge"
+          }
+        },
+        {
+          "type": "node",
+          "id": 2212804896,
+          "lat": 52.367548,
+          "lon": 4.899026,
+          "tags": {
+            "amenity": "bench",
+            "backrest": "yes",
+            "check_date": "2021-07-25"
+          }
+        },
+        {
+          "type": "node",
+          "id": 2212804897,
+          "lat": 52.3675652,
+          "lon": 4.8989869,
+          "tags": {
+            "amenity": "bench",
+            "backrest": "yes",
+            "check_date": "2021-07-25"
+          }
+        },
+        {
+          "type": "node",
+          "id": 2212804898,
+          "lat": 52.3675823,
+          "lon": 4.8989478,
+          "tags": {
+            "amenity": "bench",
+            "backrest": "yes",
+            "check_date": "2021-07-25"
+          }
+        },
+        {
+          "type": "node",
+          "id": 2212804905,
+          "lat": 52.3676937,
+          "lon": 4.8989492,
+          "tags": {
+            "amenity": "bench",
+            "backrest": "yes",
+            "check_date": "2021-07-25"
+          }
+        },
+        {
+          "type": "node",
+          "id": 2212804908,
+          "lat": 52.3677162,
+          "lon": 4.8974006,
+          "tags": {
+            "amenity": "bench",
+            "armrest": "no",
+            "backrest": "yes",
+            "material": "wood",
+            "seats": "4"
+          }
+        },
+        {
+          "type": "node",
+          "id": 2212804911,
+          "lat": 52.3677226,
+          "lon": 4.898982,
+          "tags": {
+            "amenity": "bench",
+            "backrest": "yes",
+            "check_date": "2021-07-25"
+          }
+        },
+        {
+          "type": "node",
+          "id": 2270302930,
+          "lat": 52.3562637,
+          "lon": 4.8662208,
+          "tags": {
+            "amenity": "bench",
+            "backrest": "yes"
+          }
+        },
+        {
+          "type": "node",
+          "id": 2293578202,
+          "lat": 52.3674779,
+          "lon": 4.8891336,
+          "tags": {
+            "access": "yes",
+            "amenity": "toilets",
+            "fee": "yes",
+            "opening_hours": "Mo-Su 00:00-00:00",
+            "supervised": "no",
+            "unisex": "yes",
+            "wheelchair": "yes"
+          }
+        },
+        {
+          "type": "node",
+          "id": 2294731730,
+          "lat": 52.3673047,
+          "lon": 4.890048,
+          "tags": {
+            "access": "yes",
+            "amenity": "toilets",
+            "changing_table": "no",
+            "fee": "no",
+            "female": "no",
+            "male": "yes",
+            "supervised": "no",
+            "toilets:disposal": "pitlatrine",
+            "toilets:handwashing": "no",
+            "wheelchair": "no"
+          }
+        },
+        {
+          "type": "node",
+          "id": 2325490640,
+          "lat": 52.3708919,
+          "lon": 4.90104,
+          "tags": {
+            "amenity": "bench",
+            "backrest": "yes"
+          }
+        },
+        {
+          "type": "node",
+          "id": 2325490652,
+          "lat": 52.3709091,
+          "lon": 4.9011366,
+          "tags": {
+            "amenity": "bench",
+            "backrest": "yes"
+          }
+        },
+        {
+          "type": "node",
+          "id": 2327314841,
+          "lat": 52.358839,
+          "lon": 4.8743324,
+          "tags": {
+            "amenity": "drinking_water",
+            "bottle": "no",
+            "check_date": "2025-03-15",
+            "fee": "no",
+            "fountain": "bubbler",
+            "operator": "Waternet",
+            "operator:wikidata": "Q2137469",
+            "operator:wikipedia": "nl:Waternet (bedrijf)",
+            "wheelchair": "yes"
+          }
+        },
+        {
+          "type": "node",
+          "id": 2414322888,
+          "lat": 52.3650262,
+          "lon": 4.8722211,
+          "tags": {
+            "amenity": "bench",
+            "backrest": "yes",
+            "check_date": "2021-03-27",
+            "source": "knowledge"
+          }
+        },
+        {
+          "type": "node",
+          "id": 2421175418,
+          "lat": 52.3638915,
+          "lon": 4.8681346,
+          "tags": {
+            "amenity": "bench",
+            "backrest": "yes",
+            "check_date": "2021-04-06",
+            "material": "metal"
+          }
+        },
+        {
+          "type": "node",
+          "id": 2421175419,
+          "lat": 52.3638348,
+          "lon": 4.8681032,
+          "tags": {
+            "amenity": "bench",
+            "backrest": "yes",
+            "check_date": "2021-04-06",
+            "material": "metal"
+          }
+        },
+        {
+          "type": "node",
+          "id": 2421175420,
+          "lat": 52.3639088,
+          "lon": 4.8680479,
+          "tags": {
+            "amenity": "bench",
+            "backrest": "yes",
+            "check_date": "2021-04-06",
+            "material": "metal"
+          }
+        },
+        {
+          "type": "node",
+          "id": 2421175423,
+          "lat": 52.3639196,
+          "lon": 4.868262,
+          "tags": {
+            "amenity": "bench",
+            "backrest": "yes",
+            "check_date": "2021-04-06",
+            "material": "metal"
+          }
+        },
+        {
+          "type": "node",
+          "id": 2421175427,
+          "lat": 52.3639444,
+          "lon": 4.8680267,
+          "tags": {
+            "amenity": "bench",
+            "backrest": "yes",
+            "check_date": "2021-04-06",
+            "material": "metal"
+          }
+        },
+        {
+          "type": "node",
+          "id": 2421175430,
+          "lat": 52.3639596,
+          "lon": 4.8682886,
+          "tags": {
+            "amenity": "bench",
+            "backrest": "yes",
+            "check_date": "2021-04-06",
+            "material": "metal"
+          }
+        },
+        {
+          "type": "node",
+          "id": 2421175433,
+          "lat": 52.3640006,
+          "lon": 4.8682638,
+          "tags": {
+            "amenity": "bench",
+            "backrest": "yes",
+            "check_date": "2021-04-06",
+            "material": "metal"
+          }
+        },
+        {
+          "type": "node",
+          "id": 2421201668,
+          "lat": 52.3649789,
+          "lon": 4.8683631,
+          "tags": {
+            "amenity": "bench",
+            "backrest": "yes",
+            "check_date": "2021-01-16",
+            "material": "wood",
+            "seats": "8"
+          }
+        },
+        {
+          "type": "node",
+          "id": 2421201677,
+          "lat": 52.3653376,
+          "lon": 4.8684108,
+          "tags": {
+            "amenity": "bench",
+            "backrest": "yes",
+            "check_date": "2023-08-13",
+            "material": "wood",
+            "seats": "6"
+          }
+        },
+        {
+          "type": "node",
+          "id": 2421201679,
+          "lat": 52.3653625,
+          "lon": 4.86854,
+          "tags": {
+            "amenity": "bench",
+            "backrest": "yes",
+            "check_date": "2023-08-13",
+            "material": "wood",
+            "seats": "6"
+          }
+        },
+        {
+          "type": "node",
+          "id": 2421201680,
+          "lat": 52.365396,
+          "lon": 4.8680746,
+          "tags": {
+            "amenity": "bench",
+            "backrest": "yes",
+            "check_date": "2023-08-13",
+            "material": "wood",
+            "seats": "8"
+          }
+        },
+        {
+          "type": "node",
+          "id": 2428358877,
+          "lat": 52.3633709,
+          "lon": 4.8724716,
+          "tags": {
+            "amenity": "bench",
+            "backrest": "yes",
+            "check_date": "2021-03-03"
+          }
+        },
+        {
+          "type": "node",
+          "id": 2429900778,
+          "lat": 52.3624926,
+          "lon": 4.8691963,
+          "tags": {
+            "amenity": "bench",
+            "backrest": "yes"
+          }
+        },
+        {
+          "type": "node",
+          "id": 2429900779,
+          "lat": 52.3625205,
+          "lon": 4.8691399,
+          "tags": {
+            "amenity": "bench",
+            "backrest": "yes"
+          }
+        },
+        {
+          "type": "node",
+          "id": 2429900780,
+          "lat": 52.3623518,
+          "lon": 4.8692321,
+          "tags": {
+            "amenity": "bench",
+            "backrest": "yes"
+          }
+        },
+        {
+          "type": "node",
+          "id": 2429900781,
+          "lat": 52.3624993,
+          "lon": 4.8690783,
+          "tags": {
+            "amenity": "bench",
+            "backrest": "yes"
+          }
+        },
+        {
+          "type": "node",
+          "id": 2429900782,
+          "lat": 52.3624616,
+          "lon": 4.8690944,
+          "tags": {
+            "amenity": "bench",
+            "backrest": "yes"
+          }
+        },
+        {
+          "type": "node",
+          "id": 2429993645,
+          "lat": 52.3625134,
+          "lon": 4.8676946,
+          "tags": {
+            "amenity": "bench",
+            "backrest": "yes",
+            "check_date": "2021-02-25"
+          }
+        },
+        {
+          "type": "node",
+          "id": 2429993647,
+          "lat": 52.3625718,
+          "lon": 4.867655,
+          "tags": {
+            "amenity": "bench",
+            "backrest": "yes",
+            "check_date": "2021-02-25"
+          }
+        },
+        {
+          "type": "node",
+          "id": 2429993650,
+          "lat": 52.3626868,
+          "lon": 4.8676825,
+          "tags": {
+            "amenity": "bench",
+            "backrest": "no",
+            "check_date": "2023-08-13"
+          }
+        },
+        {
+          "type": "node",
+          "id": 2429993652,
+          "lat": 52.3626972,
+          "lon": 4.8676415,
+          "tags": {
+            "amenity": "bench",
+            "backrest": "no",
+            "check_date": "2023-08-13"
+          }
+        },
+        {
+          "type": "node",
+          "id": 2429993653,
+          "lat": 52.3626965,
+          "lon": 4.8677224,
+          "tags": {
+            "amenity": "bench",
+            "backrest": "no"
+          }
+        },
+        {
+          "type": "node",
+          "id": 2429993656,
+          "lat": 52.3627222,
+          "lon": 4.8676245,
+          "tags": {
+            "amenity": "bench",
+            "backrest": "no",
+            "check_date": "2023-08-13"
+          }
+        },
+        {
+          "type": "node",
+          "id": 2429993657,
+          "lat": 52.3627222,
+          "lon": 4.8677405,
+          "tags": {
+            "amenity": "bench",
+            "backrest": "no",
+            "check_date": "2021-04-06"
+          }
+        },
+        {
+          "type": "node",
+          "id": 2429993658,
+          "lat": 52.3627472,
+          "lon": 4.8676415,
+          "tags": {
+            "amenity": "bench",
+            "backrest": "no",
+            "check_date": "2021-02-25"
+          }
+        },
+        {
+          "type": "node",
+          "id": 2429993659,
+          "lat": 52.3627472,
+          "lon": 4.8677235,
+          "tags": {
+            "amenity": "bench",
+            "backrest": "no",
+            "check_date": "2021-02-25"
+          }
+        },
+        {
+          "type": "node",
+          "id": 2429993660,
+          "lat": 52.3627575,
+          "lon": 4.867678,
+          "tags": {
+            "amenity": "bench",
+            "backrest": "no",
+            "check_date": "2021-02-25"
+          }
+        },
+        {
+          "type": "node",
+          "id": 2429993664,
+          "lat": 52.3628083,
+          "lon": 4.8674947,
+          "tags": {
+            "amenity": "bench",
+            "backrest": "yes",
+            "check_date": "2021-02-25"
+          }
+        },
+        {
+          "type": "node",
+          "id": 2429993665,
+          "lat": 52.3628779,
+          "lon": 4.8674476,
+          "tags": {
+            "amenity": "bench",
+            "backrest": "yes",
+            "check_date": "2021-02-25"
+          }
+        },
+        {
+          "type": "node",
+          "id": 2505989191,
+          "lat": 52.357249,
+          "lon": 4.8912693,
+          "tags": {
+            "amenity": "bench"
+          }
+        },
+        {
+          "type": "node",
+          "id": 2505989196,
+          "lat": 52.3570967,
+          "lon": 4.8915027,
+          "tags": {
+            "amenity": "bench"
+          }
+        },
+        {
+          "type": "node",
+          "id": 2634225791,
+          "lat": 52.379413,
+          "lon": 4.8916787,
+          "tags": {
+            "access": "yes",
+            "amenity": "toilets",
+            "changing_table": "no",
+            "check_date": "2025-03-14",
+            "fee": "no",
+            "male": "yes",
+            "opening_hours": "24/7",
+            "panoramax": "cdf0b46f-f2c7-44d8-9c69-f7f4a3c20259",
+            "supervised": "no",
+            "toilets:access": "yes",
+            "toilets:position": "urinal",
+            "toilets:wheelchair": "no",
+            "wheelchair": "no"
+          }
+        },
+        {
+          "type": "node",
+          "id": 2771998100,
+          "lat": 52.3890678,
+          "lon": 4.8920208,
+          "tags": {
+            "amenity": "drinking_water",
+            "man_made": "water_tap",
+            "operator": "Waternet",
+            "operator:wikidata": "Q2137469"
+          }
+        },
+        {
+          "type": "node",
+          "id": 2916493084,
+          "lat": 52.3771424,
+          "lon": 4.8835675,
+          "tags": {
+            "amenity": "drinking_water",
+            "bottle": "no",
+            "fountain": "bubbler",
+            "operator": "Waternet",
+            "operator:wikidata": "Q2137469",
+            "operator:wikipedia": "nl:Waternet (bedrijf)"
+          }
+        },
+        {
+          "type": "node",
+          "id": 2919240133,
+          "lat": 52.3632478,
+          "lon": 4.8700062,
+          "tags": {
+            "amenity": "bench",
+            "backrest": "yes",
+            "check_date": "2021-03-03"
+          }
+        },
+        {
+          "type": "node",
+          "id": 2936432161,
+          "lat": 52.3711033,
+          "lon": 4.8523399,
+          "tags": {
+            "amenity": "drinking_water",
+            "operator": "Waternet",
+            "operator:wikidata": "Q2137469"
+          }
+        },
+        {
+          "type": "node",
+          "id": 2943190447,
+          "lat": 52.3750359,
+          "lon": 4.865223,
+          "tags": {
+            "amenity": "drinking_water",
+            "fountain": "drinking",
+            "operator": "Waternet",
+            "operator:wikidata": "Q2137469",
+            "operator:wikipedia": "nl:Waternet (bedrijf)",
+            "wheelchair": "limited"
+          }
+        },
+        {
+          "type": "node",
+          "id": 2997596571,
+          "lat": 52.3857554,
+          "lon": 4.8746495,
+          "tags": {
+            "amenity": "toilets",
+            "fee": "yes",
+            "indoor": "yes",
+            "note": "inside De Bakkerswinkel",
+            "wheelchair": "no"
+          }
+        },
+        {
+          "type": "node",
+          "id": 3130910029,
+          "lat": 52.366054,
+          "lon": 4.900388,
+          "tags": {
+            "amenity": "bench",
+            "backrest": "yes",
+            "covered": "no"
+          }
+        },
+        {
+          "type": "node",
+          "id": 3373237632,
+          "lat": 52.3616462,
+          "lon": 4.9026486,
+          "tags": {
+            "amenity": "bench",
+            "backrest": "yes",
+            "check_date": "2021-06-04"
+          }
+        },
+        {
+          "type": "node",
+          "id": 3373237636,
+          "lat": 52.3628551,
+          "lon": 4.9020515,
+          "tags": {
+            "amenity": "bench",
+            "backrest": "yes",
+            "check_date": "2021-06-04"
+          }
+        },
+        {
+          "type": "node",
+          "id": 3373237638,
+          "lat": 52.3633899,
+          "lon": 4.9017662,
+          "tags": {
+            "amenity": "bench",
+            "backrest": "yes",
+            "check_date": "2021-06-04"
+          }
+        },
+        {
+          "type": "node",
+          "id": 3373237640,
+          "lat": 52.3635161,
+          "lon": 4.9017047,
+          "tags": {
+            "amenity": "bench",
+            "backrest": "yes",
+            "check_date": "2021-06-04"
+          }
+        },
+        {
+          "type": "node",
+          "id": 3381333509,
+          "lat": 52.3779574,
+          "lon": 4.9016876,
+          "tags": {
+            "amenity": "toilets",
+            "fee": "yes",
+            "wheelchair": "yes"
+          }
+        },
+        {
+          "type": "node",
+          "id": 3404634809,
+          "lat": 52.3582802,
+          "lon": 4.8994975,
+          "tags": {
+            "amenity": "bench"
+          }
+        },
+        {
+          "type": "node",
+          "id": 3404634810,
+          "lat": 52.358293,
+          "lon": 4.8995668,
+          "tags": {
+            "amenity": "bench"
+          }
+        },
+        {
+          "type": "node",
+          "id": 3404634812,
+          "lat": 52.3583047,
+          "lon": 4.8996248,
+          "tags": {
+            "amenity": "bench"
+          }
+        },
+        {
+          "type": "node",
+          "id": 3404634843,
+          "lat": 52.3599379,
+          "lon": 4.8998216,
+          "tags": {
+            "amenity": "drinking_water",
+            "fountain": "drinking",
+            "operator": "Waternet",
+            "operator:wikidata": "Q2137469",
+            "operator:wikipedia": "nl:Waternet (bedrijf)",
+            "wheelchair": "yes"
+          }
+        },
+        {
+          "type": "node",
+          "id": 3404634845,
+          "lat": 52.3600785,
+          "lon": 4.8995643,
+          "tags": {
+            "amenity": "bench",
+            "backrest": "yes",
+            "check_date": "2021-06-06"
+          }
+        },
+        {
+          "type": "node",
+          "id": 3404634847,
+          "lat": 52.3601292,
+          "lon": 4.8995662,
+          "tags": {
+            "amenity": "bench",
+            "backrest": "yes",
+            "check_date": "2021-06-06"
+          }
+        },
+        {
+          "type": "node",
+          "id": 3404634848,
+          "lat": 52.3600614,
+          "lon": 4.9001314,
+          "tags": {
+            "amenity": "bench",
+            "backrest": "yes",
+            "check_date": "2021-06-06"
+          }
+        },
+        {
+          "type": "node",
+          "id": 3404634850,
+          "lat": 52.3601557,
+          "lon": 4.8995942,
+          "tags": {
+            "amenity": "bench",
+            "backrest": "yes",
+            "check_date": "2021-06-06"
+          }
+        },
+        {
+          "type": "node",
+          "id": 3404634851,
+          "lat": 52.3601176,
+          "lon": 4.900096,
+          "tags": {
+            "amenity": "bench",
+            "backrest": "yes",
+            "check_date": "2021-06-06"
+          }
+        },
+        {
+          "type": "node",
+          "id": 3404634853,
+          "lat": 52.3601396,
+          "lon": 4.9000622,
+          "tags": {
+            "amenity": "bench",
+            "backrest": "yes",
+            "check_date": "2021-06-06"
+          }
+        },
+        {
+          "type": "node",
+          "id": 3404634854,
+          "lat": 52.3601782,
+          "lon": 4.8996785,
+          "tags": {
+            "amenity": "bench",
+            "backrest": "yes",
+            "check_date": "2021-06-06"
+          }
+        },
+        {
+          "type": "node",
+          "id": 3404634855,
+          "lat": 52.3601571,
+          "lon": 4.9000154,
+          "tags": {
+            "amenity": "bench",
+            "backrest": "yes",
+            "check_date": "2021-06-06"
+          }
+        },
+        {
+          "type": "node",
+          "id": 3404634857,
+          "lat": 52.3601645,
+          "lon": 4.8999014,
+          "tags": {
+            "amenity": "bench",
+            "backrest": "yes",
+            "check_date": "2021-06-06"
+          }
+        },
+        {
+          "type": "node",
+          "id": 3407541857,
+          "lat": 52.3580862,
+          "lon": 4.8999948,
+          "tags": {
+            "amenity": "bench"
+          }
+        },
+        {
+          "type": "node",
+          "id": 3407541860,
+          "lat": 52.3581896,
+          "lon": 4.9005309,
+          "tags": {
+            "amenity": "bench"
+          }
+        },
+        {
+          "type": "node",
+          "id": 3407541863,
+          "lat": 52.3582891,
+          "lon": 4.9010231,
+          "tags": {
+            "amenity": "bench",
+            "backrest": "yes"
+          }
+        },
+        {
+          "type": "node",
+          "id": 3413425262,
+          "lat": 52.3602158,
+          "lon": 4.8986357,
+          "tags": {
+            "amenity": "bench",
+            "backrest": "yes",
+            "check_date": "2021-02-02"
+          }
+        },
+        {
+          "type": "node",
+          "id": 3413425264,
+          "lat": 52.3602963,
+          "lon": 4.8965649,
+          "tags": {
+            "amenity": "bench",
+            "backrest": "yes"
+          }
+        },
+        {
+          "type": "node",
+          "id": 3413425265,
+          "lat": 52.3602374,
+          "lon": 4.8985822,
+          "tags": {
+            "amenity": "bench",
+            "backrest": "yes",
+            "check_date": "2021-02-02"
+          }
+        },
+        {
+          "type": "node",
+          "id": 3413425267,
+          "lat": 52.3602706,
+          "lon": 4.8985412,
+          "tags": {
+            "amenity": "bench",
+            "backrest": "yes",
+            "check_date": "2021-02-02"
+          }
+        },
+        {
+          "type": "node",
+          "id": 3413425270,
+          "lat": 52.3603531,
+          "lon": 4.896627,
+          "tags": {
+            "amenity": "bench",
+            "backrest": "yes"
+          }
+        },
+        {
+          "type": "node",
+          "id": 3413425271,
+          "lat": 52.3603588,
+          "lon": 4.8966567,
+          "tags": {
+            "amenity": "bench",
+            "backrest": "yes"
+          }
+        },
+        {
+          "type": "node",
+          "id": 3413425274,
+          "lat": 52.3603319,
+          "lon": 4.8985203,
+          "tags": {
+            "amenity": "bench",
+            "backrest": "yes",
+            "check_date": "2021-02-02"
+          }
+        },
+        {
+          "type": "node",
+          "id": 3413425276,
+          "lat": 52.3603654,
+          "lon": 4.8985317,
+          "tags": {
+            "amenity": "bench",
+            "backrest": "yes",
+            "check_date": "2021-02-02"
+          }
+        },
+        {
+          "type": "node",
+          "id": 3413425280,
+          "lat": 52.3604236,
+          "lon": 4.8986062,
+          "tags": {
+            "amenity": "bench",
+            "backrest": "yes",
+            "check_date": "2021-02-02"
+          }
+        },
+        {
+          "type": "node",
+          "id": 3414542015,
+          "lat": 52.3627679,
+          "lon": 4.9018489,
+          "tags": {
+            "amenity": "bench",
+            "backrest": "yes",
+            "check_date": "2021-06-04"
+          }
+        },
+        {
+          "type": "node",
+          "id": 3581918212,
+          "lat": 52.3830736,
+          "lon": 4.9073507,
+          "tags": {
+            "amenity": "toilets"
+          }
+        },
+        {
+          "type": "node",
+          "id": 3585988216,
+          "lat": 52.3889383,
+          "lon": 4.8873906,
+          "tags": {
+            "amenity": "drinking_water",
+            "fountain": "bubbler",
+            "operator": "Waternet",
+            "operator:wikidata": "Q2137469",
+            "operator:wikipedia": "nl:Waternet (bedrijf)",
+            "wheelchair": "yes"
+          }
+        },
+        {
+          "type": "node",
+          "id": 3634624132,
+          "lat": 52.3660646,
+          "lon": 4.897343,
+          "tags": {
+            "amenity": "drinking_water",
+            "bottle": "yes",
+            "man_made": "water_tap",
+            "operator": "Waternet",
+            "operator:wikidata": "Q2137469",
+            "operator:wikipedia": "nl:Waternet (bedrijf)",
+            "wheelchair": "yes"
+          }
+        },
+        {
+          "type": "node",
+          "id": 3706817260,
+          "lat": 52.3600308,
+          "lon": 4.8849024,
+          "tags": {
+            "access": "customers",
+            "amenity": "toilets",
+            "changing_table": "yes",
+            "fee": "no",
+            "level": "-1",
+            "toilets:disposal": "flush",
+            "wheelchair": "yes"
+          }
+        },
+        {
+          "type": "node",
+          "id": 3912208247,
+          "lat": 52.3686548,
+          "lon": 4.8555444,
+          "tags": {
+            "amenity": "drinking_water",
+            "name": "Waterhappertje",
+            "operator": "Waternet",
+            "operator:wikidata": "Q2137469"
+          }
+        },
+        {
+          "type": "node",
+          "id": 3918459901,
+          "lat": 52.3658849,
+          "lon": 4.9082867,
+          "tags": {
+            "amenity": "bench",
+            "backrest": "yes"
+          }
+        },
+        {
+          "type": "node",
+          "id": 3918502463,
+          "lat": 52.3596782,
+          "lon": 4.8870575,
+          "tags": {
+            "amenity": "bench",
+            "backrest": "yes"
+          }
+        },
+        {
+          "type": "node",
+          "id": 3918658507,
+          "lat": 52.3593905,
+          "lon": 4.8870302,
+          "tags": {
+            "amenity": "bench",
+            "backrest": "yes"
+          }
+        },
+        {
+          "type": "node",
+          "id": 3918658508,
+          "lat": 52.3577411,
+          "lon": 4.8860893,
+          "tags": {
+            "amenity": "bench",
+            "backrest": "yes"
+          }
+        },
+        {
+          "type": "node",
+          "id": 3926944254,
+          "lat": 52.359502,
+          "lon": 4.8888309,
+          "tags": {
+            "amenity": "bench",
+            "armrest": "no",
+            "backrest": "yes",
+            "material": "wood",
+            "seats": "4"
+          }
+        },
+        {
+          "type": "node",
+          "id": 3926944255,
+          "lat": 52.3594603,
+          "lon": 4.888884,
+          "tags": {
+            "amenity": "bench",
+            "armrest": "no",
+            "backrest": "yes",
+            "material": "wood",
+            "seats": "4"
+          }
+        },
+        {
+          "type": "node",
+          "id": 3926945223,
+          "lat": 52.3594429,
+          "lon": 4.8889065,
+          "tags": {
+            "amenity": "bench",
+            "armrest": "no",
+            "backrest": "yes",
+            "material": "wood",
+            "seats": "4"
+          }
+        },
+        {
+          "type": "node",
+          "id": 3927198244,
+          "lat": 52.3601052,
+          "lon": 4.88847,
+          "tags": {
+            "amenity": "bench",
+            "backrest": "yes"
+          }
+        },
+        {
+          "type": "node",
+          "id": 3930424248,
+          "lat": 52.3866301,
+          "lon": 4.888758,
+          "tags": {
+            "amenity": "bench",
+            "backrest": "yes",
+            "check_date": "2021-01-09"
+          }
+        },
+        {
+          "type": "node",
+          "id": 3930424250,
+          "lat": 52.3865678,
+          "lon": 4.8887419,
+          "tags": {
+            "amenity": "bench",
+            "backrest": "yes",
+            "check_date": "2021-01-09"
+          }
+        },
+        {
+          "type": "node",
+          "id": 3930558146,
+          "lat": 52.3605557,
+          "lon": 4.8855524,
+          "tags": {
+            "amenity": "bench",
+            "backrest": "yes"
+          }
+        },
+        {
+          "type": "node",
+          "id": 3931144288,
+          "lat": 52.3602884,
+          "lon": 4.8861035,
+          "tags": {
+            "amenity": "bench",
+            "armrest": "yes",
+            "backrest": "yes",
+            "check_date": "2025-03-15",
+            "material": "wood"
+          }
+        },
+        {
+          "type": "node",
+          "id": 3931161524,
+          "lat": 52.3591289,
+          "lon": 4.8852961,
+          "tags": {
+            "amenity": "bench",
+            "backrest": "yes"
+          }
+        },
+        {
+          "type": "node",
+          "id": 3931161528,
+          "lat": 52.3591786,
+          "lon": 4.8853148,
+          "tags": {
+            "amenity": "bench",
+            "backrest": "yes"
+          }
+        },
+        {
+          "type": "node",
+          "id": 4120934367,
+          "lat": 52.3674542,
+          "lon": 4.8862097,
+          "tags": {
+            "addr:city": "Amsterdam",
+            "addr:postcode": "1016CK",
+            "addr:street": "Leidsegracht",
+            "amenity": "bench",
+            "backrest": "yes",
+            "description": "The famous bench in The Fault in Our Stars",
+            "name": "The Fault In Our Stars Bench",
+            "source": "user knowledge",
+            "subject:wikidata": "Q14704171",
+            "subject:wikipedia": "nl:The Fault in Our Stars (film)",
+            "tourism": "attraction"
+          }
+        },
+        {
+          "type": "node",
+          "id": 4163014389,
+          "lat": 52.3669898,
+          "lon": 4.8903618,
+          "tags": {
+            "amenity": "bench"
+          }
+        },
+        {
+          "type": "node",
+          "id": 4193342194,
+          "lat": 52.3785912,
+          "lon": 4.8457305,
+          "tags": {
+            "amenity": "bench",
+            "backrest": "yes"
+          }
+        },
+        {
+          "type": "node",
+          "id": 4229638247,
+          "lat": 52.3859823,
+          "lon": 4.876032,
+          "tags": {
+            "amenity": "drinking_water",
+            "fountain": "bubbler",
+            "operator": "Waternet",
+            "operator:wikidata": "Q2137469",
+            "wheelchair": "yes"
+          }
+        },
+        {
+          "type": "node",
+          "id": 4253146218,
+          "lat": 52.3818159,
+          "lon": 4.9089136,
+          "tags": {
+            "amenity": "bench",
+            "armrest": "no",
+            "backrest": "yes",
+            "material": "wood",
+            "seats": "6"
+          }
+        },
+        {
+          "type": "node",
+          "id": 4253147538,
+          "lat": 52.3818612,
+          "lon": 4.9089663,
+          "tags": {
+            "amenity": "bench",
+            "armrest": "no",
+            "backrest": "yes",
+            "material": "wood",
+            "seats": "6"
+          }
+        },
+        {
+          "type": "node",
+          "id": 4307283472,
+          "lat": 52.3836131,
+          "lon": 4.9040112,
+          "tags": {
+            "amenity": "bench"
+          }
+        },
+        {
+          "type": "node",
+          "id": 4307283653,
+          "lat": 52.3837026,
+          "lon": 4.9050894,
+          "tags": {
+            "amenity": "bench"
+          }
+        },
+        {
+          "type": "node",
+          "id": 4331308419,
+          "lat": 52.3622668,
+          "lon": 4.8993316,
+          "tags": {
+            "amenity": "bench",
+            "backrest": "yes"
+          }
+        },
+        {
+          "type": "node",
+          "id": 4331353892,
+          "lat": 52.3622379,
+          "lon": 4.8993008,
+          "tags": {
+            "amenity": "bench",
+            "backrest": "yes"
+          }
+        },
+        {
+          "type": "node",
+          "id": 4344470390,
+          "lat": 52.3789405,
+          "lon": 4.8991512,
+          "tags": {
+            "access": "yes",
+            "amenity": "toilets",
+            "brand": "SANIFAIR",
+            "brand:wikidata": "Q104814416",
+            "changing_table": "yes",
+            "charge": "0.9 EUR",
+            "fee": "yes",
+            "opening_hours": "07:00-00:00",
+            "operator": "SANIFAIR GmbH",
+            "operator:wikidata": "Q104814416"
+          }
+        },
+        {
+          "type": "node",
+          "id": 4350231356,
+          "lat": 52.3871957,
+          "lon": 4.8996169,
+          "tags": {
+            "amenity": "bench",
+            "backrest": "yes",
+            "check_date": "2023-06-12"
+          }
+        },
+        {
+          "type": "node",
+          "id": 4360510351,
+          "lat": 52.3668124,
+          "lon": 4.8844722,
+          "tags": {
+            "amenity": "bench",
+            "backrest": "no",
+            "check_date": "2026-04-24"
+          }
+        },
+        {
+          "type": "node",
+          "id": 4360510353,
+          "lat": 52.36763,
+          "lon": 4.8846615,
+          "tags": {
+            "amenity": "bench",
+            "backrest": "yes"
+          }
+        },
+        {
+          "type": "node",
+          "id": 4360510383,
+          "lat": 52.366724,
+          "lon": 4.8845795,
+          "tags": {
+            "amenity": "bench",
+            "backrest": "no",
+            "check_date": "2026-04-24"
+          }
+        },
+        {
+          "type": "node",
+          "id": 4360566178,
+          "lat": 52.3592529,
+          "lon": 4.8922852,
+          "tags": {
+            "amenity": "bench",
+            "backrest": "yes"
+          }
+        },
+        {
+          "type": "node",
+          "id": 4379625097,
+          "lat": 52.3825864,
+          "lon": 4.8559549,
+          "tags": {
+            "amenity": "bench",
+            "armrest": "no",
+            "backrest": "yes",
+            "material": "wood",
+            "seats": "4"
+          }
+        }
+      ]
+    }
+  }
+}
