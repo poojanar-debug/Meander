@@ -5,7 +5,14 @@ export default defineConfig({
   plugins: [react()],
   server: {
     proxy: {
-      '/api': { target: 'http://localhost:8000', changeOrigin: true },
+      // localhost is right when the backend runs on the same machine. Under
+      // docker compose the API is a different container, so `localhost` here
+      // would be the *frontend* container and every /api call would fail with
+      // a connection refused that looks like the backend being down.
+      '/api': {
+        target: process.env.VITE_API_PROXY_TARGET || 'http://localhost:8000',
+        changeOrigin: true,
+      },
     },
   },
   build: {

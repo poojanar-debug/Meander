@@ -1,0 +1,42 @@
+# Everything is excluded, then the two things the API image needs are allowed
+# back. A deny-list here would silently start shipping whatever gets added to
+# the repository next; this cannot.
+*
+
+!backend/
+!data/cache.db
+
+# ...and then the parts of backend/ that must not ship.
+backend/tests/
+backend/**/__pycache__/
+backend/**/*.py[cod]
+backend/requirements.txt
+
+# Named explicitly as well as excluded by the * above, because each one is a
+# specific hazard rather than mere weight:
+#
+#   fixtures/     ~150 recorded upstream responses, none of them needed at
+#                 runtime — live mode never reads them, and Phase 1.3 stopped
+#                 production writing them.
+#   graphhopper/  a 45 MB JAR and a multi-GB graph. The router has its own
+#                 image; putting the graph in the API image would be a
+#                 gigabyte of dead weight per deploy.
+#   frontend/     served from S3, not from here.
+#   .env          secrets. config.py loads it if present, so an .env that
+#                 reached the image would silently override the task
+#                 definition's environment.
+fixtures/
+graphhopper/
+frontend/
+scripts/
+infra/
+docs/
+.env
+.env.*
+.venv*/
+.git/
+.github/
+.claude/
+*.md
+data/*.db-wal
+data/*.db-shm
