@@ -1,6 +1,6 @@
 {
   "_meander_provenance": "recorded",
-  "_meander_recorded_at": "2026-08-04T12:07:02.473793+00:00",
+  "_meander_recorded_at": "2026-08-04T16:50:43.497967+00:00",
   "_meander_note": "Written by backend/fixtures.py. Secrets are redacted and excluded from the request signature.",
   "request": {
     "method": "GET",
@@ -22,11 +22,11 @@
     "status": 200,
     "headers": {
       "content-type": "application/json; charset=utf-8",
-      "date": "Tue, 04 Aug 2026 12:07:02 GMT"
+      "date": "Tue, 04 Aug 2026 16:50:43 GMT"
     },
     "json": [
       {
-        "place_id": 281310877,
+        "place_id": 280035802,
         "licence": "Data \u00a9 OpenStreetMap contributors, ODbL 1.0. http://osm.org/copyright",
         "osm_type": "way",
         "osm_id": 372975520,

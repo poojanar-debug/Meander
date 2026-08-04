@@ -266,9 +266,15 @@ export default function MapView({ routes, selected, origin, dest, onSelect }) {
     if (coordinates.length < 2) return
 
     const narrow = map.getContainer().clientWidth < 640
+    // Jump rather than fly when nobody can see it. MapLibre animates the camera
+    // with requestAnimationFrame, which does not run in a hidden tab — so an
+    // animated fitBounds started while the page is backgrounded never
+    // progresses, and switching back shows the map still sitting at its initial
+    // centre with the routes off-screen.
+    const instant = prefersReducedMotion() || document.hidden
     map.fitBounds(boundsOf(coordinates), {
       padding: narrow ? 40 : 70,
-      duration: prefersReducedMotion() ? 0 : 600,
+      duration: instant ? 0 : 600,
       maxZoom: 16,
     })
   }, [selected, routes, ready])
