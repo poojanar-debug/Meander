@@ -120,7 +120,9 @@ def _check_startup() -> list[str]:
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     missing = _check_startup()
     cache = get_cache()
-    purged = cache.purge_expired_routes()
+    # Startup runs on the event loop like everything else, and a large
+    # route_cache makes this a multi-second stall before the first request.
+    purged = await run_in_threadpool(cache.purge_expired_routes)
     # Logged explicitly because four behaviours hang off it and none of them
     # fails loudly when it is wrong — most importantly, a False here drops the
     # smoothness hard constraint and the app just gets quietly less safe. See
@@ -134,7 +136,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             "clip_available": clip_available(),
             "missing_keys": missing,
             "routes_purged": purged,
-            "cache_stats": cache.stats(),
+            "cache_stats": await run_in_threadpool(cache.stats),
             "graphhopper_self_hosted": resolution["self_hosted"],
             "graphhopper_flag_source": resolution["source"],
             "path_details": path_details(),
@@ -610,7 +612,10 @@ async def route_events(req: RouteRequest) -> AsyncIterator[dict[str, Any]]:
                 context.departure.when.isoformat() if context.departure else None
             ),
             reason=reason or (context.departure.reason if context.departure else None),
-            cache=CacheInfo(segments_scored=cache.segment_count(), hit_rate=_hit_rate()),
+            cache=CacheInfo(
+                segments_scored=await run_in_threadpool(cache.segment_count),
+                hit_rate=_hit_rate(),
+            ),
         ).model_dump(),
     }
 
@@ -708,7 +713,12 @@ async def _stream(req: RouteRequest, cache_key: str) -> AsyncIterator[str]:
         async for event in route_events_with_deadline(req):
             if event["type"] == "done":
                 metrics.incr("daily_routes_served")
-                get_cache().put_route(cache_key, event["payload"], settings.route_cache_ttl_s)
+                await run_in_threadpool(
+                    get_cache().put_route,
+                    cache_key,
+                    event["payload"],
+                    settings.route_cache_ttl_s,
+                )
             yield _sse(event)
     except RoutingError as exc:
         metrics.incr("upstream_failures_total")
@@ -734,7 +744,7 @@ async def post_routes(req: RouteRequest, request: Request, response: Response) -
 
     cache = get_cache()
     key = route_cache_key(req)
-    cached = cache.get_route(key)
+    cached = await run_in_threadpool(cache.get_route, key)
     if cached is not None:
         metrics.incr("cache_hits_total")
         limiter.refund(_client_ip(request))
@@ -775,7 +785,7 @@ async def post_routes(req: RouteRequest, request: Request, response: Response) -
         return _error("upstream", "No route could be produced for that request.", 502)
 
     metrics.incr("daily_routes_served")
-    cache.put_route(key, payload, settings.route_cache_ttl_s)
+    await run_in_threadpool(cache.put_route, key, payload, settings.route_cache_ttl_s)
     response.headers["X-Meander-Cache"] = "miss"
     return payload
 
