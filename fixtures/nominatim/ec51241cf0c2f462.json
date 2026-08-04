@@ -1,6 +1,6 @@
 {
   "_meander_provenance": "recorded",
-  "_meander_recorded_at": "2026-08-04T15:17:07.905316+00:00",
+  "_meander_recorded_at": "2026-08-04T15:38:37.439851+00:00",
   "_meander_note": "Written by backend/fixtures.py. Secrets are redacted and excluded from the request signature.",
   "request": {
     "method": "GET",
@@ -22,7 +22,7 @@
     "status": 200,
     "headers": {
       "content-type": "application/json; charset=utf-8",
-      "date": "Tue, 04 Aug 2026 15:17:07 GMT"
+      "date": "Tue, 04 Aug 2026 15:38:37 GMT"
     },
     "json": [
       {

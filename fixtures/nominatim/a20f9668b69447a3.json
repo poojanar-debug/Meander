@@ -1,0 +1,156 @@
+{
+  "_meander_provenance": "recorded",
+  "_meander_recorded_at": "2026-08-04T15:52:10.062270+00:00",
+  "_meander_note": "Written by backend/fixtures.py. Secrets are redacted and excluded from the request signature.",
+  "request": {
+    "method": "GET",
+    "url": "https://nominatim.openstreetmap.org/search",
+    "params": {
+      "q": "ELIZ",
+      "format": "jsonv2",
+      "limit": 6,
+      "addressdetails": 0
+    },
+    "json": null,
+    "data": {},
+    "content": null,
+    "headers": {
+      "Accept": "application/json"
+    }
+  },
+  "response": {
+    "status": 200,
+    "headers": {
+      "content-type": "application/json; charset=utf-8",
+      "date": "Tue, 04 Aug 2026 15:52:10 GMT"
+    },
+    "json": [
+      {
+        "place_id": 293365531,
+        "licence": "Data \u00a9 OpenStreetMap contributors, ODbL 1.0. http://osm.org/copyright",
+        "osm_type": "relation",
+        "osm_id": 347602,
+        "lat": "40.3025307",
+        "lon": "-2.4188699",
+        "category": "boundary",
+        "type": "administrative",
+        "place_rank": 16,
+        "importance": 0.5442535169364351,
+        "addresstype": "village",
+        "name": "Olmedilla de Eliz",
+        "display_name": "Olmedilla de Eliz, Cuenca, Castilla-La Mancha, Espa\u00f1a",
+        "boundingbox": [
+          "40.2759755",
+          "40.3202098",
+          "-2.4452504",
+          "-2.3908068"
+        ]
+      },
+      {
+        "place_id": 366581785,
+        "licence": "Data \u00a9 OpenStreetMap contributors, ODbL 1.0. http://osm.org/copyright",
+        "osm_type": "way",
+        "osm_id": 464621072,
+        "lat": "45.3339767",
+        "lon": "-75.6660465",
+        "category": "landuse",
+        "type": "brownfield",
+        "place_rank": 24,
+        "importance": 0.08008719386587317,
+        "addresstype": "brownfield",
+        "name": "Former Elizabeth Park Public School",
+        "display_name": "Former Elizabeth Park Public School, 15, Gloucester-Southgate, Ottawa, Eastern Ontario, Ontario, K1V 7N9, Canada",
+        "boundingbox": [
+          "45.3333865",
+          "45.3345838",
+          "-75.6673579",
+          "-75.6646441"
+        ]
+      },
+      {
+        "place_id": 194855246,
+        "licence": "Data \u00a9 OpenStreetMap contributors, ODbL 1.0. http://osm.org/copyright",
+        "osm_type": "node",
+        "osm_id": 12229434401,
+        "lat": "55.7783180",
+        "lon": "37.6020206",
+        "category": "shop",
+        "type": "clothes",
+        "place_rank": 30,
+        "importance": 8.908293278396304e-05,
+        "addresstype": "shop",
+        "name": "Eliz",
+        "display_name": "Eliz, \u0414\u043e\u043b\u0433\u043e\u0440\u0443\u043a\u043e\u0432\u0441\u043a\u0430\u044f \u0443\u043b\u0438\u0446\u0430, \u0422\u0432\u0435\u0440\u0441\u043a\u043e\u0439 \u0440\u0430\u0439\u043e\u043d, \u041c\u043e\u0441\u043a\u0432\u0430, \u0426\u0435\u043d\u0442\u0440\u0430\u043b\u044c\u043d\u044b\u0439 \u0444\u0435\u0434\u0435\u0440\u0430\u043b\u044c\u043d\u044b\u0439 \u043e\u043a\u0440\u0443\u0433, 127006, \u0420\u043e\u0441\u0441\u0438\u044f",
+        "boundingbox": [
+          "55.7782680",
+          "55.7783680",
+          "37.6019706",
+          "37.6020706"
+        ]
+      },
+      {
+        "place_id": 116592646,
+        "licence": "Data \u00a9 OpenStreetMap contributors, ODbL 1.0. http://osm.org/copyright",
+        "osm_type": "node",
+        "osm_id": 9001691927,
+        "lat": "50.9655136",
+        "lon": "7.0096777",
+        "category": "shop",
+        "type": "jewelry",
+        "place_rank": 30,
+        "importance": 8.006485084301545e-05,
+        "addresstype": "shop",
+        "name": "Eliz",
+        "display_name": "Eliz, 29, Keupstra\u00dfe, M\u00fclheim, K\u00f6ln, Nordrhein-Westfalen, 51063, Deutschland",
+        "boundingbox": [
+          "50.9654636",
+          "50.9655636",
+          "7.0096277",
+          "7.0097277"
+        ]
+      },
+      {
+        "place_id": 171707874,
+        "licence": "Data \u00a9 OpenStreetMap contributors, ODbL 1.0. http://osm.org/copyright",
+        "osm_type": "node",
+        "osm_id": 10039688526,
+        "lat": "53.8717674",
+        "lon": "27.5728378",
+        "category": "shop",
+        "type": "clothes",
+        "place_rank": 30,
+        "importance": 7.699473563740013e-05,
+        "addresstype": "shop",
+        "name": "Eliz",
+        "display_name": "Eliz, 8, \u0414\u0437\u044f\u043d\u0456\u0441\u0430\u045e\u0441\u043a\u0430\u044f \u0432\u0443\u043b\u0456\u0446\u0430, \u0421\u0435\u0440\u0430\u0431\u0440\u0430\u043d\u0441\u043a\u0456\u044f \u041c\u043b\u044b\u043d\u044b, \u041a\u043e\u0437\u044b\u0440\u0430\u0432\u0430, \u041f\u0430\u0441\u0451\u043b\u0430\u043a \u0412\u0435\u043b\u0430\u0437\u0430\u0432\u043e\u0434\u0430, \u041b\u0435\u043d\u0456\u043d\u0441\u043a\u0456 \u0440\u0430\u0451\u043d, \u041c\u0456\u043d\u0441\u043a, 220028, \u0411\u0435\u043b\u0430\u0440\u0443\u0441\u044c",
+        "boundingbox": [
+          "53.8717174",
+          "53.8718174",
+          "27.5727878",
+          "27.5728878"
+        ]
+      },
+      {
+        "place_id": 171502899,
+        "licence": "Data \u00a9 OpenStreetMap contributors, ODbL 1.0. http://osm.org/copyright",
+        "osm_type": "node",
+        "osm_id": 4972743251,
+        "lat": "53.8600115",
+        "lon": "27.6744999",
+        "category": "shop",
+        "type": "clothes",
+        "place_rank": 30,
+        "importance": 7.699473563740013e-05,
+        "addresstype": "shop",
+        "name": "Eliz",
+        "display_name": "Eliz, 150\u0410, \u041f\u0430\u0440\u0442\u044b\u0437\u0430\u043d\u0441\u043a\u0456 \u043f\u0440\u0430\u0441\u043f\u0435\u043a\u0442, \u041f\u0430\u045e\u043d\u043e\u0447\u043d\u044b \u041f\u0430\u0441\u0451\u043b\u0430\u043a, \u0417\u0430\u0432\u043e\u0434\u0441\u043a\u0456 \u0440\u0430\u0451\u043d, \u041c\u0456\u043d\u0441\u043a, 220102, \u0411\u0435\u043b\u0430\u0440\u0443\u0441\u044c",
+        "boundingbox": [
+          "53.8599615",
+          "53.8600615",
+          "27.6744499",
+          "27.6745499"
+        ]
+      }
+    ]
+  }
+}

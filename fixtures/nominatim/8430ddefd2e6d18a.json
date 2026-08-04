@@ -1,0 +1,51 @@
+{
+  "_meander_provenance": "recorded",
+  "_meander_recorded_at": "2026-08-04T15:52:12.611829+00:00",
+  "_meander_note": "Written by backend/fixtures.py. Secrets are redacted and excluded from the request signature.",
+  "request": {
+    "method": "GET",
+    "url": "https://nominatim.openstreetmap.org/search",
+    "params": {
+      "q": "ELIZABETH MOIR",
+      "format": "jsonv2",
+      "limit": 6,
+      "addressdetails": 0
+    },
+    "json": null,
+    "data": {},
+    "content": null,
+    "headers": {
+      "Accept": "application/json"
+    }
+  },
+  "response": {
+    "status": 200,
+    "headers": {
+      "content-type": "application/json; charset=utf-8",
+      "date": "Tue, 04 Aug 2026 15:52:12 GMT"
+    },
+    "json": [
+      {
+        "place_id": 254101737,
+        "licence": "Data \u00a9 OpenStreetMap contributors, ODbL 1.0. http://osm.org/copyright",
+        "osm_type": "node",
+        "osm_id": 3780541996,
+        "lat": "6.8864860",
+        "lon": "79.8692910",
+        "category": "amenity",
+        "type": "school",
+        "place_rank": 30,
+        "importance": 7.168307011516011e-05,
+        "addresstype": "amenity",
+        "name": "Elizabeth Moir Junior School",
+        "display_name": "Elizabeth Moir Junior School, Park Road, Polhengoda Jct., Narahenpita, Havelock Town, Colombo, Colombo District, Western Province, 00500, Sri Lanka",
+        "boundingbox": [
+          "6.8864360",
+          "6.8865360",
+          "79.8692410",
+          "79.8693410"
+        ]
+      }
+    ]
+  }
+}

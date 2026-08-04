@@ -1,0 +1,156 @@
+{
+  "_meander_provenance": "recorded",
+  "_meander_recorded_at": "2026-08-04T15:52:10.958256+00:00",
+  "_meander_note": "Written by backend/fixtures.py. Secrets are redacted and excluded from the request signature.",
+  "request": {
+    "method": "GET",
+    "url": "https://nominatim.openstreetmap.org/search",
+    "params": {
+      "q": "ELIZA",
+      "format": "jsonv2",
+      "limit": 6,
+      "addressdetails": 0
+    },
+    "json": null,
+    "data": {},
+    "content": null,
+    "headers": {
+      "Accept": "application/json"
+    }
+  },
+  "response": {
+    "status": 200,
+    "headers": {
+      "content-type": "application/json; charset=utf-8",
+      "date": "Tue, 04 Aug 2026 15:52:11 GMT"
+    },
+    "json": [
+      {
+        "place_id": 373189002,
+        "licence": "Data \u00a9 OpenStreetMap contributors, ODbL 1.0. http://osm.org/copyright",
+        "osm_type": "node",
+        "osm_id": 151408445,
+        "lat": "41.2958644",
+        "lon": "-90.9676453",
+        "category": "place",
+        "type": "hamlet",
+        "place_rank": 20,
+        "importance": 0.3047903492217065,
+        "addresstype": "hamlet",
+        "name": "Eliza",
+        "display_name": "Eliza, Mercer County, Illinois, United States",
+        "boundingbox": [
+          "41.2758644",
+          "41.3158644",
+          "-90.9876453",
+          "-90.9476453"
+        ]
+      },
+      {
+        "place_id": 290417509,
+        "licence": "Data \u00a9 OpenStreetMap contributors, ODbL 1.0. http://osm.org/copyright",
+        "osm_type": "way",
+        "osm_id": 303500571,
+        "lat": "43.2764777",
+        "lon": "-2.3316973",
+        "category": "amenity",
+        "type": "place_of_worship",
+        "place_rank": 30,
+        "importance": 0.1570394422394589,
+        "addresstype": "amenity",
+        "name": "Eliza",
+        "display_name": "Eliza, 4, Herriko plaza, Itziar, Deba, Gipuzkoa, Euskadi, 20829, Espa\u00f1a",
+        "boundingbox": [
+          "43.2763332",
+          "43.2766320",
+          "-2.3319645",
+          "-2.3314284"
+        ]
+      },
+      {
+        "place_id": 290940233,
+        "licence": "Data \u00a9 OpenStreetMap contributors, ODbL 1.0. http://osm.org/copyright",
+        "osm_type": "node",
+        "osm_id": 8859904396,
+        "lat": "43.1428902",
+        "lon": "-1.1776344",
+        "category": "place",
+        "type": "hamlet",
+        "place_rank": 20,
+        "importance": 0.13339814068818187,
+        "addresstype": "hamlet",
+        "name": "Eliza",
+        "display_name": "Eliza, Ahaxe-Alciette-Bascassan, Bayonne, Pyr\u00e9n\u00e9es-Atlantiques, Nouvelle-Aquitaine, France m\u00e9tropolitaine, 64220, France",
+        "boundingbox": [
+          "43.1228902",
+          "43.1628902",
+          "-1.1976344",
+          "-1.1576344"
+        ]
+      },
+      {
+        "place_id": 300155314,
+        "licence": "Data \u00a9 OpenStreetMap contributors, ODbL 1.0. http://osm.org/copyright",
+        "osm_type": "node",
+        "osm_id": 4131376723,
+        "lat": "7.3544061",
+        "lon": "-58.4914119",
+        "category": "place",
+        "type": "hamlet",
+        "place_rank": 20,
+        "importance": 0.1333833348592355,
+        "addresstype": "hamlet",
+        "name": "Eliza",
+        "display_name": "Eliza, Dartmouth, Dartmouth Village District, Evergreen - Paradise, Pomeroon-Supenaam, Guyana",
+        "boundingbox": [
+          "7.3344061",
+          "7.3744061",
+          "-58.5114119",
+          "-58.4714119"
+        ]
+      },
+      {
+        "place_id": 344921543,
+        "licence": "Data \u00a9 OpenStreetMap contributors, ODbL 1.0. http://osm.org/copyright",
+        "osm_type": "node",
+        "osm_id": 153354456,
+        "lat": "34.8639683",
+        "lon": "-85.6130230",
+        "category": "place",
+        "type": "hamlet",
+        "place_rank": 20,
+        "importance": 0.13337083466849772,
+        "addresstype": "hamlet",
+        "name": "Eliza",
+        "display_name": "Eliza, Jackson County, Alabama, 35979, United States",
+        "boundingbox": [
+          "34.8439683",
+          "34.8839683",
+          "-85.6330230",
+          "-85.5930230"
+        ]
+      },
+      {
+        "place_id": 303476485,
+        "licence": "Data \u00a9 OpenStreetMap contributors, ODbL 1.0. http://osm.org/copyright",
+        "osm_type": "node",
+        "osm_id": 151574914,
+        "lat": "30.3288046",
+        "lon": "-91.2289967",
+        "category": "place",
+        "type": "hamlet",
+        "place_rank": 20,
+        "importance": 0.13336833524071104,
+        "addresstype": "hamlet",
+        "name": "Eliza",
+        "display_name": "Eliza, West Baton Rouge Parish, Louisiana, 70710, United States",
+        "boundingbox": [
+          "30.3088046",
+          "30.3488046",
+          "-91.2489967",
+          "-91.2089967"
+        ]
+      }
+    ]
+  }
+}

@@ -1,0 +1,246 @@
+{
+  "_meander_provenance": "recorded",
+  "_meander_recorded_at": "2026-08-04T15:46:18.907833+00:00",
+  "_meander_note": "Written by backend/fixtures.py. Secrets are redacted and excluded from the request signature.",
+  "request": {
+    "method": "POST",
+    "url": "https://graphhopper.com/api/1/route",
+    "params": {
+      "key": "<redacted>"
+    },
+    "json": {
+      "profile": "foot",
+      "points_encoded": false,
+      "instructions": false,
+      "calc_points": true,
+      "elevation": true,
+      "details": [
+        "road_class",
+        "surface",
+        "road_environment"
+      ],
+      "points": [
+        [
+          -90.967645,
+          41.295864
+        ]
+      ],
+      "algorithm": "round_trip",
+      "round_trip.distance": 2625,
+      "round_trip.seed": 42
+    },
+    "data": {},
+    "content": null,
+    "headers": {
+      "Content-Type": "application/json"
+    }
+  },
+  "response": {
+    "status": 200,
+    "headers": {
+      "date": "Tue, 04 Aug 2026 15:46:18 GMT",
+      "content-type": "application/json;charset=utf-8",
+      "x-ratelimit-remaining": "490"
+    },
+    "json": {
+      "hints": {
+        "visited_nodes.sum": 26,
+        "visited_nodes.average": 13.0
+      },
+      "info": {
+        "copyrights": [
+          "GraphHopper",
+          "OpenStreetMap contributors"
+        ],
+        "took": 4,
+        "road_data_timestamp": "2026-08-03T19:00:00Z"
+      },
+      "paths": [
+        {
+          "distance": 1131.124,
+          "weight": 24270.0,
+          "time": 814408,
+          "transfers": 0,
+          "legs": [],
+          "points_encoded": false,
+          "bbox": [
+            -90.967662,
+            41.290814,
+            -90.967053,
+            41.295863
+          ],
+          "points": {
+            "type": "LineString",
+            "coordinates": [
+              [
+                -90.967614,
+                41.295863,
+                211.99
+              ],
+              [
+                -90.967662,
+                41.294294,
+                209.33
+              ],
+              [
+                -90.967524,
+                41.293443,
+                207.56
+              ],
+              [
+                -90.967376,
+                41.292443,
+                206.28
+              ],
+              [
+                -90.967252,
+                41.291761,
+                205.68
+              ],
+              [
+                -90.967156,
+                41.291456,
+                205.8
+              ],
+              [
+                -90.967098,
+                41.291317,
+                206.0
+              ],
+              [
+                -90.967073,
+                41.291229,
+                206.0
+              ],
+              [
+                -90.967053,
+                41.290814,
+                206.0
+              ],
+              [
+                -90.967073,
+                41.291229,
+                206.0
+              ],
+              [
+                -90.967098,
+                41.291317,
+                206.0
+              ],
+              [
+                -90.967156,
+                41.291456,
+                205.8
+              ],
+              [
+                -90.967252,
+                41.291761,
+                205.68
+              ],
+              [
+                -90.967376,
+                41.292443,
+                206.28
+              ],
+              [
+                -90.967524,
+                41.293443,
+                207.56
+              ],
+              [
+                -90.967662,
+                41.294294,
+                209.33
+              ],
+              [
+                -90.967614,
+                41.295863,
+                211.99
+              ]
+            ]
+          },
+          "details": {
+            "surface": [
+              [
+                0,
+                7,
+                "paved"
+              ],
+              [
+                7,
+                8,
+                "missing"
+              ],
+              [
+                8,
+                9,
+                "missing"
+              ],
+              [
+                9,
+                16,
+                "paved"
+              ]
+            ],
+            "road_environment": [
+              [
+                0,
+                8,
+                "road"
+              ],
+              [
+                8,
+                16,
+                "road"
+              ]
+            ],
+            "road_class": [
+              [
+                0,
+                7,
+                "unclassified"
+              ],
+              [
+                7,
+                8,
+                "track"
+              ],
+              [
+                8,
+                9,
+                "track"
+              ],
+              [
+                9,
+                16,
+                "unclassified"
+              ]
+            ]
+          },
+          "ascend": 6.644549721474931,
+          "descend": 6.644549721474931,
+          "snapped_waypoints": {
+            "type": "LineString",
+            "coordinates": [
+              [
+                -90.967614,
+                41.295863,
+                211.99
+              ],
+              [
+                -90.967053,
+                41.290814,
+                206.0
+              ],
+              [
+                -90.967614,
+                41.295863,
+                211.99
+              ]
+            ]
+          }
+        }
+      ]
+    }
+  }
+}
