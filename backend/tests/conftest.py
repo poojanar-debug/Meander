@@ -64,3 +64,27 @@ def cache(tmp_cache_db: Path):
     c = Cache(tmp_cache_db)
     yield c
     c.close()
+
+
+@pytest.fixture
+def tmp_fixture_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Path]:
+    """Redirect fixtures/ and the live-call budget file to a temp directory."""
+    from backend import fixtures as fx
+
+    d = tmp_path / "fixtures"
+    d.mkdir()
+    monkeypatch.setattr(fx, "FIXTURE_DIR", d)
+    fx.reset_budget_singleton()
+    yield d
+    fx.reset_budget_singleton()
+
+
+@pytest.fixture
+def fixture_mode(monkeypatch: pytest.MonkeyPatch):
+    """Override MEANDER_FIXTURES for one test without touching the frozen Settings."""
+    from backend import fixtures as fx
+
+    def _set(mode: str) -> None:
+        monkeypatch.setattr(fx, "current_mode", lambda: mode)
+
+    return _set

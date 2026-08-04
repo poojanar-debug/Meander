@@ -70,6 +70,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         },
     )
     yield
+    from .fixtures import aclose_client
+
+    await aclose_client()
     log.info("shutdown")
 
 
@@ -92,6 +95,8 @@ app.add_middleware(
 
 @app.get("/api/health")
 def health() -> dict[str, Any]:
+    from .fixtures import budget_snapshot, fixture_inventory
+
     cache = get_cache()
     return {
         "status": "ok",
@@ -100,5 +105,7 @@ def health() -> dict[str, Any]:
         "fixture_mode": settings.fixture_mode,
         "missing_keys": settings.missing_keys(),
         "cache": cache.stats(),
+        "live_call_budget": budget_snapshot(),
+        "fixtures": fixture_inventory(),
         "counters": metrics.snapshot(),
     }

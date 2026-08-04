@@ -59,3 +59,52 @@ budget; these predate `fixtures.py`.
 
 **Blockers opened:** BLOCKED.md #1 (no `GRAPHHOPPER_KEY`), #2 (no `MAPILLARY_TOKEN`),
 #3 (prototype `Waypoint.dc.html` / `mock-api.js` referenced by HANDOFF.md are not on this machine).
+
+---
+
+## Phase B — Fixtures + live-call budget · 2026-08-04
+
+**Done**
+
+- `backend/fixtures.py`: record/replay around the one shared `httpx.AsyncClient`.
+  - `signature()` hashes method, host, path, query, body and content-type. **API keys are
+    deliberately excluded**, so two contributors with different keys share fixtures.
+  - `replay` (default) never opens a socket; a miss raises `FixtureMissing` naming the exact
+    command to record it. `record` replays known signatures and goes live for new ones. `live`
+    always goes live and still writes the fixture.
+  - Secrets are redacted from the fixture body *and* the stored URL's query string, with a
+    post-write assertion that deletes the file if a live key value appears in it anyway.
+  - Non-2xx responses are never recorded — replaying a 401 forever would look exactly like a
+    routing bug.
+- `LiveCallBudget`: per-service hard ceilings persisted to `fixtures/_budget.json` (gitignored).
+  Hitting a cap logs once, downgrades that service to replay-only and lets the run continue. A
+  refused spend is not charged. An **unbudgeted service gets zero live calls**, so a hostname typo
+  cannot become an uncapped spend.
+- Provenance travels on the response as `x-meander-provenance`: `live`, `recorded` or `synthetic`.
+  `is_synthetic()` is the hook downstream code uses to refuse to present a hand-built fixture as a
+  measurement.
+- `/api/health` now reports the budget snapshot and a fixture inventory split by provenance.
+
+**Verified**
+
+- 56 tests pass with outbound sockets blocked by an autouse conftest guard, including a meta-test
+  (`test_the_socket_guard_is_actually_active`) that proves the guard is really in force — without
+  it, "the suite passes offline" would be an untested claim.
+- `test_record_mode_writes_a_fixture_then_replays_it` drives the full record path over an
+  `httpx.MockTransport` and asserts the upstream is called exactly once across two `fetch()` calls,
+  and that the replay is not charged to the budget.
+- `test_recorded_fixture_never_contains_the_live_key` sets a fake live key and asserts it is absent
+  from the written file.
+
+**Live API calls used:** 0.
+
+**Decisions**
+
+- Budget cost is a parameter (`cost=`), not a constant, because GraphHopper charges ~3 credits per
+  route request while Open-Meteo charges 1. Routing passes `cost=3`.
+- The budget file is gitignored rather than committed: it is machine-local spend, not shared state,
+  and committing it would create a merge conflict on every contributor's first live call.
+- Provenance is carried as a response header rather than a wrapper type so callers keep using the
+  ordinary `httpx.Response` API and cannot forget to unwrap.
+
+**Deviations:** none.
