@@ -30,18 +30,50 @@ negotiable; that is not.
 
 ## Status
 
-All eleven build phases are done and tagged (`phase-a` … `phase-k`). 367 tests pass offline, the
-frontend has no WCAG 2.1 AA violations in an automated pass, and the deploy build boots with torch
-absent.
+**It produces real routes.** That was not true when the first eleven build phases were tagged
+(`phase-a` … `phase-k`), and the sentence that used to sit here — "it has never produced a real
+route" — is what a self-hosted GraphHopper 11 fixed.
 
-**It has never produced a real route.** There was no GraphHopper API key available when it was
-built, so the routing fixtures are hand-made — every route says so, in the response and on the
-card. Add a key and re-record to change that. [BLOCKED.md](BLOCKED.md) has the three things that
-need a human and the exact command for each; [PROGRESS.md](PROGRESS.md) is the full build log,
-including the hostile self-audit and what a reviewer should still be sceptical about.
+### What is proven
 
-Nothing here is deployed. [DEPLOY.md](DEPLOY.md) is written to be followed without asking
-questions.
+All three presets route, against a self-hosted server carrying Sri Lanka + the Netherlands + Great
+Britain in one graph. `scripts/verify_selfhosted.py` asserts it at four points, one per imported
+region: all three presets answer, their geometries differ from each other, and `smoothness` comes
+back as a path detail — which is the fifth hard accessibility constraint, and the one the hosted
+API cannot supply at all.
+
+### What is measured
+
+One uncached `POST /api/routes` — a 45-minute foot round trip near Hyde Park, all three
+objectives, nothing cached:
+
+| | |
+|---|---|
+| wall clock | **14.0 s** |
+| GraphHopper requests issued | **8** — 6 nature candidates, 1 fastest, 1 accessible |
+| fastest | 35.9 min · 2,939 m · 64% of its length checked · 3 findings |
+| nature | 22.4 min · 1,791 m · 88% checked · greener than fastest (0.666 vs 0.646) |
+| accessible | **blocked** — hard constraints reject it, and it says so |
+
+That is one measurement on one machine against a warm graph, not a benchmark. The nature route
+came back well under the time budget and carries a `preset_note` saying so, which is the app
+working as intended rather than a defect.
+
+### What is still unverified
+
+**Every route is `scoring_method: "geometry_only"`.** `data/cache.db` ships with zero CLIP segment
+scores, so nothing in this checkout has ever been scored from real street-level imagery, and the
+prompt pair driving CLIP has still only been ranked against generated reference images.
+[BLOCKED.md](BLOCKED.md) §2 is open and has the two commands that would close it.
+
+The "accessible is longer with fewer barriers" claim in [PROGRESS.md](PROGRESS.md) is a single
+Hyde Park measurement. Nothing re-runs it.
+
+### What is deployed
+
+Nothing yet. [DEPLOY.md](DEPLOY.md) is written to be followed without asking questions.
+[PROGRESS.md](PROGRESS.md) is the full build log, including the hostile self-audit and what a
+reviewer should still be sceptical about.
 
 ---
 
@@ -292,13 +324,16 @@ everywhere, and the app cannot tell a usable bench from a broken one. When Overp
 the field is `null` — "we could not look" — which is deliberately distinct from `[]`, "we looked
 and found none".
 
-### The demo runs on hand-built routing data
+### The keyless demo runs on hand-built routing data
 
-There is no GraphHopper key in this checkout, so the GraphHopper fixtures are **synthetic**: real
-response schema, plausible geometry, invented streets. Every route derived from one carries
-`synthetic_upstream: true`, is labelled `placeholder`, and the UI prints "Built from demonstration
-data, not a live routing response. Do not follow it." Add a key and re-record to get real routes —
-see [BLOCKED.md](BLOCKED.md).
+Out of the box (`MEANDER_FIXTURES=replay`, no routing server) the committed GraphHopper fixtures
+are **synthetic**: real response schema, plausible geometry, invented streets. Every route derived
+from one carries `synthetic_upstream: true`, is labelled `placeholder`, and the UI prints "Built
+from demonstration data, not a live routing response. Do not follow it."
+
+Point the app at a self-hosted GraphHopper and that stops being true — the routes above under
+**Status** are real ones. The distinction survives in the response: `scoring_method` and
+`synthetic_upstream` say which kind you are looking at, on every route, always.
 
 ### Other things worth knowing
 

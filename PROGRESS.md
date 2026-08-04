@@ -891,3 +891,73 @@ route available near you, but noticeably shorter than the time you asked for"*
 rather than silently handing over an 18-minute walk.
 
 **Live API calls:** GraphHopper hosted 0 (self-hosted is unmetered), Nominatim 3.
+
+---
+
+## Launch phase 0 · Baseline, and one number that was wrong
+
+Branched `feat/launch` off `main` at 867e8e2.
+
+**Where the tree actually is.** 387 tests pass offline, 2 skipped — not the 367
+the audit was written against. The frontend builds clean:
+
+| chunk | raw | gzip |
+|---|---|---|
+| `maplibre` | 1,055.24 kB | 283.74 kB |
+| `index` js | 222.77 kB | 70.61 kB |
+| `index` css | 80.30 kB | 12.79 kB |
+| `index.html` | 1.16 kB | 0.63 kB |
+
+**Three real routes, end to end.** Backend in `live` mode against the
+self-hosted GraphHopper 11, 45-minute foot round trip near Hyde Park, nothing
+cached: **14.0 s**, **8 GraphHopper requests** — 6 nature candidates, 1 fastest,
+1 accessible, exactly the arithmetic the audit predicted. `fastest` 35.9 min /
+64% checked, `nature` 22.4 min / 88% checked and genuinely greener (0.666 vs
+0.646), `accessible` blocked. `segments_scored` 0, so all three are
+`geometry_only`; self-hosting did nothing for BLOCKED.md §2 and it was worth
+re-confirming rather than assuming.
+
+**Then the 14 s turned out to be the wrong story.** Timing each SSE frame on
+arrival, the routing loop finishes in **0.02 s** and then nothing happens for
+**3.9 s**. Measured directly:
+
+| upstream | latency |
+|---|---|
+| GraphHopper, one foot route, localhost | **0.024 s** |
+| Open-Meteo forecast | 0.578 s |
+| Open-Meteo air quality | 0.836 s |
+| Overpass, one trivial bench query | **13.553 s** |
+
+Three consecutive uncached Hyde Park requests took 4.18 s, 1.19 s and 9.36 s.
+That spread is Overpass, not us.
+
+So the audit's "the objective loop is sequential and the worst case is well over
+two minutes" is right about the code and wrong about where the time goes **once
+the router is your own**. Eight local routing requests cost about 0.2 s
+together. The sequential enrichment — Overpass, then forecast, then air quality
+— is the entire budget, and its worst leg is 13.6 s.
+
+Which surfaces a defect nobody had written down: `HTTP_TIMEOUT_S` is **12.0 s**
+and Overpass just took 13.6 s. Rest stops are already silently timing out into
+`null` some fraction of the time. `null` is honest — it means "we could not
+look", distinct from `[]` — so this degrades correctly rather than lying, but it
+means the rest-stop feature is quietly absent at random. Phase 1.5 gathers the
+three enrichment calls, which turns worst-case ≈ sum into worst-case ≈ Overpass,
+and makes the timeout configurable so it can be set above Overpass's actual
+tail.
+
+**What surprised me.** That the first measurement was misleading in the
+flattering direction. 14 s for eight routing requests reads like "routing is
+slow, parallelise it". Parallelising the routing would have bought ~0.15 s and
+left a 13 s p99 completely untouched.
+
+**A privacy trap, reproduced deliberately.** `data/cache.db` is tracked. One
+uncached request left it byte-identical on disk with the route parked in
+`cache.db-wal`, which is gitignored — `git status` said clean. A checkpoint then
+took the tracked file from 4 KB to 45 KB carrying a full coordinate array. It is
+now guarded: `scripts/scrub_cache_db.py --check` inspects the **staged blob**,
+not the working tree, because a developer can stage the dirty file and then
+clean the working copy. Hooks live in `scripts/git-hooks/`.
+
+**Live API calls:** GraphHopper self-hosted ~40 (unmetered), Overpass 5,
+Open-Meteo 10, Nominatim 0.

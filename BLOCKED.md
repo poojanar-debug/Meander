@@ -2,9 +2,38 @@
 
 Things this run could not finish, what was tried, and what needs a human.
 
+| | |
+|---|---|
+| §0 free tier cannot route nature/accessible | **resolved** — self-hosted GraphHopper 11 |
+| §1 no `GRAPHHOPPER_KEY`, fixtures synthetic | **resolved** — a real key exists; live routing works |
+| §2 no `MAPILLARY_TOKEN`, CLIP unvalidated | **open** |
+| §3 prototype sources missing | **resolved** — worked around, nothing outstanding |
+
 ---
 
-## 0 · The GraphHopper free tier cannot route the nature or accessible presets
+## 0 · ~~The GraphHopper free tier cannot route the nature or accessible presets~~ — RESOLVED
+
+**Resolved:** 2026-08-04, by self-hosting, which was option 2 below.
+
+`scripts/graphhopper.sh setup && scripts/graphhopper.sh serve` builds and runs an open-source
+GraphHopper 11 with no flexible-mode restriction. Point `MEANDER_GRAPHHOPPER_URL` at it and both
+presets route for real. Verified by `scripts/verify_selfhosted.py` at four points, one per
+imported region: all three presets answer and their geometries differ.
+
+Self-hosting also bought something the paid plan would not have. The graph is built with
+`smoothness` as an encoded value, so the accessible custom model can now *exclude* ways recorded
+as `IMPASSABLE` rather than only reporting them after the fact. That is one of the five hard
+accessibility constraints, and until now it could never fire from routing data — the hosted API
+does not expose it at any price tier.
+
+The cost is that coverage is now finite: only places inside the imported extracts can be routed.
+`scripts/graphhopper.sh regions` prints what is built in.
+
+The original finding, kept because the capability matrix is still the reference for anyone
+deploying against the hosted API instead:
+
+<details>
+<summary>Original entry</summary>
 
 **Discovered:** 2026-08-04, on the first live request with a real API key.
 
@@ -51,10 +80,28 @@ A fourth option not yet built: approximate the nature preset on the free tier by
 routing through a green waypoint found via Overpass, which needs no custom
 model. That is a real feature rather than a config change, so it is not done.
 
+</details>
 
 ---
 
-## 1 · No `GRAPHHOPPER_KEY` in the environment — routing fixtures are synthetic
+## 1 · ~~No `GRAPHHOPPER_KEY` in the environment — routing fixtures are synthetic~~ — RESOLVED
+
+**Resolved:** 2026-08-04. A real key is now configured in `.env`, and with
+`MEANDER_FIXTURES=live` the app routes any location inside the imported graph.
+An uncached three-objective round trip near Hyde Park returned three real
+routes in 14.0 s across 8 GraphHopper requests.
+
+**The committed fixtures are still synthetic**, and that is deliberate rather
+than unfinished. They are what makes the keyless demo work offline, they are
+labelled `synthetic` in their envelope, and every route derived from one is
+forced to `scoring_method: "placeholder"` with `synthetic_upstream: true`. A
+recorded fixture would silently drop that labelling, so re-recording is a
+decision about what the demo should claim, not a bug to fix.
+
+⚠ Before re-recording, read the fixture-signature note at the end of this file.
+
+<details>
+<summary>Original entry</summary>
 
 **Discovered:** Phase A, 2026-08-04
 
@@ -97,9 +144,15 @@ MEANDER_FIXTURES=record python3 -m backend.record_fixtures --service graphhopper
 That command replaces every synthetic GraphHopper fixture with a recorded one and stays inside the
 80-call budget. Recorded fixtures drop the `placeholder` label automatically.
 
+</details>
+
 ---
 
 ## 2 · Mapillary token absent — CLIP scoring cannot be validated against real imagery
+
+**Status: OPEN.** This is the one still-unresolved gap, and it is the reason
+every route this project has ever produced — synthetic or real — reports
+`scoring_method: "geometry_only"` or `"placeholder"`, never `"clip"`.
 
 **Discovered:** Phase A, 2026-08-04
 
@@ -122,6 +175,12 @@ prompt pair behaves on real street photography.
 - whether CLIP ranks Hyde Park above Euston Road, which is the Phase G acceptance criterion
 - any real `scoring_method: "clip"` route, since `data/cache.db` ships empty of CLIP rows
 
+Re-confirmed 2026-08-04 against a live self-hosted run: `segment_scores` holds **0 rows**, so all
+three routes came back `geometry_only`. The committed `data/cache.db` is a 4 KB file whose schema
+is created on first open; every environment therefore starts from zero. Nothing about self-hosting
+changed this — the two are unrelated subsystems, and it is easy to assume otherwise now that the
+routes are real.
+
 **What you need to do**
 
 1. Create a client token at https://www.mapillary.com/dashboard/developers
@@ -141,7 +200,9 @@ MEANDER_FIXTURES=record python3 -m backend.batch_score --location hyde-park-lond
 
 ---
 
-## 3 · Prototype sources referenced by HANDOFF.md were not present
+## 3 · ~~Prototype sources referenced by HANDOFF.md were not present~~ — RESOLVED
+
+Worked around completely; nothing is outstanding. Kept for the record.
 
 **Discovered:** Phase A, 2026-08-04
 
@@ -157,3 +218,22 @@ then a narration pass at +700 ms, and includes the blocked-accessible fixture wi
 
 **What you need to do** — if the original prototype turns up, diff `frontend/src/api/mock.js`
 against it; the contract shape should match.
+
+---
+
+## Before you re-record any fixture
+
+A fixture is keyed on a **hash of the outgoing request body**. `path_details()`,
+`_base_body()`, the two custom models and the round-trip parameters are all
+inside that hash. Change any one of them and every committed GraphHopper fixture
+misses at once, so the offline test suite — the whole safety net — fails
+wholesale with `no_fixture` 503s rather than with anything that points at the
+cause.
+
+This has already cost this project a debugging session; PROGRESS.md records it
+as self-hosting defect #6. `backend/tests/conftest.py` pins
+`MEANDER_GRAPHHOPPER_URL` and `MEANDER_GRAPHHOPPER_SELF_HOSTED` for exactly this
+reason — those two decide `path_details()`, and therefore the signature.
+
+If you change what the app sends GraphHopper, re-record in the **same commit**
+and confirm the suite passes offline before pushing.
