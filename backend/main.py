@@ -19,12 +19,14 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from . import __version__
+from .accessibility import assess_route
 from .cache import get_cache
 from .config import STRICT_STARTUP, settings
 from .geometry import score_geometry
 from .logging_setup import configure_logging, get_logger
 from .metrics import metrics
 from .models import (
+    Blocker,
     CacheInfo,
     GeocodeResponse,
     Route,
@@ -41,7 +43,7 @@ from .routing import (
     RoutingError,
     geometry_for_wire,
 )
-from .scoring import ClipTerm, clip_term_for_route
+from .scoring import clip_term_for_route
 
 configure_logging(settings.log_level)
 log = get_logger(__name__)
@@ -52,26 +54,11 @@ limiter = RateLimiter(
     daily_ceiling=settings.global_daily_route_ceiling,
 )
 
-PLACEHOLDER_CONFIDENCE = 0.0
-
-GEOMETRY_ONLY_NOTE = (
-    "Accessibility data has not been evaluated for this route yet. "
-    "Scenery is scored from the route's shape and its OpenStreetMap tags, not from imagery."
-)
 SYNTHETIC_NOTE = (
     "This route was built from demonstration data, not a live routing response. "
     "Every number on it is a placeholder, not a measurement."
 )
-CLIP_NOTE_TEMPLATE = (
-    "Accessibility data has not been evaluated for this route yet. "
-    "Scenery is scored from street-level imagery covering {pct}% of the route."
-)
 
-
-def _scoring_note(clip: ClipTerm) -> str:
-    if clip.score is None:
-        return GEOMETRY_ONLY_NOTE
-    return CLIP_NOTE_TEMPLATE.format(pct=round(clip.coverage * 100))
 
 # ~110 m. Two requests from the same street corner should share a cached answer.
 CACHE_COORD_DECIMALS = 3
@@ -207,6 +194,7 @@ def _scored_route(route_id: str, label: str, raw: RawRoute) -> Route:
     scores = score_geometry(
         raw.points, raw.elevations or None, raw.details, clip_score=clip.score
     )
+    access = assess_route(raw.points, raw.elevations or None, raw.details)
     synthetic = raw.synthetic_upstream
 
     if synthetic:
@@ -216,10 +204,19 @@ def _scored_route(route_id: str, label: str, raw: RawRoute) -> Route:
     else:
         method = "geometry_only"
 
+    # Hard constraints reject only the accessible preset. On the other two the
+    # same findings are reported as information: someone walking may well take a
+    # route with three steps in it, and should still be told they are there.
+    blocked = route_id == "accessible" and access.is_blocked
+    blockers = [
+        Blocker(type=f.type, lat=f.lat, lon=f.lon, description=f.description)
+        for f in access.findings
+    ]
+
     return Route(
         id=route_id,
         label=label,
-        status="ok",
+        status="blocked" if blocked else "ok",
         geometry=geometry_for_wire(raw),
         duration_min=round(raw.duration_min, 1),
         distance_m=round(raw.distance_m),
@@ -228,9 +225,15 @@ def _scored_route(route_id: str, label: str, raw: RawRoute) -> Route:
         # shade would be a claim about the place rather than an absence of data.
         scores=Scores(nature=scores.nature, air=scores.air, shade=None),
         scoring_method=method,
-        confidence=PLACEHOLDER_CONFIDENCE,
+        # A coverage figure computed over invented tags is not a coverage
+        # figure. Synthetic routes report no confidence at all.
+        confidence=0.0 if synthetic else access.coverage,
+        blockers=blockers,
         synthetic_upstream=synthetic,
-        confidence_note=SYNTHETIC_NOTE if synthetic else _scoring_note(clip),
+        confidence_note=SYNTHETIC_NOTE if synthetic else access.sentence(),
+        status_note=(
+            "Hard accessibility constraints reject this route." if blocked else None
+        ),
     )
 
 
@@ -305,7 +308,10 @@ async def _build_routes(req: RouteRequest) -> tuple[list[Route], str | None]:
 
         if objective == "fastest":
             fastest_duration = raw.duration_min
-        routes.append(_scored_route(objective, label, raw))
+        route = _scored_route(objective, label, raw)
+        if route.status == "blocked":
+            metrics.incr("routes_blocked_total")
+        routes.append(route)
 
     if not any(r.status == "ok" for r in routes):
         raise failures[0] if failures else NoRouteFound("No route could be found from there.")

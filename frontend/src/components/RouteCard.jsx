@@ -32,7 +32,11 @@ export default function RouteCard({ route, selected, onSelect }) {
   const style = styleFor(route.id)
   const blocked = route.status !== 'ok'
   const hasShape = route.geometry?.length > 1
-  const confidence = confidenceSentence(route.confidence, route.scoring_method)
+  const confidence = confidenceSentence(
+    route.confidence,
+    route.scoring_method,
+    route.confidence_note,
+  )
   const select = () => onSelect(route.id)
 
   return (

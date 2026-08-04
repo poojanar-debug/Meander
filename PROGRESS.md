@@ -448,3 +448,66 @@ with `HF_HUB_OFFLINE=1` so it never repeats it.
 - `data/cache.db` ships with no CLIP rows, so every route is `geometry_only` (or `placeholder`)
   until someone with a Mapillary token runs `batch_score.py`. The response states which path it
   used on every route, so this is visible rather than silent.
+
+---
+
+## Phase H — Accessibility engine · 2026-08-04
+
+**Done**
+
+- `backend/accessibility.py`. Three-valued `Verdict` — `PASS`, `FAIL`, `UNKNOWN` — with the rule
+  enforced in the type system rather than by convention: **`Verdict.__bool__` raises.** Writing
+  `if verdict:` is a `TypeError` on first execution instead of a wrong answer in production,
+  because that expression would silently treat UNKNOWN as accessible.
+- All five hard constraints, each rejecting only on a *tagged* bad value:
+  `highway=steps`; `barrier` in {gate, stile, turnstile, kissing_gate}; incline > 8% or > 5%
+  sustained over 50 m; surface outside {paved, asphalt, concrete, paving_stones, compacted};
+  smoothness in {bad, very_bad, horrible, very_horrible, impassable}.
+- Blockers are located on the ground — lat, lon, distance along the route, and a sentence a person
+  can act on ("Steps with no recorded step-free alternative.").
+- Confidence is the fraction of route length with a definite verdict, and the sentence it produces
+  is the exact copy from the handoff, escalating at 0.6 and again at 0.3.
+- Wired into `/api/routes`: `status`, `blockers`, `confidence` and `confidence_note` are now real.
+  The frontend renders the backend's sentence, so the wording cannot drift between the two halves.
+
+**Verified — 296 tests, 80 of them in `test_accessibility.py`**
+
+- **The DoD case**: Euston Road → Hyde Park returns `200` with the accessible route
+  `status: "blocked"` and two located blockers — `steps` at (51.51598, −0.14319) and
+  `surface: cobblestone` at (51.51201, −0.14998) — while the other two routes stay `ok`.
+- **The invariant**, from several directions:
+  - `test_an_entirely_untagged_route_is_never_reported_as_accessible` — no tags gives `UNKNOWN`,
+    coverage 0, and the sentence "do not rely on it".
+  - `test_a_route_tagged_only_with_road_class_is_not_accessible` — a way tagged `FOOTWAY` and
+    nothing else is still UNKNOWN. A footway can be cobbles.
+  - `test_a_surface_value_nobody_anticipated_is_unknown_not_accessible` — an unrecognised OSM
+    value is UNKNOWN, not a pass. New values appear constantly.
+  - `test_a_verdict_cannot_be_used_as_a_boolean` — the type-level guard itself.
+- Every constraint has a test per value, generated from the constant sets, plus a test asserting
+  each set matches the specification exactly — so silently dropping `kissing_gate` fails the suite.
+- `test_elevation_noise_does_not_invent_a_gradient` — ±0.3 m of sensor noise on 5 m vertices reads
+  as a 12% gradient without smoothing. It now reads as flat, which it is.
+- `test_a_downhill_gradient_is_rejected_too` — descending a 14% slope in a wheelchair is not safer
+  than climbing it.
+
+**Live API calls used:** 0.
+
+**Decisions**
+
+- **`road_class` can reject but can never pass.** Only `surface` and `smoothness` can say a stretch
+  is passable, so `assess_road_class` returns `FAIL` for steps and `UNKNOWN` for everything else —
+  including `FOOTWAY`. Coverage is therefore driven by surface and smoothness alone, which is why a
+  route tagged only with road classes reports 0% coverage rather than a misleadingly high one.
+- **Hard constraints block only the `accessible` preset.** The same findings appear on the other
+  two routes as information: someone walking may well take a route with three steps in it and
+  should still be told they are there. Blocking every route on any finding would make the app
+  useless in most cities without making anyone safer.
+- Incline is measured on an elevation profile resampled to a fixed 20 m grid. Routers emit vertices
+  at irregular spacing, and 0.3 m of sensor noise across a 2 m segment reads as a 15% gradient that
+  is not there.
+- A synthetic route reports `confidence: 0.0` and the synthetic warning, never a coverage figure.
+  A coverage number computed over invented tags is not a coverage number.
+- The incline sentence uses one decimal place. At zero it printed "A gradient of 8%, steeper than
+  the 8% limit", which is self-contradictory and undermines the one thing the message must do.
+
+**Deviations:** none.

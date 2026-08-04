@@ -294,7 +294,9 @@ def test_scoring_method_becomes_clip_once_segments_are_cached(tmp_cache_db) -> N
     route = _scored_route("nature", "Nature", _raw_route(points, synthetic=False))
 
     assert route.scoring_method == "clip"
-    assert "street-level imagery" in route.confidence_note
+    # confidence_note is the accessibility coverage sentence, not a scoring one:
+    # the scoring path is stated separately by scoring_method.
+    assert "Accessibility data covers" in route.confidence_note
 
 
 def test_scoring_method_is_geometry_only_without_cached_segments(tmp_cache_db) -> None:

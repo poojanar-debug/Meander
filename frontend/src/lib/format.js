@@ -49,7 +49,18 @@ export function fmtPct(fraction) {
  * accessibility answer that reads like a high-coverage one is the exact failure
  * this project exists to avoid.
  */
-export function confidenceSentence(confidence, scoringMethod) {
+export function confidenceSentence(confidence, scoringMethod, serverNote) {
+  const severity =
+    scoringMethod === 'placeholder' || confidence < 0.3
+      ? 'warning'
+      : confidence < 0.6
+        ? 'caution'
+        : 'ok'
+
+  // The backend writes this sentence, so the wording cannot drift between the
+  // two halves of the app. The client-side version below is the fallback.
+  if (serverNote) return { text: serverNote, severity }
+
   if (scoringMethod === 'placeholder') {
     return {
       text: 'Accessibility data has not been evaluated for this route. Nothing here is a measurement.',
