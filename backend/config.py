@@ -196,10 +196,33 @@ def path_details() -> list[str]:
     return list(SELF_HOSTED_PATH_DETAILS if graphhopper_is_self_hosted() else DEFAULT_PATH_DETAILS)
 SECRET_HEADERS = frozenset({"authorization", "x-api-key", "anthropic-api-key"})
 
+def _env_float(name: str, default: float) -> float:
+    raw = os.environ.get(name)
+    if raw is None or not raw.strip():
+        return default
+    try:
+        return float(raw)
+    except ValueError:
+        return default
+
+
 # Every request goes through these. Kept low so a wedged upstream degrades the
 # response instead of holding a request open.
-HTTP_TIMEOUT_S = 12.0
-HTTP_CONNECT_TIMEOUT_S = 5.0
+#
+# 12 s was too aggressive to be a default and had to become configurable:
+# Overpass measured **13.6 s** for a trivial bench query on this project, so
+# rest stops were already timing out into `null` at random. `null` is honest —
+# it means "we could not look", distinct from `[]` — but the resulting httpx
+# error surfaces as "Could not reach the routing service", which sends an
+# operator hunting a network fault that does not exist.
+HTTP_TIMEOUT_S = _env_float("MEANDER_HTTP_TIMEOUT_S", 20.0)
+HTTP_CONNECT_TIMEOUT_S = _env_float("MEANDER_HTTP_CONNECT_TIMEOUT_S", 5.0)
+
+# Whole-request ceiling. Past this, /api/routes returns what it already has
+# rather than holding the connection open — every subsystem below it is
+# best-effort and degrades to null, so a partial answer is a real answer.
+# Deliberately under a typical 60 s proxy idle timeout.
+REQUEST_DEADLINE_S = _env_float("MEANDER_REQUEST_DEADLINE_S", 45.0)
 
 
 @dataclass(frozen=True)

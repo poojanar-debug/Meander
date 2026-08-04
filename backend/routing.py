@@ -14,7 +14,8 @@ Three things in here have cost people whole days:
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+import asyncio
+from collections.abc import AsyncIterator, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -628,11 +629,48 @@ async def route_nature(
     acceptable: list[tuple[float, RawRoute]] = []
     fallback: tuple[float, RawRoute] | None = None
 
-    for influence, scale in candidates:
-        body = build_request_body(
-            origin, destination, minutes, mode, "nature", influence, scale
+    async def _candidate(influence: int, scale: float) -> RawRoute:
+        body = build_request_body(origin, destination, minutes, mode, "nature", influence, scale)
+        return await _post_route(body, mode, "nature")
+
+    if unmetered:
+        # Independent requests against a server that charges nothing, so there
+        # is no reason to wait for one before starting the next. The metered
+        # path below must stay sequential: its whole point is to stop at the
+        # first acceptable candidate rather than pay for all of them.
+        #
+        # gather with return_exceptions so one bad candidate cannot lose the
+        # others — a single unroutable variant is not a failed request.
+        settled = await asyncio.gather(
+            *(_candidate(i, s) for i, s in candidates), return_exceptions=True
         )
-        candidate = await _post_route(body, mode, "nature")
+        results: list[tuple[tuple[int, float], RawRoute]] = []
+        for spec, outcome in zip(candidates, settled, strict=True):
+            if isinstance(outcome, RawRoute):
+                results.append((spec, outcome))
+            else:
+                log.info(
+                    "nature_candidate_failed",
+                    extra={"distance_influence": spec[0], "loop_scale": spec[1],
+                           "error": type(outcome).__name__},
+                )
+        if not results:
+            # Every variant failed, so re-raise a representative failure rather
+            # than pretend the preset produced nothing for a benign reason.
+            first = next(o for o in settled if isinstance(o, BaseException))
+            raise first
+    else:
+        results = []
+
+    async def _iter_candidates() -> AsyncIterator[tuple[tuple[int, float], RawRoute]]:
+        if unmetered:
+            for spec, route in results:
+                yield spec, route
+        else:
+            for spec in candidates:
+                yield spec, await _candidate(*spec)
+
+    async for (influence, scale), candidate in _iter_candidates():
         green = greenness(candidate)
         within = cap is None or candidate.duration_min <= cap
         greener = floor is None or green > floor

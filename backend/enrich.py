@@ -13,6 +13,7 @@ failure mode for something that cannot fail.
 
 from __future__ import annotations
 
+import asyncio
 import math
 from collections.abc import Sequence
 from dataclasses import dataclass
@@ -548,9 +549,20 @@ async def enrich_context(
     midpoint = longest[len(longest) // 2]
     when = depart_at or datetime.now(UTC)
 
-    nodes = await _degrade("rest_stops", fetch_rest_stop_nodes(_sampled_for_overpass(all_points)))
-    air = await _degrade("air_quality", fetch_air_quality(midpoint, when))
-    cloud = await _degrade("cloud_cover", fetch_cloud_cover(midpoint, when))
+    # Three independent upstreams, three different hosts. Awaited in sequence
+    # this was the entire latency budget of a request: measured on this project,
+    # Overpass alone took 13.6 s for a trivial bench query while the two
+    # Open-Meteo calls took 0.58 s and 0.84 s, and a self-hosted GraphHopper
+    # answered a whole route in 0.024 s. Gathering turns worst-case ~= sum into
+    # worst-case ~= Overpass.
+    #
+    # _degrade() already swallows every failure into None, so gather cannot
+    # raise here and one slow or broken service cannot take the other two down.
+    nodes, air, cloud = await asyncio.gather(
+        _degrade("rest_stops", fetch_rest_stop_nodes(_sampled_for_overpass(all_points))),
+        _degrade("air_quality", fetch_air_quality(midpoint, when)),
+        _degrade("cloud_cover", fetch_cloud_cover(midpoint, when)),
+    )
 
     sun = solar_position(when, midpoint)
     # "How much shade will you get relative to how much you need." With no cloud

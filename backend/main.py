@@ -11,18 +11,27 @@ import asyncio
 import hashlib
 import importlib.util
 import json
+import time
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from dataclasses import dataclass
 from typing import Any
 
 from fastapi import FastAPI, Query, Request, Response
+from fastapi.concurrency import run_in_threadpool
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
 
 from . import __version__
 from .accessibility import VERY_LOW_CONFIDENCE_THRESHOLD, assess_route
 from .cache import get_cache
-from .config import STRICT_STARTUP, path_details, self_hosted_resolution, settings
+from .config import (
+    REQUEST_DEADLINE_S,
+    STRICT_STARTUP,
+    path_details,
+    self_hosted_resolution,
+    settings,
+)
 from .enrich import (
     AirQuality,
     EnrichContext,
@@ -202,21 +211,21 @@ def route_cache_key(req: RouteRequest) -> str:
     return hashlib.sha256(material.encode()).hexdigest()[:24]
 
 
-def _scored_route(
-    route_id: str,
-    label: str,
-    raw: RawRoute,
-    rest_stops: list[EnrichRestStop] | None = None,
-    air: AirQuality | None = None,
-    shade: float | None = None,
-) -> Route:
-    """Turn a routed path into a wire Route, scored as well as it honestly can be.
+@dataclass
+class _Assessment:
+    """The expensive, enrichment-independent half of scoring a route.
 
-    A route built from a hand-authored fixture keeps `scoring_method:
-    "placeholder"` even though the scoring maths ran: the maths is real but the
-    geometry it ran on is not, and a number derived from invented terrain is not
-    a measurement of anywhere.
+    Split out because a route is now emitted twice — once as soon as it is
+    routed, once when enrichment lands — and assess_route() plus
+    score_geometry() must not run twice for that.
     """
+
+    scores: Any
+    access: Any
+    clip_score: float | None
+
+
+def _assess(raw: RawRoute) -> _Assessment:
     # Cache read only — this never imports torch, and returns nothing for any
     # region batch_score.py has not pre-warmed.
     clip = _guard("clip_lookup", clip_term_for_route, raw.points)
@@ -230,6 +239,29 @@ def _scored_route(
         clip_score=clip_score,
     )
     access = _guard("accessibility", assess_route, raw.points, raw.elevations or None, raw.details)
+    return _Assessment(scores=scores, access=access, clip_score=clip_score)
+
+
+def _scored_route(
+    route_id: str,
+    label: str,
+    raw: RawRoute,
+    rest_stops: list[EnrichRestStop] | None = None,
+    air: AirQuality | None = None,
+    shade: float | None = None,
+    assessment: _Assessment | None = None,
+    enrichment_pending: bool = False,
+) -> Route:
+    """Turn a routed path into a wire Route, scored as well as it honestly can be.
+
+    A route built from a hand-authored fixture keeps `scoring_method:
+    "placeholder"` even though the scoring maths ran: the maths is real but the
+    geometry it ran on is not, and a number derived from invented terrain is not
+    a measurement of anywhere.
+    """
+    if assessment is None:
+        assessment = _assess(raw)
+    scores, access, clip_score = assessment.scores, assessment.access, assessment.clip_score
     synthetic = raw.synthetic_upstream
 
     if synthetic or scores is None:
@@ -279,6 +311,7 @@ def _scored_route(
             SYNTHETIC_NOTE if synthetic else (access.sentence() if access else UNASSESSED_NOTE)
         ),
         status_note=_status_note(route_id, blocked, access, raw),
+        enrichment_pending=enrichment_pending,
     )
 
 
@@ -423,48 +456,98 @@ async def route_events(req: RouteRequest) -> AsyncIterator[dict[str, Any]]:
             # says on the card that the comparison could not be made.
             log.info("nature_baseline_unavailable", extra={"kind": exc.kind})
 
-    for index, objective in enumerate(ordered):
-        label = ROUTE_LABELS.get(objective, objective.title())
-        yield {
-            "type": "progress",
-            "pct": 10 + int(45 * index / max(1, len(ordered))),
-            "text": f"Routing the {label.lower()} way",
-            "segments_scored": 0,
-        }
-        preset_fn = PRESETS.get(objective)
-        if preset_fn is None:
-            # Objectives beyond the implemented three (quiet/shade/air) are not
-            # silently dropped — the UI is told they are not available yet.
+    async def _run(objective: str) -> tuple[str, RawRoute | None, RoutingError | None]:
+        """Route one objective. Never raises; the caller decides what a failure means."""
+        preset_fn = PRESETS[objective]
+        try:
+            if objective == "nature":
+                return objective, await preset_fn(
+                    origin, destination, req.minutes, mode, fastest_route
+                ), None
+            return objective, await preset_fn(origin, destination, req.minutes, mode), None
+        except RoutingError as exc:
+            return objective, None, exc
+
+    def _record_failure(objective: str, label: str, exc: RoutingError) -> None:
+        if isinstance(exc, NoRouteFound):
+            log.info("preset_unroutable", extra={"objective": objective, "kind": exc.kind})
+            metrics.incr("routes_blocked_total")
+        else:
+            log.warning("preset_failed", extra={"objective": objective, "kind": exc.kind})
+            metrics.incr("upstream_failures_total")
+        failures.append(exc)
+        routes.append(_blocked_route(objective, label, mode, exc.human_message))
+
+    # Objectives beyond the implemented three (quiet/shade/air) are not silently
+    # dropped — the UI is told they are not available yet.
+    for objective in ordered:
+        if objective not in PRESETS:
+            label = ROUTE_LABELS.get(objective, objective.title())
             routes.append(
                 _blocked_route(objective, label, mode,
                                f"The {label.lower()} objective is not implemented yet.")
             )
-            continue
 
-        try:
-            if objective == "nature":
-                raw = await preset_fn(origin, destination, req.minutes, mode, fastest_route)
-            else:
-                raw = await preset_fn(origin, destination, req.minutes, mode)
-        except NoRouteFound as exc:
-            log.info("preset_unroutable", extra={"objective": objective, "kind": exc.kind})
-            metrics.incr("routes_blocked_total")
-            routes.append(_blocked_route(objective, label, mode, exc.human_message))
-            failures.append(exc)
-            continue
-        except RoutingError as exc:
-            log.warning("preset_failed", extra={"objective": objective, "kind": exc.kind})
-            metrics.incr("upstream_failures_total")
-            failures.append(exc)
-            if objective == "fastest":
+    # fastest is routed alone and first. This ordering is load-bearing, not
+    # stylistic: route_nature takes it and derives both the NATURE_DURATION_CAP
+    # and the greenness floor from it. A flat gather over all three would pass
+    # fastest=None and silently disable both — see test_nature_baseline.py.
+    if "fastest" in objectives:
+        yield {"type": "progress", "pct": 15, "text": "Routing the fastest way",
+               "segments_scored": 0}
+        _, raw, exc = await _run("fastest")
+        if exc is not None:
+            if not isinstance(exc, NoRouteFound):
+                metrics.incr("upstream_failures_total")
                 # Without the baseline there is nothing to show at all.
-                raise
-            routes.append(_blocked_route(objective, label, mode, exc.human_message))
-            continue
-
-        if objective == "fastest":
+                raise exc
+            _record_failure("fastest", ROUTE_LABELS.get("fastest", "Fastest"), exc)
+        else:
             fastest_route = raw
-        routed.append((objective, label, raw))
+            routed.append(("fastest", ROUTE_LABELS.get("fastest", "Fastest"), raw))
+
+    # nature and accessible are independent of each other, so they go together.
+    rest = [o for o in ordered if o in PRESETS and o != "fastest"]
+    if rest:
+        yield {"type": "progress", "pct": 35, "text": "Routing the other ways",
+               "segments_scored": 0}
+        for objective, raw, exc in await asyncio.gather(*(_run(o) for o in rest)):
+            label = ROUTE_LABELS.get(objective, objective.title())
+            if exc is not None:
+                _record_failure(objective, label, exc)
+            else:
+                routed.append((objective, label, raw))
+
+    # Preserve the caller's order rather than completion order.
+    routed.sort(key=lambda item: ordered.index(item[0]))
+
+    if not routed and not any(r.status == "ok" for r in routes):
+        raise failures[0] if failures else NoRouteFound("No route could be found from there.")
+
+    # --- first pass: emit every route the moment it exists -------------------
+    #
+    # Enrichment is the entire latency budget of a request — Overpass measured
+    # 13.6 s against 0.024 s for a whole self-hosted route — and it is shared
+    # across all three routes, so waiting for it meant nothing at all reached
+    # the browser for up to fourteen seconds. The map can draw these now.
+    #
+    # enrichment_pending says plainly that air, shade and rest stops are not
+    # yet measured, because `rest_stops` cannot be null and an empty list would
+    # otherwise read as "we looked and found none".
+    assessments: dict[str, _Assessment] = {}
+    for objective, label, raw in routed:
+        assessments[objective] = await run_in_threadpool(_assess, raw)
+        route = _scored_route(
+            objective, label, raw, None, None, None,
+            assessment=assessments[objective], enrichment_pending=True,
+        )
+        if route.status == "blocked":
+            metrics.incr("routes_blocked_total")
+        yield {"type": "route", "route": route.model_dump()}
+
+    for route in routes:
+        if route.status == "blocked" and not route.geometry:
+            yield {"type": "route", "route": route.model_dump()}
 
     yield {
         "type": "progress",
@@ -473,9 +556,12 @@ async def route_events(req: RouteRequest) -> AsyncIterator[dict[str, Any]]:
         "segments_scored": 0,
     }
 
+    # --- second pass: the same routes, now enriched --------------------------
+    #
     # Enrichment runs once for the whole request, over every route's geometry.
-    # It is entirely best-effort: every field below may be None, and the
-    # response says `null` rather than inventing a number.
+    # It is entirely best-effort: every field may be None, and the response says
+    # `null` rather than inventing a number. The client merges route events by
+    # id, which is the same mechanism narration already uses.
     context = EnrichContext()
     if routed:
         context = await enrich_context([r.points for _, _, r in routed], req.depart_at)
@@ -483,21 +569,16 @@ async def route_events(req: RouteRequest) -> AsyncIterator[dict[str, Any]]:
     cache = get_cache()
     for objective, label, raw in routed:
         stops = (
-            rest_stops_on_route(raw.points, context.rest_stop_nodes)
+            await run_in_threadpool(rest_stops_on_route, raw.points, context.rest_stop_nodes)
             if context.rest_stop_nodes is not None
             else None
         )
-        route = _scored_route(objective, label, raw, stops, context.air, context.shade_score)
-        if route.status == "blocked":
-            metrics.incr("routes_blocked_total")
+        route = _scored_route(
+            objective, label, raw, stops, context.air, context.shade_score,
+            assessment=assessments.get(objective),
+        )
         routes.append(route)
-        # Emitted the moment it exists, so the map draws it while the rest are
-        # still being computed.
         yield {"type": "route", "route": route.model_dump()}
-
-    for route in routes:
-        if route.status == "blocked" and not route.geometry:
-            yield {"type": "route", "route": route.model_dump()}
 
     if not any(r.status == "ok" for r in routes):
         raise failures[0] if failures else NoRouteFound("No route could be found from there.")
@@ -534,6 +615,76 @@ async def route_events(req: RouteRequest) -> AsyncIterator[dict[str, Any]]:
     }
 
 
+DEADLINE_NOTE = (
+    "This took longer than expected, so what had been worked out is shown here. "
+    "Air quality, shade and rest stops may be missing. Try again for the full picture."
+)
+
+
+async def route_events_with_deadline(
+    req: RouteRequest, deadline_s: float | None = None
+) -> AsyncIterator[dict[str, Any]]:
+    """route_events, but it returns what it has rather than hanging.
+
+    Nothing underneath this had an overall ceiling. Every upstream has its own
+    timeout, but they compose: three enrichment fetches plus a routing pass each
+    allowed HTTP_TIMEOUT_S is a worst case far past any proxy's idle timeout,
+    and the user gets a dead connection instead of a partial answer.
+
+    Everything below the routing itself is best-effort and already degrades to
+    null, so a truncated response is a real response — it just has less on it,
+    and says so.
+    """
+    deadline_s = REQUEST_DEADLINE_S if deadline_s is None else deadline_s
+    partial: dict[str, dict[str, Any]] = {}
+    agen = route_events(req).__aiter__()
+    expires_at = time.monotonic() + deadline_s
+
+    try:
+        while True:
+            remaining = expires_at - time.monotonic()
+            if remaining <= 0:
+                raise TimeoutError
+            try:
+                # wait_for rather than wrapping the loop in asyncio.timeout: the
+                # clock must not run while this generator is suspended at a
+                # yield waiting on a slow client.
+                event = await asyncio.wait_for(agen.__anext__(), timeout=remaining)
+            except StopAsyncIteration:
+                return
+            if event["type"] == "route":
+                partial[event["route"]["id"]] = event["route"]
+            yield event
+    except TimeoutError:
+        usable = [r for r in partial.values() if r.get("geometry")]
+        log.warning(
+            "request_deadline_exceeded",
+            extra={"deadline_s": deadline_s, "routes_ready": len(usable)},
+        )
+        metrics.incr("request_deadline_exceeded_total")
+        if not usable:
+            yield {
+                "type": "error",
+                "kind": "timeout",
+                "message": (
+                    "This took too long and no route was ready in time. "
+                    "Please try again."
+                ),
+            }
+            return
+        yield {
+            "type": "done",
+            "payload": RoutesResponse(
+                routes=[Route(**r) for r in usable],
+                best_departure=None,
+                reason=DEADLINE_NOTE,
+                cache=CacheInfo(segments_scored=0, hit_rate=_hit_rate()),
+            ).model_dump(),
+        }
+    finally:
+        await agen.aclose()
+
+
 SSE_HEADERS = {
     "Cache-Control": "no-cache, no-transform",
     "Connection": "keep-alive",
@@ -554,7 +705,7 @@ def _wants_stream(request: Request) -> bool:
 async def _stream(req: RouteRequest, cache_key: str) -> AsyncIterator[str]:
     """Forward each event as it is produced, and cache the final payload."""
     try:
-        async for event in route_events(req):
+        async for event in route_events_with_deadline(req):
             if event["type"] == "done":
                 metrics.incr("daily_routes_served")
                 get_cache().put_route(cache_key, event["payload"], settings.route_cache_ttl_s)
@@ -613,7 +764,7 @@ async def post_routes(req: RouteRequest, request: Request, response: Response) -
 
     try:
         payload: dict[str, Any] | None = None
-        async for event in route_events(req):
+        async for event in route_events_with_deadline(req):
             if event["type"] == "done":
                 payload = event["payload"]
     except RoutingError as exc:

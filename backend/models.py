@@ -129,6 +129,17 @@ class Route(BaseModel):
     # contract, and the UI has to be able to say it.
     status_note: str | None = None
 
+    # True on the first of two passes: the geometry, duration, accessibility
+    # assessment and coverage are final, but air, shade and rest stops have not
+    # been fetched yet and a second `route` event with the same id will follow.
+    #
+    # This exists because `rest_stops` cannot be null. An empty list means "we
+    # looked and found none", which would be a false claim about a route we have
+    # not looked at yet — and the whole project turns on absence of data never
+    # being reported as a finding. The UI must not render rest stops or the air
+    # and shade scores as measured while this is true.
+    enrichment_pending: bool = False
+
 
 class CacheInfo(BaseModel):
     segments_scored: int
