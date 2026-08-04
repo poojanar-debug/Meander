@@ -147,6 +147,38 @@ and sun position (computed locally).
 > details, and therefore the whole accessibility engine, are unaffected. See
 > [BLOCKED.md](BLOCKED.md) #0 for the options.
 
+### Self-hosting GraphHopper, so all three presets work
+
+The open-source GraphHopper server has no flexible-mode restriction, so running
+one locally is what makes `nature` and `accessible` real routes rather than
+blocked ones. It also exposes the `smoothness` tag, which the hosted API does
+not — that is one of the five hard accessibility constraints, and self-hosting
+is the only way it can fire from routing data.
+
+```bash
+scripts/graphhopper.sh setup
+```
+
+Downloads the OSM extracts, merges them into one graph and builds it. Needs a
+JDK 21+ and `osmium-tool` (`brew install openjdk@21 osmium-tool`); the script
+checks and tells you if either is missing. The build is the slow part — minutes
+to tens of minutes depending on how much of the world you asked for.
+
+```bash
+scripts/graphhopper.sh serve
+```
+
+Then point Meander at it, in `.env`:
+
+```
+MEANDER_GRAPHHOPPER_URL=http://localhost:8989/route
+```
+
+Only places **inside the imported extracts** can be routed. The regions are the
+`REGIONS` list at the top of `scripts/graphhopper.sh`; add a Geofabrik path and
+re-run `setup` to widen coverage. `scripts/graphhopper.sh regions` prints what
+is currently built in.
+
 Two things stay optional:
 
 | | without it |
