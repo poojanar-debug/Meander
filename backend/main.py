@@ -17,7 +17,7 @@ from typing import Any
 
 from fastapi import FastAPI, Query, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 
 from . import __version__
 from .accessibility import assess_route
@@ -34,6 +34,7 @@ from .geometry import score_geometry
 from .logging_setup import configure_logging, get_logger
 from .metrics import metrics
 from .models import (
+    BarrierReport,
     Blocker,
     CacheInfo,
     GeocodeResponse,
@@ -345,15 +346,20 @@ async def _attach_narration(routes: list[Route]) -> None:
     await asyncio.gather(*(one(r) for r in routes), return_exceptions=True)
 
 
-async def _build_routes(
-    req: RouteRequest,
-) -> tuple[list[Route], str | None, EnrichContext]:
-    """Route every requested objective, degrading rather than failing.
+async def route_events(req: RouteRequest) -> AsyncIterator[dict[str, Any]]:
+    """Produce the whole response as a sequence of events.
 
-    A preset that cannot be routed becomes a ``blocked`` result. Only an
+    Both transports consume this: the SSE path forwards each event as it is
+    produced, and the JSON path drains it and returns the final payload. One
+    implementation, so a route cannot appear over one transport and not the
+    other.
+
+    A preset that cannot be routed becomes a ``blocked`` event. Only an
     entirely empty set is an error.
     """
     from .models import ROUTE_LABELS
+
+    yield {"type": "progress", "pct": 5, "text": "Looking for routable roads", "segments_scored": 0}
 
     mode = effective_mode(req.mode, req.minutes)
     origin = req.origin.to_latlon()
@@ -368,8 +374,14 @@ async def _build_routes(
     # fastest first when present: nature's duration cap is relative to it.
     ordered = sorted(objectives, key=lambda o: 0 if o == "fastest" else 1)
 
-    for objective in ordered:
+    for index, objective in enumerate(ordered):
         label = ROUTE_LABELS.get(objective, objective.title())
+        yield {
+            "type": "progress",
+            "pct": 10 + int(45 * index / max(1, len(ordered))),
+            "text": f"Routing the {label.lower()} way",
+            "segments_scored": 0,
+        }
         preset_fn = PRESETS.get(objective)
         if preset_fn is None:
             # Objectives beyond the implemented three (quiet/shade/air) are not
@@ -405,6 +417,13 @@ async def _build_routes(
             fastest_duration = raw.duration_min
         routed.append((objective, label, raw))
 
+    yield {
+        "type": "progress",
+        "pct": 60,
+        "text": "Checking surfaces, air and rest stops",
+        "segments_scored": 0,
+    }
+
     # Enrichment runs once for the whole request, over every route's geometry.
     # It is entirely best-effort: every field below may be None, and the
     # response says `null` rather than inventing a number.
@@ -412,6 +431,7 @@ async def _build_routes(
     if routed:
         context = await enrich_context([r.points for _, _, r in routed], req.depart_at)
 
+    cache = get_cache()
     for objective, label, raw in routed:
         stops = (
             rest_stops_on_route(raw.points, context.rest_stop_nodes)
@@ -422,11 +442,24 @@ async def _build_routes(
         if route.status == "blocked":
             metrics.incr("routes_blocked_total")
         routes.append(route)
+        # Emitted the moment it exists, so the map draws it while the rest are
+        # still being computed.
+        yield {"type": "route", "route": route.model_dump()}
+
+    for route in routes:
+        if route.status == "blocked" and not route.geometry:
+            yield {"type": "route", "route": route.model_dump()}
 
     if not any(r.status == "ok" for r in routes):
         raise failures[0] if failures else NoRouteFound("No route could be found from there.")
 
+    # Narration arrives after the routes, as a second pass over the same ids.
+    # The client merges by id rather than appending.
+    yield {"type": "progress", "pct": 90, "text": "Writing the descriptions", "segments_scored": 0}
     await _attach_narration(routes)
+    for route in routes:
+        if route.narration:
+            yield {"type": "route", "route": route.model_dump()}
 
     # Preserve the caller's requested order in the response.
     order = {o: i for i, o in enumerate(objectives)}
@@ -439,7 +472,49 @@ async def _build_routes(
             f"Every route found is longer than your {req.minutes}-minute budget. "
             "The shortest option is shown first."
         )
-    return routes, reason, context
+    yield {
+        "type": "done",
+        "payload": RoutesResponse(
+            routes=routes,
+            best_departure=(
+                context.departure.when.isoformat() if context.departure else None
+            ),
+            reason=reason or (context.departure.reason if context.departure else None),
+            cache=CacheInfo(segments_scored=cache.segment_count(), hit_rate=_hit_rate()),
+        ).model_dump(),
+    }
+
+
+SSE_HEADERS = {
+    "Cache-Control": "no-cache, no-transform",
+    "Connection": "keep-alive",
+    # Nginx and several proxies buffer streaming responses by default, which
+    # turns SSE back into one slow document. This asks them not to.
+    "X-Accel-Buffering": "no",
+}
+
+
+def _sse(event: dict[str, Any]) -> str:
+    return f"data: {json.dumps(event, separators=(',', ':'))}\n\n"
+
+
+def _wants_stream(request: Request) -> bool:
+    return "text/event-stream" in (request.headers.get("accept") or "")
+
+
+async def _stream(req: RouteRequest, cache_key: str) -> AsyncIterator[str]:
+    """Forward each event as it is produced, and cache the final payload."""
+    try:
+        async for event in route_events(req):
+            if event["type"] == "done":
+                metrics.incr("daily_routes_served")
+                get_cache().put_route(cache_key, event["payload"], settings.route_cache_ttl_s)
+            yield _sse(event)
+    except RoutingError as exc:
+        metrics.incr("upstream_failures_total")
+        # The status line has already been sent, so the error has to travel as
+        # an event. The client turns it back into its normal error banner.
+        yield _sse({"type": "error", "kind": exc.kind, "message": exc.human_message})
 
 
 @app.post("/api/routes")
@@ -463,27 +538,43 @@ async def post_routes(req: RouteRequest, request: Request, response: Response) -
     if cached is not None:
         metrics.incr("cache_hits_total")
         limiter.refund(_client_ip(request))
+        if _wants_stream(request):
+            # A cache hit still speaks SSE, so the client has one code path.
+            async def replay() -> AsyncIterator[str]:
+                for route in cached["routes"]:
+                    yield _sse({"type": "route", "route": route})
+                yield _sse({"type": "done", "payload": cached})
+
+            return StreamingResponse(
+                replay(),
+                media_type="text/event-stream",
+                headers={**SSE_HEADERS, "X-Meander-Cache": "hit"},
+            )
         response.headers["X-Meander-Cache"] = "hit"
         return cached
 
     metrics.incr("cache_misses_total")
 
+    if _wants_stream(request):
+        return StreamingResponse(
+            _stream(req, key),
+            media_type="text/event-stream",
+            headers={**SSE_HEADERS, "X-Meander-Cache": "miss"},
+        )
+
     try:
-        routes, reason, context = await _build_routes(req)
+        payload: dict[str, Any] | None = None
+        async for event in route_events(req):
+            if event["type"] == "done":
+                payload = event["payload"]
     except RoutingError as exc:
         metrics.incr("upstream_failures_total")
         return _error(exc.kind, exc.human_message, exc.status_code)
 
-    metrics.incr("daily_routes_served")
-    payload = RoutesResponse(
-        routes=routes,
-        best_departure=(
-            context.departure.when.isoformat() if context.departure else None
-        ),
-        reason=reason or (context.departure.reason if context.departure else None),
-        cache=CacheInfo(segments_scored=cache.segment_count(), hit_rate=_hit_rate()),
-    ).model_dump()
+    if payload is None:
+        return _error("upstream", "No route could be produced for that request.", 502)
 
+    metrics.incr("daily_routes_served")
     cache.put_route(key, payload, settings.route_cache_ttl_s)
     response.headers["X-Meander-Cache"] = "miss"
     return payload
@@ -511,6 +602,47 @@ async def geocode(q: str = Query(min_length=2, max_length=120)) -> Any:
     except GeocodeError as exc:
         return _error("geocode", exc.human_message, exc.status_code)
     return GeocodeResponse(results=results)
+
+
+# ---------------------------------------------------------------------------
+# barrier reporting — OSM DEVELOPMENT SERVER ONLY
+# ---------------------------------------------------------------------------
+
+
+@app.post("/api/report-barrier")
+async def report_barrier(report: BarrierReport, request: Request) -> Any:
+    """File an obstruction as an OpenStreetMap note.
+
+    **This writes to api06.dev.openstreetmap.org, the OSM development server,
+    and never to production OSM.** The target is asserted at call time as well
+    as configured, because a copy-paste that pointed this at production would
+    put junk into the map everyone else relies on.
+    """
+    decision = limiter.check(_client_ip(request))
+    if not decision.allowed:
+        metrics.incr("rate_limited_total")
+        return JSONResponse(
+            status_code=429,
+            content={"error": {"kind": decision.reason, "message": decision.message}},
+            headers={"Retry-After": str(max(1, decision.retry_after_s))},
+        )
+
+    from .osm_report import BarrierReportError, submit_barrier
+
+    try:
+        note_id = await submit_barrier(report)
+    except BarrierReportError as exc:
+        return _error("barrier_report", exc.human_message, exc.status_code)
+
+    return {
+        "status": "submitted",
+        "note_id": note_id,
+        "target": "api06.dev.openstreetmap.org",
+        "message": (
+            "Thank you. This was filed on the OpenStreetMap development server, "
+            "not the live map."
+        ),
+    }
 
 
 # ---------------------------------------------------------------------------
