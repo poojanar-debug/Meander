@@ -20,7 +20,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
 
 from . import __version__
-from .accessibility import assess_route
+from .accessibility import VERY_LOW_CONFIDENCE_THRESHOLD, assess_route
 from .cache import get_cache
 from .config import STRICT_STARTUP, settings
 from .enrich import (
@@ -270,10 +270,28 @@ def _scored_route(
         confidence_note=(
             SYNTHETIC_NOTE if synthetic else (access.sentence() if access else UNASSESSED_NOTE)
         ),
-        status_note=(
-            "Hard accessibility constraints reject this route." if blocked else None
-        ),
+        status_note=_status_note(route_id, blocked, access),
     )
+
+
+def _status_note(route_id: str, blocked: bool, access: Any) -> str | None:
+    """Why a route is blocked — or, for the accessible route, why it is not a claim.
+
+    A route with no recorded barriers is not a verified route: it is a route
+    with nothing recorded against it. On the accessible objective specifically,
+    that distinction is the whole point, so it is stated rather than left to the
+    reader to infer from a percentage.
+    """
+    if blocked:
+        return "Hard accessibility constraints reject this route."
+    if route_id != "accessible" or access is None:
+        return None
+    if access.coverage < VERY_LOW_CONFIDENCE_THRESHOLD:
+        return (
+            "No barriers were found, but almost nothing along this route has been "
+            "recorded in OpenStreetMap. That is an absence of data, not a step-free route."
+        )
+    return None
 
 
 def _guard(stage: str, fn: Any, *args: Any, **kwargs: Any) -> Any:

@@ -241,6 +241,25 @@ def _parse_path(path: dict[str, Any], mode: EffectiveMode, synthetic: bool, pres
     )
 
 
+# Coordinate-free labels for GraphHopper's error text, so a log line can say
+# what went wrong without repeating what the caller asked for.
+_UPSTREAM_CLASSIFICATIONS = (
+    ("cannot find point", "point_not_snappable"),
+    ("connection between locations not found", "no_connection"),
+    ("profile", "bad_profile"),
+    ("custom_model", "bad_custom_model"),
+    ("query param", "bad_parameter"),
+)
+
+
+def _classify_upstream_message(message: str) -> str:
+    lowered = message.lower()
+    for needle, label in _UPSTREAM_CLASSIFICATIONS:
+        if needle in lowered:
+            return label
+    return "unclassified"
+
+
 def _shape_upstream_error(response: httpx.Response) -> RoutingError:
     try:
         message = str((response.json() or {}).get("message", ""))
@@ -269,7 +288,14 @@ def _shape_upstream_error(response: httpx.Response) -> RoutingError:
         return NoRouteFound(
             "There is no route between those two points for this mode of travel."
         )
-    log.warning("graphhopper_error", extra={"status": status, "upstream_message": message[:200]})
+    # Deliberately NOT logging `message`: GraphHopper's error text routinely
+    # embeds the caller's coordinates ("Cannot find point 0: 51.50,-0.16"), and
+    # this project does not log coordinates. A classification is enough to
+    # debug with.
+    log.warning(
+        "graphhopper_error",
+        extra={"status": status, "classification": _classify_upstream_message(message)},
+    )
     return RoutingError(
         "upstream",
         "The routing service could not answer that request. Please try again.",

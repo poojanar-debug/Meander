@@ -419,3 +419,67 @@ def test_the_incline_message_is_never_self_contradictory() -> None:
     assert findings
     reported = float(findings[0].description.split("%")[0].split()[-1])
     assert reported > MAX_INCLINE_PCT
+
+
+# ---------------------------------------------------------------------------
+# the wire response, not just the engine
+# ---------------------------------------------------------------------------
+
+
+def test_an_unverified_accessible_route_says_it_is_unverified(tmp_cache_db) -> None:
+    """"No barriers found" on an untagged route is an absence of data, not a
+    step-free claim, and the response has to say so in words."""
+    from backend.main import _scored_route
+    from backend.routing import RawRoute
+
+    points = _line(1000)
+    raw = RawRoute(
+        points=points,
+        distance_m=1000.0,
+        duration_min=13.0,
+        mode="foot",
+        elevations=_flat(len(points)),
+        details={"road_class": [(0, 60, "FOOTWAY")]},  # nothing about the surface
+        synthetic_upstream=False,
+    )
+
+    route = _scored_route("accessible", "Accessible", raw)
+
+    assert route.status == "ok"
+    assert route.confidence == 0.0
+    assert route.status_note is not None
+    assert "absence of data" in route.status_note
+    assert "do not rely on it" in route.confidence_note
+
+
+def test_a_well_tagged_accessible_route_carries_no_such_warning(tmp_cache_db) -> None:
+    from backend.main import _scored_route
+    from backend.routing import RawRoute
+
+    points = _line(1000)
+    raw = RawRoute(
+        points=points,
+        distance_m=1000.0,
+        duration_min=13.0,
+        mode="foot",
+        elevations=_flat(len(points)),
+        details={"surface": [(0, 60, "ASPHALT")], "smoothness": [(0, 60, "good")]},
+        synthetic_upstream=False,
+    )
+
+    route = _scored_route("accessible", "Accessible", raw)
+
+    assert route.status == "ok"
+    assert route.confidence > 0.9
+    assert route.status_note is None
+
+
+def test_the_other_objectives_do_not_get_the_accessible_warning(tmp_cache_db) -> None:
+    from backend.main import _scored_route
+    from backend.routing import RawRoute
+
+    points = _line(1000)
+    raw = RawRoute(points=points, distance_m=1000.0, duration_min=13.0, mode="foot",
+                   elevations=_flat(len(points)), details={}, synthetic_upstream=False)
+
+    assert _scored_route("fastest", "Fastest", raw).status_note is None

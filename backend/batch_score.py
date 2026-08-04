@@ -109,7 +109,7 @@ async def run(slugs: list[str], minutes: int, variant: str, dry_run: bool) -> in
             # One point failing must not lose the points already scored: every
             # successful point is written to the cache as it goes.
             except ScoringUnavailable as exc:
-                log.info("point_skipped", extra={"reason": str(exc)[:120]})
+                log.info("point_skipped", extra={"reason": type(exc).__name__})
                 continue
             if score is None:
                 total_empty += 1

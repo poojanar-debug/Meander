@@ -14,7 +14,12 @@ from datetime import UTC, datetime
 from typing import Any
 
 BANNED_FIELDS = frozenset(
-    {"lat", "lon", "latitude", "longitude", "ip", "client_ip", "user_agent", "origin_coord"}
+    {
+        "lat", "lon", "latitude", "longitude", "ip", "client_ip", "user_agent",
+        "origin_coord", "destination", "origin", "coordinates", "point", "points",
+        # A segment key is a rounded coordinate pair, and a bbox is four of them.
+        "segment_key", "bbox", "upstream_message",
+    }
 )
 
 _RESERVED = frozenset(

@@ -219,6 +219,7 @@ class Cache:
         if not keys:
             return {}
         out: dict[str, dict[str, Any]] = {}
+        corrupt = 0
         for i in range(0, len(keys), 400):
             chunk = keys[i : i + 400]
             placeholders = ",".join("?" * len(chunk))
@@ -231,7 +232,10 @@ class Cache:
                 try:
                     out[row["segment_key"]] = json.loads(row["tags_json"])
                 except json.JSONDecodeError:
-                    log.warning("access_tags_corrupt", extra={"segment_key": row["segment_key"]})
+                    # The key is a rounded coordinate, so it is counted, not logged.
+                    corrupt += 1
+        if corrupt:
+            log.warning("access_tags_corrupt", extra={"rows": corrupt})
         return out
 
     def put_access_tags(self, lat: float, lon: float, tags: dict[str, Any]) -> str:
