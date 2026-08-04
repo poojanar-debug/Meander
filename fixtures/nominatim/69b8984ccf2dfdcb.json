@@ -1,0 +1,156 @@
+{
+  "_meander_provenance": "recorded",
+  "_meander_recorded_at": "2026-08-04T16:45:32.592436+00:00",
+  "_meander_note": "Written by backend/fixtures.py. Secrets are redacted and excluded from the request signature.",
+  "request": {
+    "method": "GET",
+    "url": "https://nominatim.openstreetmap.org/search",
+    "params": {
+      "q": "moir",
+      "format": "jsonv2",
+      "limit": 6,
+      "addressdetails": 0
+    },
+    "json": null,
+    "data": {},
+    "content": null,
+    "headers": {
+      "Accept": "application/json"
+    }
+  },
+  "response": {
+    "status": 200,
+    "headers": {
+      "content-type": "application/json; charset=utf-8",
+      "date": "Tue, 04 Aug 2026 16:45:32 GMT"
+    },
+    "json": [
+      {
+        "place_id": 24351527,
+        "licence": "Data \u00a9 OpenStreetMap contributors, ODbL 1.0. http://osm.org/copyright",
+        "osm_type": "node",
+        "osm_id": 4936314207,
+        "lat": "-44.7726941",
+        "lon": "167.9771767",
+        "category": "natural",
+        "type": "peak",
+        "place_rank": 18,
+        "importance": 0.3476412868877268,
+        "addresstype": "peak",
+        "name": "Mount Moir",
+        "display_name": "Mount Moir, Fiordland Community, Southland District, Southland, New Zealand / Aotearoa",
+        "boundingbox": [
+          "-44.7727441",
+          "-44.7726441",
+          "167.9771267",
+          "167.9772267"
+        ]
+      },
+      {
+        "place_id": 274875768,
+        "licence": "Data \u00a9 OpenStreetMap contributors, ODbL 1.0. http://osm.org/copyright",
+        "osm_type": "node",
+        "osm_id": 267762443,
+        "lat": "55.0660456",
+        "lon": "-6.5618833",
+        "category": "place",
+        "type": "village",
+        "place_rank": 19,
+        "importance": 0.3807705141182751,
+        "addresstype": "village",
+        "name": "Balnamore",
+        "display_name": "Balnamore, Causeway Coast and Glens District, County Antrim, Northern Ireland / Tuaisceart \u00c9ireann, BT53 7PT, United Kingdom",
+        "boundingbox": [
+          "55.0460456",
+          "55.0860456",
+          "-6.5818833",
+          "-6.5418833"
+        ]
+      },
+      {
+        "place_id": 377866358,
+        "licence": "Data \u00a9 OpenStreetMap contributors, ODbL 1.0. http://osm.org/copyright",
+        "osm_type": "way",
+        "osm_id": 327006275,
+        "lat": "21.8772720",
+        "lon": "-159.4601167",
+        "category": "leisure",
+        "type": "garden",
+        "place_rank": 25,
+        "importance": 0.16273786379520622,
+        "addresstype": "garden",
+        "name": "Moir Garden",
+        "display_name": "Moir Garden, Po\u02bbip\u016b, Kaua\u02bbi County, Hawaii, United States",
+        "boundingbox": [
+          "21.8767169",
+          "21.8777399",
+          "-159.4605094",
+          "-159.4596699"
+        ]
+      },
+      {
+        "place_id": 33922794,
+        "licence": "Data \u00a9 OpenStreetMap contributors, ODbL 1.0. http://osm.org/copyright",
+        "osm_type": "node",
+        "osm_id": 3020140762,
+        "lat": "-34.3230796",
+        "lon": "118.3460836",
+        "category": "natural",
+        "type": "peak",
+        "place_rank": 18,
+        "importance": 0.16004599755855647,
+        "addresstype": "peak",
+        "name": "Moir Hill",
+        "display_name": "Moir Hill, Western Australia, Australia",
+        "boundingbox": [
+          "-34.3231296",
+          "-34.3230296",
+          "118.3460336",
+          "118.3461336"
+        ]
+      },
+      {
+        "place_id": 26034282,
+        "licence": "Data \u00a9 OpenStreetMap contributors, ODbL 1.0. http://osm.org/copyright",
+        "osm_type": "node",
+        "osm_id": 1706661521,
+        "lat": "-36.4698000",
+        "lon": "174.5998800",
+        "category": "natural",
+        "type": "peak",
+        "place_rank": 18,
+        "importance": 0.16004500114442663,
+        "addresstype": "peak",
+        "name": "Moir Hill",
+        "display_name": "Moir Hill, Rodney, Auckland, 0951, New Zealand / Aotearoa",
+        "boundingbox": [
+          "-36.4698500",
+          "-36.4697500",
+          "174.5998300",
+          "174.5999300"
+        ]
+      },
+      {
+        "place_id": 285037198,
+        "licence": "Data \u00a9 OpenStreetMap contributors, ODbL 1.0. http://osm.org/copyright",
+        "osm_type": "relation",
+        "osm_id": 3340472,
+        "lat": "53.2947052",
+        "lon": "-9.6728038",
+        "category": "place",
+        "type": "island",
+        "place_rank": 17,
+        "importance": 0.17339701762417029,
+        "addresstype": "island",
+        "name": "Leitir M\u00f3ir",
+        "display_name": "Leitir M\u00f3ir, Conamara Municipal District, County Galway, Connacht, \u00c9ire / Ireland",
+        "boundingbox": [
+          "53.2794804",
+          "53.3098806",
+          "-9.7120129",
+          "-9.6293393"
+        ]
+      }
+    ]
+  }
+}

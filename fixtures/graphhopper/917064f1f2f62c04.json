@@ -1,6 +1,6 @@
 {
   "_meander_provenance": "synthetic",
-  "_meander_recorded_at": "2026-08-04T15:21:25.593539+00:00",
+  "_meander_recorded_at": "2026-08-04T16:46:09.670358+00:00",
   "_meander_note": "Written by backend/fixtures.py. Secrets are redacted and excluded from the request signature.",
   "request": {
     "method": "POST",

@@ -1,0 +1,51 @@
+{
+  "_meander_provenance": "recorded",
+  "_meander_recorded_at": "2026-08-04T16:26:55.675164+00:00",
+  "_meander_note": "Written by backend/fixtures.py. Secrets are redacted and excluded from the request signature.",
+  "request": {
+    "method": "GET",
+    "url": "https://nominatim.openstreetmap.org/search",
+    "params": {
+      "q": "Elizab",
+      "format": "jsonv2",
+      "limit": 6,
+      "addressdetails": 0
+    },
+    "json": null,
+    "data": {},
+    "content": null,
+    "headers": {
+      "Accept": "application/json"
+    }
+  },
+  "response": {
+    "status": 200,
+    "headers": {
+      "content-type": "application/json; charset=utf-8",
+      "date": "Tue, 04 Aug 2026 16:26:55 GMT"
+    },
+    "json": [
+      {
+        "place_id": 181834303,
+        "licence": "Data \u00a9 OpenStreetMap contributors, ODbL 1.0. http://osm.org/copyright",
+        "osm_type": "way",
+        "osm_id": 411016840,
+        "lat": "51.6160082",
+        "lon": "17.7931319",
+        "category": "landuse",
+        "type": "industrial",
+        "place_rank": 24,
+        "importance": 0.08006029831387805,
+        "addresstype": "industrial",
+        "name": "ELIZAB STAL",
+        "display_name": "ELIZAB STAL, Zacisze-Z\u0119bc\u00f3w, Ostr\u00f3w Wielkopolski, powiat ostrowski, wojew\u00f3dztwo wielkopolskie, 63-400, Polska",
+        "boundingbox": [
+          "51.6154015",
+          "51.6165825",
+          "17.7913543",
+          "17.7957835"
+        ]
+      }
+    ]
+  }
+}

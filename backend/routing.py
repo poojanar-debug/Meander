@@ -20,7 +20,13 @@ from typing import Any
 
 import httpx
 
-from .config import GRAPHHOPPER_URL, NOMINATIM_URL, path_details, settings
+from .config import (
+    GRAPHHOPPER_URL,
+    NOMINATIM_URL,
+    graphhopper_is_self_hosted,
+    path_details,
+    settings,
+)
 from .fixtures import BudgetExhausted, FixtureMissing, fetch, is_synthetic
 from .geometry import LatLon, closes_loop, path_length_m, to_lonlat_pairs
 from .logging_setup import get_logger
@@ -43,6 +49,29 @@ LOOP_SPEED_M_PER_MIN: dict[EffectiveMode, float] = {
 }
 
 PROFILE_FOR_MODE: dict[EffectiveMode, str] = {"foot": "foot", "bike": "bike", "car": "car"}
+
+# The values GraphHopper's own enums accept in a custom model, probed against a
+# running server. These are NOT the same as OSM tag values: `surface=earth` is
+# valid OSM but the router maps it to GROUND, and writing EARTH in a custom
+# model fails the whole request with "is neither a method, a field, nor a member
+# class of com.graphhopper.routing.ev.Surface". accessibility.py deliberately
+# keeps the wider OSM vocabulary, because it evaluates tags rather than
+# compiling them.
+GH_SURFACE_VALUES = frozenset({
+    "PAVED", "ASPHALT", "CONCRETE", "PAVING_STONES", "COMPACTED", "GRAVEL",
+    "FINE_GRAVEL", "GROUND", "DIRT", "GRASS", "SAND", "WOOD", "COBBLESTONE",
+    "UNPAVED", "MISSING", "OTHER",
+})
+GH_ROAD_CLASS_VALUES = frozenset({
+    "STEPS", "PATH", "FOOTWAY", "TRACK", "BRIDLEWAY", "CYCLEWAY", "PEDESTRIAN",
+    "LIVING_STREET", "MOTORWAY", "TRUNK", "PRIMARY", "SECONDARY", "TERTIARY",
+    "RESIDENTIAL", "SERVICE", "UNCLASSIFIED", "ROAD", "OTHER",
+})
+GH_ROAD_ENVIRONMENT_VALUES = frozenset({"ROAD", "FERRY", "BRIDGE", "TUNNEL", "FORD", "OTHER"})
+GH_SMOOTHNESS_VALUES = frozenset({
+    "EXCELLENT", "GOOD", "INTERMEDIATE", "BAD", "VERY_BAD", "HORRIBLE",
+    "VERY_HORRIBLE", "IMPASSABLE", "MISSING", "OTHER",
+})
 
 # Returned per-edge so accessibility.py can evaluate the route it was actually
 # given. Resolved at call time because it depends on which server we are talking
@@ -141,7 +170,7 @@ def nature_custom_model(distance_influence: int) -> dict[str, Any]:
 NATURE_DISTANCE_INFLUENCE_LADDER = (20, 45, 90)
 
 
-def accessible_custom_model() -> dict[str, Any]:
+def accessible_custom_model(with_smoothness: bool | None = None) -> dict[str, Any]:
     """Refuse ways that are *known* to be impassable.
 
     This models only the known-bad half of the accessibility rule. An untagged
@@ -150,6 +179,9 @@ def accessible_custom_model() -> dict[str, Any]:
     against the route's confidence, and never reported as accessible. The
     distinction is the whole point of the project — see CONTRIBUTING.md.
     """
+    if with_smoothness is None:
+        with_smoothness = "smoothness" in path_details()
+
     return {
         "priority": [
             {"if": "road_class == STEPS", "multiply_by": "0"},
@@ -157,7 +189,7 @@ def accessible_custom_model() -> dict[str, Any]:
             {
                 "if": "surface == GRAVEL || surface == GROUND || surface == DIRT "
                       "|| surface == SAND || surface == GRASS || surface == COBBLESTONE "
-                      "|| surface == UNPAVED || surface == EARTH || surface == WOOD",
+                      "|| surface == UNPAVED || surface == WOOD",
                 "multiply_by": "0",
             },
             {
@@ -165,6 +197,22 @@ def accessible_custom_model() -> dict[str, Any]:
                       "|| surface == PAVING_STONES || surface == COMPACTED",
                 "multiply_by": "1.0",
             },
+            # Only reachable on a self-hosted graph: the encoded value must be
+            # built into the graph, and the hosted API does not include it. This
+            # is the hard constraint the router could never enforce — until now
+            # bad smoothness could only be reported after the fact, never
+            # avoided. Referencing it against a graph without it fails the whole
+            # request, so it is conditional.
+            *(
+                [{
+                    "if": "smoothness == BAD || smoothness == VERY_BAD "
+                          "|| smoothness == HORRIBLE || smoothness == VERY_HORRIBLE "
+                          "|| smoothness == IMPASSABLE",
+                    "multiply_by": "0",
+                }]
+                if with_smoothness
+                else []
+            ),
         ],
         # High, because a wandering "accessible" route is a worse answer than a
         # direct one: every extra metre is more unverified surface.
@@ -432,9 +480,17 @@ def build_request_body(
     elif preset == "accessible":
         body["custom_model"] = accessible_custom_model()
 
-    # Flexible mode is required for a custom model and rejected outright without
-    # one on a free package, so it travels with the model and never alone.
-    if "custom_model" in body:
+    # When flexible mode is required, and only then.
+    #
+    # A custom model always needs it. A round trip needs it too, but only on a
+    # self-hosted server: one with contraction hierarchies prepared answers
+    # "algorithm=round_trip cannot be used with CH", whereas the hosted API
+    # accepts the same request happily. Asking for it unconditionally would
+    # break every round trip on a free package, where flexible mode is paid.
+    needs_flexible = "custom_model" in body or (
+        body.get("algorithm") == "round_trip" and graphhopper_is_self_hosted()
+    )
+    if needs_flexible:
         body["ch.disable"] = True
     return body
 

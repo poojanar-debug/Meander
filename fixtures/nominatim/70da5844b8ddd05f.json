@@ -1,0 +1,51 @@
+{
+  "_meander_provenance": "recorded",
+  "_meander_recorded_at": "2026-08-04T16:45:27.517928+00:00",
+  "_meander_note": "Written by backend/fixtures.py. Secrets are redacted and excluded from the request signature.",
+  "request": {
+    "method": "GET",
+    "url": "https://nominatim.openstreetmap.org/search",
+    "params": {
+      "q": "Your location\\\\\\",
+      "format": "jsonv2",
+      "limit": 6,
+      "addressdetails": 0
+    },
+    "json": null,
+    "data": {},
+    "content": null,
+    "headers": {
+      "Accept": "application/json"
+    }
+  },
+  "response": {
+    "status": 200,
+    "headers": {
+      "content-type": "application/json; charset=utf-8",
+      "date": "Tue, 04 Aug 2026 16:45:27 GMT"
+    },
+    "json": [
+      {
+        "place_id": 296277667,
+        "licence": "Data \u00a9 OpenStreetMap contributors, ODbL 1.0. http://osm.org/copyright",
+        "osm_type": "node",
+        "osm_id": 10106039422,
+        "lat": "30.9333138",
+        "lon": "-6.9189239",
+        "category": "amenity",
+        "type": "car_rental",
+        "place_rank": 30,
+        "importance": 5.529640650029782e-05,
+        "addresstype": "amenity",
+        "name": "YOUR Location",
+        "display_name": "YOUR Location, Avenue Moulay Abdellah, Ouarzazate \u0648\u0631\u0632\u0627\u0632\u0627\u062a, Pachalik d'Ouarzazate \u0628\u0627\u0634\u0648\u064a\u0629 \u0648\u0631\u0632\u0627\u0632\u0627\u062a, Province d'Ouarzazate \u2d5c\u2d30\u2d59\u2d33\u2d30 \u2d4f \u2d61\u2d30\u2d54\u2d63\u2d30\u2d63\u2d30\u2d5c \u0625\u0642\u0644\u064a\u0645 \u0648\u0631\u0632\u0632\u0627\u062a, Dr\u00e2a-Tafilalet \u2d37\u2d30\u2d54\u2d44\u2d30-\u2d5c\u2d30\u2d3c\u2d49\u2d4d\u2d30\u2d4d\u2d5c \u062f\u0631\u0639\u0629 \u062a\u0627\u0641\u064a\u0644\u0627\u0644\u062a, 45010, Maroc \u2d4d\u2d4e\u2d56\u2d54\u2d49\u2d31 \u0627\u0644\u0645\u063a\u0631\u0628",
+        "boundingbox": [
+          "30.9332638",
+          "30.9333638",
+          "-6.9189739",
+          "-6.9188739"
+        ]
+      }
+    ]
+  }
+}

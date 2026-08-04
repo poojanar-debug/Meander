@@ -1,6 +1,6 @@
 {
   "_meander_provenance": "synthetic",
-  "_meander_recorded_at": "2026-08-04T15:21:25.600795+00:00",
+  "_meander_recorded_at": "2026-08-04T16:46:09.678407+00:00",
   "_meander_note": "Written by backend/fixtures.py. Secrets are redacted and excluded from the request signature.",
   "request": {
     "method": "POST",
@@ -37,7 +37,7 @@
             "multiply_by": "0"
           },
           {
-            "if": "surface == GRAVEL || surface == GROUND || surface == DIRT || surface == SAND || surface == GRASS || surface == COBBLESTONE || surface == UNPAVED || surface == EARTH || surface == WOOD",
+            "if": "surface == GRAVEL || surface == GROUND || surface == DIRT || surface == SAND || surface == GRASS || surface == COBBLESTONE || surface == UNPAVED || surface == WOOD",
             "multiply_by": "0"
           },
           {

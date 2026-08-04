@@ -18,12 +18,20 @@ from typing import Any
 
 import pytest
 
-os.environ.setdefault("MEANDER_FIXTURES", "replay")
+# Forced, not setdefault. These decide the exact shape of every upstream request
+# and therefore the signature each committed fixture is keyed on, so a developer
+# who has exported MEANDER_FIXTURES or MEANDER_GRAPHHOPPER_URL for their own
+# self-hosted server would otherwise watch the whole suite fail on fixture
+# misses. Per-test overrides go through the `fixture_mode` fixture instead.
+os.environ["MEANDER_FIXTURES"] = "replay"
+os.environ["MEANDER_GRAPHHOPPER_URL"] = "https://graphhopper.com/api/1/route"
+os.environ.pop("MEANDER_PATH_DETAILS", None)
 os.environ.setdefault("MEANDER_LOG_LEVEL", "WARNING")
 # open_clip otherwise contacts the Hugging Face hub to revalidate the CLIP
 # weights, which the socket guard below correctly refuses. Offline mode makes it
 # use the local weights cache, or fail with a clear error if there is none.
 os.environ.setdefault("HF_HUB_OFFLINE", "1")
+
 
 _REAL_CONNECT = socket.socket.connect
 _REAL_CREATE_CONNECTION = socket.create_connection

@@ -1,0 +1,156 @@
+{
+  "_meander_provenance": "recorded",
+  "_meander_recorded_at": "2026-08-04T16:26:52.706915+00:00",
+  "_meander_note": "Written by backend/fixtures.py. Secrets are redacted and excluded from the request signature.",
+  "request": {
+    "method": "GET",
+    "url": "https://nominatim.openstreetmap.org/search",
+    "params": {
+      "q": "Eli",
+      "format": "jsonv2",
+      "limit": 6,
+      "addressdetails": 0
+    },
+    "json": null,
+    "data": {},
+    "content": null,
+    "headers": {
+      "Accept": "application/json"
+    }
+  },
+  "response": {
+    "status": 200,
+    "headers": {
+      "content-type": "application/json; charset=utf-8",
+      "date": "Tue, 04 Aug 2026 16:26:52 GMT"
+    },
+    "json": [
+      {
+        "place_id": 376794962,
+        "licence": "Data \u00a9 OpenStreetMap contributors, ODbL 1.0. http://osm.org/copyright",
+        "osm_type": "node",
+        "osm_id": 369144324,
+        "lat": "64.6187457",
+        "lon": "-162.2702575",
+        "category": "aeroway",
+        "type": "aerodrome",
+        "place_rank": 30,
+        "importance": 0.41871967358108847,
+        "addresstype": "aeroway",
+        "name": "Elim Airport",
+        "display_name": "Elim Airport, Elim Moses Point, Elim, Unorganized Borough, Alaska, 99739, United States",
+        "boundingbox": [
+          "64.6037457",
+          "64.6337457",
+          "-162.2852575",
+          "-162.2552575"
+        ]
+      },
+      {
+        "place_id": 340713304,
+        "licence": "Data \u00a9 OpenStreetMap contributors, ODbL 1.0. http://osm.org/copyright",
+        "osm_type": "node",
+        "osm_id": 153895904,
+        "lat": "39.1934098",
+        "lon": "-81.6484612",
+        "category": "place",
+        "type": "hamlet",
+        "place_rank": 20,
+        "importance": 0.2885983973306146,
+        "addresstype": "hamlet",
+        "name": "Eli",
+        "display_name": "Eli, Wood County, West Virginia, 26181, United States",
+        "boundingbox": [
+          "39.1734098",
+          "39.2134098",
+          "-81.6684612",
+          "-81.6284612"
+        ]
+      },
+      {
+        "place_id": 334369411,
+        "licence": "Data \u00a9 OpenStreetMap contributors, ODbL 1.0. http://osm.org/copyright",
+        "osm_type": "node",
+        "osm_id": 154363230,
+        "lat": "37.0439593",
+        "lon": "-84.9643960",
+        "category": "place",
+        "type": "hamlet",
+        "place_rank": 20,
+        "importance": 0.2574973608523206,
+        "addresstype": "hamlet",
+        "name": "Eli",
+        "display_name": "Eli, Russell County, Kentucky, United States",
+        "boundingbox": [
+          "37.0239593",
+          "37.0639593",
+          "-84.9843960",
+          "-84.9443960"
+        ]
+      },
+      {
+        "place_id": 257089817,
+        "licence": "Data \u00a9 OpenStreetMap contributors, ODbL 1.0. http://osm.org/copyright",
+        "osm_type": "node",
+        "osm_id": 9104589788,
+        "lat": "10.0562477",
+        "lon": "123.1382305",
+        "category": "place",
+        "type": "village",
+        "place_rank": 19,
+        "importance": 0.14671382085908288,
+        "addresstype": "village",
+        "name": "Eli",
+        "display_name": "Eli, La Libertad, Negros Oriental, Negros Island Region, Philippines",
+        "boundingbox": [
+          "10.0362477",
+          "10.0762477",
+          "123.1182305",
+          "123.1582305"
+        ]
+      },
+      {
+        "place_id": 29094465,
+        "licence": "Data \u00a9 OpenStreetMap contributors, ODbL 1.0. http://osm.org/copyright",
+        "osm_type": "node",
+        "osm_id": 3245700781,
+        "lat": "-3.4309910",
+        "lon": "127.9189600",
+        "category": "place",
+        "type": "village",
+        "place_rank": 19,
+        "importance": 0.14670416800183103,
+        "addresstype": "village",
+        "name": "Eli",
+        "display_name": "Eli, Seram Bagian Barat, Maluku, Indonesia",
+        "boundingbox": [
+          "-3.4509910",
+          "-3.4109910",
+          "127.8989600",
+          "127.9389600"
+        ]
+      },
+      {
+        "place_id": 161847909,
+        "licence": "Data \u00a9 OpenStreetMap contributors, ODbL 1.0. http://osm.org/copyright",
+        "osm_type": "node",
+        "osm_id": 9907521516,
+        "lat": "63.9706533",
+        "lon": "11.6336844",
+        "category": "place",
+        "type": "hamlet",
+        "place_rank": 20,
+        "importance": 0.13339265506981002,
+        "addresstype": "hamlet",
+        "name": "Eli",
+        "display_name": "Eli, Skarpnes, Steinkjer, Tr\u00f8ndelag, 7711, Norge",
+        "boundingbox": [
+          "63.9506533",
+          "63.9906533",
+          "11.6136844",
+          "11.6536844"
+        ]
+      }
+    ]
+  }
+}

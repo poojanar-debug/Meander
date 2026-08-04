@@ -29,6 +29,14 @@ MERGED="$DATA_DIR/meander-regions.osm.pbf"
 CONFIG="$GH_DIR/config.yml"
 PORT=8989
 
+# Heap sizes. The graph is loaded into RAM (GraphHopper's default dataaccess),
+# so the server needs comfortably more heap than the graph is big — an 8 GB heap
+# against a 6.6 GB graph dies with OutOfMemoryError during startup, after the
+# import has already succeeded, which is a confusing place to fail. Override for
+# a small extract or a small machine:  GH_HEAP=4g scripts/graphhopper.sh serve
+IMPORT_HEAP="${GH_IMPORT_HEAP:-24g}"
+SERVE_HEAP="${GH_HEAP:-20g}"
+
 # Regions to import, as Geofabrik paths. Add a line and re-run `setup` to widen
 # coverage; only places inside these extracts can be routed.
 REGIONS=(
@@ -109,7 +117,7 @@ build_graph() {
   local java; java="$(find_java)"
   rm -rf "$DATA_DIR/graph-cache"
   echo "  building the routing graph — this is the slow part…"
-  ( cd "$GH_DIR" && "$java" -Xmx12g -Xms4g \
+  ( cd "$GH_DIR" && "$java" -Xmx"$IMPORT_HEAP" -Xms4g \
       -Ddw.graphhopper.datareader.file="data/$(basename "$MERGED")" \
       -jar "$GH_JAR" import "$CONFIG" )
 }
@@ -136,7 +144,8 @@ case "${1:-}" in
       echo "No graph built yet. Run:  scripts/graphhopper.sh setup" >&2; exit 1; }
     local_java="$(find_java)"
     cd "$GH_DIR"
-    exec "$local_java" -Xmx8g -Xms2g -jar "$GH_JAR" server "$CONFIG"
+    echo "  serving with a ${SERVE_HEAP} heap (graph is $(du -sh "$DATA_DIR/graph-cache" | cut -f1))"
+    exec "$local_java" -Xmx"$SERVE_HEAP" -Xms2g -jar "$GH_JAR" server "$CONFIG"
     ;;
 
   status)

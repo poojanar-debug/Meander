@@ -1,0 +1,156 @@
+{
+  "_meander_provenance": "recorded",
+  "_meander_recorded_at": "2026-08-04T16:27:04.429283+00:00",
+  "_meander_note": "Written by backend/fixtures.py. Secrets are redacted and excluded from the request signature.",
+  "request": {
+    "method": "GET",
+    "url": "https://nominatim.openstreetmap.org/search",
+    "params": {
+      "q": "Elizabeth m",
+      "format": "jsonv2",
+      "limit": 6,
+      "addressdetails": 0
+    },
+    "json": null,
+    "data": {},
+    "content": null,
+    "headers": {
+      "Accept": "application/json"
+    }
+  },
+  "response": {
+    "status": 200,
+    "headers": {
+      "content-type": "application/json; charset=utf-8",
+      "date": "Tue, 04 Aug 2026 16:27:04 GMT"
+    },
+    "json": [
+      {
+        "place_id": 178207553,
+        "licence": "Data \u00a9 OpenStreetMap contributors, ODbL 1.0. http://osm.org/copyright",
+        "osm_type": "node",
+        "osm_id": 13234119825,
+        "lat": "52.2941406",
+        "lon": "21.0276743",
+        "category": "shop",
+        "type": "beauty",
+        "place_rank": 30,
+        "importance": 8.366292820625647e-05,
+        "addresstype": "shop",
+        "name": "Elizabeth",
+        "display_name": "Elizabeth, 11, Ludwika Kondratowicza, Toru\u0144ska, Br\u00f3dno, Targ\u00f3wek, Warszawa, wojew\u00f3dztwo mazowieckie, 03-242, Polska",
+        "boundingbox": [
+          "52.2940906",
+          "52.2941906",
+          "21.0276243",
+          "21.0277243"
+        ]
+      },
+      {
+        "place_id": 177925948,
+        "licence": "Data \u00a9 OpenStreetMap contributors, ODbL 1.0. http://osm.org/copyright",
+        "osm_type": "node",
+        "osm_id": 3983135960,
+        "lat": "52.2329507",
+        "lon": "21.0180379",
+        "category": "shop",
+        "type": "shoes",
+        "place_rank": 30,
+        "importance": 8.366292820625647e-05,
+        "addresstype": "shop",
+        "name": "Elizabeth",
+        "display_name": "Elizabeth, 7, Chmielna, Centrum, \u015ar\u00f3dmie\u015bcie P\u00f3\u0142nocne, \u015ar\u00f3dmie\u015bcie, Warszawa, wojew\u00f3dztwo mazowieckie, 00-021, Polska",
+        "boundingbox": [
+          "52.2329007",
+          "52.2330007",
+          "21.0179879",
+          "21.0180879"
+        ]
+      },
+      {
+        "place_id": 59359611,
+        "licence": "Data \u00a9 OpenStreetMap contributors, ODbL 1.0. http://osm.org/copyright",
+        "osm_type": "node",
+        "osm_id": 11970520620,
+        "lat": "40.6549374",
+        "lon": "22.9226704",
+        "category": "shop",
+        "type": "clothes",
+        "place_rank": 30,
+        "importance": 7.405279621571706e-05,
+        "addresstype": "shop",
+        "name": "Elizabeth",
+        "display_name": "Elizabeth, \u03a6\u03b9\u03bb\u03b9\u03c0\u03c0\u03bf\u03c5\u03c0\u03cc\u03bb\u03b5\u03c9\u03c2, \u0395\u03c0\u03c4\u03ac\u03bb\u03bf\u03c6\u03bf\u03c2, \u039a\u03bf\u03b9\u03bd\u03cc\u03c4\u03b7\u03c4\u03b1 \u0391\u03bc\u03c0\u03b5\u03bb\u03bf\u03ba\u03ae\u03c0\u03c9\u03bd, \u0394\u03b7\u03bc\u03bf\u03c4\u03b9\u03ba\u03ae \u0395\u03bd\u03cc\u03c4\u03b7\u03c4\u03b1 \u0391\u03bc\u03c0\u03b5\u03bb\u03bf\u03ba\u03ae\u03c0\u03c9\u03bd, \u0394\u03ae\u03bc\u03bf\u03c2 \u0391\u03bc\u03c0\u03b5\u03bb\u03bf\u03ba\u03ae\u03c0\u03c9\u03bd - \u039c\u03b5\u03bd\u03b5\u03bc\u03ad\u03bd\u03b7\u03c2, \u039c\u03b7\u03c4\u03c1\u03bf\u03c0\u03bf\u03bb\u03b9\u03c4\u03b9\u03ba\u03ae \u0395\u03bd\u03cc\u03c4\u03b7\u03c4\u03b1 \u0398\u03b5\u03c3\u03c3\u03b1\u03bb\u03bf\u03bd\u03af\u03ba\u03b7\u03c2, \u03a0\u03b5\u03c1\u03b9\u03c6\u03ad\u03c1\u03b5\u03b9\u03b1 \u039a\u03b5\u03bd\u03c4\u03c1\u03b9\u03ba\u03ae\u03c2 \u039c\u03b1\u03ba\u03b5\u03b4\u03bf\u03bd\u03af\u03b1\u03c2, \u0391\u03c0\u03bf\u03ba\u03b5\u03bd\u03c4\u03c1\u03c9\u03bc\u03ad\u03bd\u03b7 \u0394\u03b9\u03bf\u03af\u03ba\u03b7\u03c3\u03b7 \u039c\u03b1\u03ba\u03b5\u03b4\u03bf\u03bd\u03af\u03b1\u03c2 - \u0398\u03c1\u03ac\u03ba\u03b7\u03c2, 561 21, \u0395\u03bb\u03bb\u03ac\u03c2",
+        "boundingbox": [
+          "40.6548874",
+          "40.6549874",
+          "22.9226204",
+          "22.9227204"
+        ]
+      },
+      {
+        "place_id": 59447053,
+        "licence": "Data \u00a9 OpenStreetMap contributors, ODbL 1.0. http://osm.org/copyright",
+        "osm_type": "node",
+        "osm_id": 5382719881,
+        "lat": "40.6097708",
+        "lon": "22.9902433",
+        "category": "shop",
+        "type": "hairdresser",
+        "place_rank": 30,
+        "importance": 7.405279621571706e-05,
+        "addresstype": "shop",
+        "name": "Elizabeth",
+        "display_name": "Elizabeth, 17\u03b7\u03c2 \u039d\u03bf\u03b5\u03bc\u03b2\u03c1\u03af\u03bf\u03c5, \u039a\u03c9\u03bd\u03c3\u03c4\u03b1\u03bd\u03c4\u03b9\u03bd\u03bf\u03c5\u03c0\u03bf\u03bb\u03af\u03c4\u03b9\u03ba\u03b1, \u03a0\u03c5\u03bb\u03b1\u03af\u03b1, \u039a\u03bf\u03b9\u03bd\u03cc\u03c4\u03b7\u03c4\u03b1 \u03a0\u03c5\u03bb\u03b1\u03af\u03b1\u03c2, \u0394\u03b7\u03bc\u03bf\u03c4\u03b9\u03ba\u03ae \u0395\u03bd\u03cc\u03c4\u03b7\u03c4\u03b1 \u03a0\u03c5\u03bb\u03b1\u03af\u03b1\u03c2, \u0394\u03ae\u03bc\u03bf\u03c2 \u03a0\u03c5\u03bb\u03b1\u03af\u03b1\u03c2 - \u03a7\u03bf\u03c1\u03c4\u03b9\u03ac\u03c4\u03b7, \u039c\u03b7\u03c4\u03c1\u03bf\u03c0\u03bf\u03bb\u03b9\u03c4\u03b9\u03ba\u03ae \u0395\u03bd\u03cc\u03c4\u03b7\u03c4\u03b1 \u0398\u03b5\u03c3\u03c3\u03b1\u03bb\u03bf\u03bd\u03af\u03ba\u03b7\u03c2, \u03a0\u03b5\u03c1\u03b9\u03c6\u03ad\u03c1\u03b5\u03b9\u03b1 \u039a\u03b5\u03bd\u03c4\u03c1\u03b9\u03ba\u03ae\u03c2 \u039c\u03b1\u03ba\u03b5\u03b4\u03bf\u03bd\u03af\u03b1\u03c2, \u0391\u03c0\u03bf\u03ba\u03b5\u03bd\u03c4\u03c1\u03c9\u03bc\u03ad\u03bd\u03b7 \u0394\u03b9\u03bf\u03af\u03ba\u03b7\u03c3\u03b7 \u039c\u03b1\u03ba\u03b5\u03b4\u03bf\u03bd\u03af\u03b1\u03c2 - \u0398\u03c1\u03ac\u03ba\u03b7\u03c2, 555 35, \u0395\u03bb\u03bb\u03ac\u03c2",
+        "boundingbox": [
+          "40.6097208",
+          "40.6098208",
+          "22.9901933",
+          "22.9902933"
+        ]
+      },
+      {
+        "place_id": 55040849,
+        "licence": "Data \u00a9 OpenStreetMap contributors, ODbL 1.0. http://osm.org/copyright",
+        "osm_type": "node",
+        "osm_id": 5907123706,
+        "lat": "35.3675607",
+        "lon": "24.4997878",
+        "category": "shop",
+        "type": "clothes",
+        "place_rank": 30,
+        "importance": 6.008468757148116e-05,
+        "addresstype": "shop",
+        "name": "Elizabeth",
+        "display_name": "Elizabeth, \u0386\u03c1\u03b7 \u0392\u03b5\u03bb\u03bf\u03c5\u03c7\u03b9\u03ce\u03c4\u03b7, \u039a\u03b1\u03bb\u03bb\u03b9\u03b8\u03ad\u03b1, \u03a0\u03b5\u03c1\u03b9\u03b2\u03cc\u03bb\u03b9\u03b1, \u03a1\u03ad\u03b8\u03c5\u03bc\u03bd\u03bf, \u0394\u03ae\u03bc\u03bf\u03c2 \u03a1\u03b5\u03b8\u03cd\u03bc\u03bd\u03b7\u03c2, \u03a0\u03b5\u03c1\u03b9\u03c6\u03b5\u03c1\u03b5\u03b9\u03b1\u03ba\u03ae \u0395\u03bd\u03cc\u03c4\u03b7\u03c4\u03b1 \u03a1\u03b5\u03b8\u03cd\u03bc\u03bd\u03b7\u03c2, \u03a0\u03b5\u03c1\u03b9\u03c6\u03ad\u03c1\u03b5\u03b9\u03b1 \u039a\u03c1\u03ae\u03c4\u03b7\u03c2, \u0391\u03c0\u03bf\u03ba\u03b5\u03bd\u03c4\u03c1\u03c9\u03bc\u03ad\u03bd\u03b7 \u0394\u03b9\u03bf\u03af\u03ba\u03b7\u03c3\u03b7 \u039a\u03c1\u03ae\u03c4\u03b7\u03c2, 741 00, \u0395\u03bb\u03bb\u03ac\u03c2",
+        "boundingbox": [
+          "35.3675107",
+          "35.3676107",
+          "24.4997378",
+          "24.4998378"
+        ]
+      },
+      {
+        "place_id": 30279520,
+        "licence": "Data \u00a9 OpenStreetMap contributors, ODbL 1.0. http://osm.org/copyright",
+        "osm_type": "node",
+        "osm_id": 701219800,
+        "lat": "-8.7887996",
+        "lon": "120.9781247",
+        "category": "tourism",
+        "type": "hotel",
+        "place_rank": 30,
+        "importance": 3.750133516437045e-05,
+        "addresstype": "tourism",
+        "name": "Elizabeth",
+        "display_name": "Elizabeth, Jalan Ogi, Bajawa, Ngada, Nusa Tenggara Timur, Kepulauan Nusa Tenggara, 86413, Indonesia",
+        "boundingbox": [
+          "-8.7888496",
+          "-8.7887496",
+          "120.9780747",
+          "120.9781747"
+        ]
+      }
+    ]
+  }
+}

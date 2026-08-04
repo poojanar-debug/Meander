@@ -1,12 +1,12 @@
 {
   "_meander_provenance": "recorded",
-  "_meander_recorded_at": "2026-08-04T16:26:53.843045+00:00",
+  "_meander_recorded_at": "2026-08-04T16:13:12.764945+00:00",
   "_meander_note": "Written by backend/fixtures.py. Secrets are redacted and excluded from the request signature.",
   "request": {
     "method": "GET",
     "url": "https://nominatim.openstreetmap.org/search",
     "params": {
-      "q": "Eliza",
+      "q": "eliza",
       "format": "jsonv2",
       "limit": 6,
       "addressdetails": 0
@@ -22,11 +22,11 @@
     "status": 200,
     "headers": {
       "content-type": "application/json; charset=utf-8",
-      "date": "Tue, 04 Aug 2026 16:26:53 GMT"
+      "date": "Tue, 04 Aug 2026 16:13:12 GMT"
     },
     "json": [
       {
-        "place_id": 373680663,
+        "place_id": 371846984,
         "licence": "Data \u00a9 OpenStreetMap contributors, ODbL 1.0. http://osm.org/copyright",
         "osm_type": "node",
         "osm_id": 151408445,
@@ -47,7 +47,7 @@
         ]
       },
       {
-        "place_id": 292880961,
+        "place_id": 289753676,
         "licence": "Data \u00a9 OpenStreetMap contributors, ODbL 1.0. http://osm.org/copyright",
         "osm_type": "way",
         "osm_id": 303500571,
@@ -68,7 +68,7 @@
         ]
       },
       {
-        "place_id": 291783525,
+        "place_id": 288766533,
         "licence": "Data \u00a9 OpenStreetMap contributors, ODbL 1.0. http://osm.org/copyright",
         "osm_type": "node",
         "osm_id": 8859904396,
@@ -89,7 +89,7 @@
         ]
       },
       {
-        "place_id": 301379504,
+        "place_id": 301820856,
         "licence": "Data \u00a9 OpenStreetMap contributors, ODbL 1.0. http://osm.org/copyright",
         "osm_type": "node",
         "osm_id": 4131376723,
@@ -110,7 +110,7 @@
         ]
       },
       {
-        "place_id": 343327695,
+        "place_id": 339769068,
         "licence": "Data \u00a9 OpenStreetMap contributors, ODbL 1.0. http://osm.org/copyright",
         "osm_type": "node",
         "osm_id": 153354456,
@@ -131,7 +131,7 @@
         ]
       },
       {
-        "place_id": 304602412,
+        "place_id": 301360025,
         "licence": "Data \u00a9 OpenStreetMap contributors, ODbL 1.0. http://osm.org/copyright",
         "osm_type": "node",
         "osm_id": 151574914,

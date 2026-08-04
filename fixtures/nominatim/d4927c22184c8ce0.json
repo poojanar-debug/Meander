@@ -1,0 +1,93 @@
+{
+  "_meander_provenance": "recorded",
+  "_meander_recorded_at": "2026-08-04T16:45:32.677323+00:00",
+  "_meander_note": "Written by backend/fixtures.py. Secrets are redacted and excluded from the request signature.",
+  "request": {
+    "method": "GET",
+    "url": "https://nominatim.openstreetmap.org/search",
+    "params": {
+      "q": "moi",
+      "format": "jsonv2",
+      "limit": 6,
+      "addressdetails": 0
+    },
+    "json": null,
+    "data": {},
+    "content": null,
+    "headers": {
+      "Accept": "application/json"
+    }
+  },
+  "response": {
+    "status": 200,
+    "headers": {
+      "content-type": "application/json; charset=utf-8",
+      "date": "Tue, 04 Aug 2026 16:45:32 GMT"
+    },
+    "json": [
+      {
+        "place_id": 63643715,
+        "licence": "Data \u00a9 OpenStreetMap contributors, ODbL 1.0. http://osm.org/copyright",
+        "osm_type": "node",
+        "osm_id": 460197038,
+        "lat": "44.9009291",
+        "lon": "23.2083386",
+        "category": "place",
+        "type": "village",
+        "place_rank": 19,
+        "importance": 0.40432454964183334,
+        "addresstype": "village",
+        "name": "Moi",
+        "display_name": "Moi, B\u00e2lteni, Gorj, 217062, Rom\u00e2nia",
+        "boundingbox": [
+          "44.8809291",
+          "44.9209291",
+          "23.1883386",
+          "23.2283386"
+        ]
+      },
+      {
+        "place_id": 160311098,
+        "licence": "Data \u00a9 OpenStreetMap contributors, ODbL 1.0. http://osm.org/copyright",
+        "osm_type": "node",
+        "osm_id": 319944504,
+        "lat": "58.4570799",
+        "lon": "6.5518742",
+        "category": "place",
+        "type": "village",
+        "place_rank": 19,
+        "importance": 0.3268260957230098,
+        "addresstype": "village",
+        "name": "Moi",
+        "display_name": "Moi, Lund, Rogaland, 4460, Norge",
+        "boundingbox": [
+          "58.4370799",
+          "58.4770799",
+          "6.5318742",
+          "6.5718742"
+        ]
+      },
+      {
+        "place_id": 275916624,
+        "licence": "Data \u00a9 OpenStreetMap contributors, ODbL 1.0. http://osm.org/copyright",
+        "osm_type": "relation",
+        "osm_id": 62149,
+        "lat": "54.7023545",
+        "lon": "-3.2765753",
+        "category": "boundary",
+        "type": "administrative",
+        "place_rank": 4,
+        "importance": 0.9388533772580386,
+        "addresstype": "country",
+        "name": "United Kingdom",
+        "display_name": "United Kingdom",
+        "boundingbox": [
+          "49.6740000",
+          "61.0610000",
+          "-14.0155170",
+          "2.0919117"
+        ]
+      }
+    ]
+  }
+}
