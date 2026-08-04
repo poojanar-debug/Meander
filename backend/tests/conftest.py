@@ -102,15 +102,26 @@ def tmp_fixture_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator
 
 @pytest.fixture(autouse=True)
 def _clean_process_state() -> Iterator[None]:
-    """Counters and rate-limit buckets are process-wide; reset them per test."""
+    """Counters, rate-limit buckets and shutdown state are process-wide.
+
+    The shutdown flag matters more than it looks: every TestClient that exits
+    runs lifespan's shutdown and leaves it set, so without this the *next*
+    test's stream immediately answers "this server is restarting" and produces
+    no events at all.
+    """
+    from backend import main as main_mod
     from backend.main import limiter
     from backend.metrics import metrics
 
-    metrics.reset()
-    limiter.reset()
+    def _reset() -> None:
+        metrics.reset()
+        limiter.reset()
+        main_mod._shutting_down.clear()
+        main_mod._open_streams = 0
+
+    _reset()
     yield
-    metrics.reset()
-    limiter.reset()
+    _reset()
 
 
 @pytest.fixture

@@ -236,6 +236,12 @@ REQUEST_DEADLINE_S = _env_float("MEANDER_REQUEST_DEADLINE_S", 45.0)
 # come from the load balancer and the whole service rate-limits as one client.
 TRUSTED_PROXY_HOPS = _env_int("MEANDER_TRUSTED_PROXY_HOPS", 0)
 
+# How long shutdown waits for in-flight SSE streams to finish before closing the
+# cache under them. Must stay comfortably below uvicorn's
+# --timeout-graceful-shutdown, which must in turn stay below the orchestrator's
+# SIGTERM-to-SIGKILL window.
+DRAIN_TIMEOUT_S = _env_float("MEANDER_DRAIN_TIMEOUT_S", 20.0)
+
 
 @dataclass(frozen=True)
 class Settings:

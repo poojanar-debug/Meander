@@ -28,6 +28,7 @@ from . import __version__
 from .accessibility import VERY_LOW_CONFIDENCE_THRESHOLD, assess_route
 from .cache import get_cache
 from .config import (
+    DRAIN_TIMEOUT_S,
     REQUEST_DEADLINE_S,
     STRICT_STARTUP,
     TRUSTED_PROXY_HOPS,
@@ -122,6 +123,14 @@ def _check_startup() -> list[str]:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+    # Module state, so it survives a previous run of this app object — which
+    # happens in tests, and would happen to anything that restarts the app
+    # in-process. Left set, every stream would immediately answer
+    # "this server is restarting".
+    global _open_streams
+    _shutting_down.clear()
+    _open_streams = 0
+
     missing = _check_startup()
     cache = get_cache()
     # Startup runs on the event loop like everything else, and a large
@@ -147,10 +156,34 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         },
     )
     yield
+
+    # ECS sends SIGTERM and then SIGKILL. Everything below happens inside that
+    # window, so it is ordered by how bad losing it would be.
     from .fixtures import aclose_client
 
+    # 1. Tell in-flight streams to stop. They check between events and emit a
+    #    `shutting_down` error frame, so a client gets an explanation instead of
+    #    a connection cut from under it mid-response.
+    _shutting_down.set()
+    for _ in range(int(DRAIN_TIMEOUT_S / 0.25)):
+        if _open_streams == 0:
+            break
+        await asyncio.sleep(0.25)
+    if _open_streams:
+        log.warning("shutdown_streams_still_open", extra={"count": _open_streams})
+
+    # 2. The httpx client, so nothing is mid-flight to an upstream.
     await aclose_client()
-    log.info("shutdown")
+
+    # 3. The cache. Cache.close() existed and had no caller anywhere, so the
+    #    thread-local sqlite connections were never closed — which is also the
+    #    leak a long-running load test would have found.
+    try:
+        get_cache().close()
+    except Exception as exc:  # noqa: BLE001 — shutdown must not raise
+        log.warning("cache_close_failed", extra={"error": type(exc).__name__})
+
+    log.info("shutdown", extra={"streams_open_at_exit": _open_streams})
 
 
 app = FastAPI(
@@ -820,24 +853,99 @@ def _wants_stream(request: Request) -> bool:
     return "text/event-stream" in (request.headers.get("accept") or "")
 
 
+# Long enough not to be chatter, short enough to beat a 60 s proxy idle
+# timeout. There is otherwise a silent gap between the 60% progress event and
+# the enriched routes that can exceed one.
+KEEPALIVE_S = 15.0
+
+# Set by lifespan on SIGTERM so in-flight streams can say goodbye rather than
+# having the connection cut from under them.
+_shutting_down = asyncio.Event()
+_open_streams = 0
+
+
 async def _stream(req: RouteRequest, cache_key: str) -> AsyncIterator[str]:
-    """Forward each event as it is produced, and cache the final payload."""
+    """Forward each event as it is produced, and cache the final payload.
+
+    Three things this has to survive that it previously did not.
+
+    **Anything that is not a RoutingError.** A sqlite3.OperationalError from
+    put_route or a pydantic error in model_dump escaped mid-stream, the client
+    got a truncated response with no error event, and the frontend resolved to
+    null — an empty screen with no explanation.
+
+    **A client that goes away.** A disconnect at 90% cancelled the generator and
+    threw away every GraphHopper call the request had made, caching nothing.
+
+    **A long silence.** Nothing was written between the 60% progress event and
+    the first enriched route, which on a slow Overpass is long enough for a
+    proxy to close an idle connection.
+    """
+    global _open_streams
+    _open_streams += 1
+    agen = route_events_with_deadline(req).__aiter__()
+    finished: dict[str, Any] | None = None
+    cached = False
+
     try:
-        async for event in route_events_with_deadline(req):
+        while True:
+            if _shutting_down.is_set():
+                yield _sse({
+                    "type": "error",
+                    "kind": "shutting_down",
+                    "message": (
+                        "This server is restarting. Your request was not finished — "
+                        "please try again in a moment."
+                    ),
+                })
+                return
+            try:
+                event = await asyncio.wait_for(agen.__anext__(), timeout=KEEPALIVE_S)
+            except TimeoutError:
+                # A comment frame. SSE clients ignore it; proxies see traffic.
+                yield ": keepalive\n\n"
+                continue
+            except StopAsyncIteration:
+                return
+
             if event["type"] == "done":
+                finished = event["payload"]
                 metrics.incr("daily_routes_served")
                 await run_in_threadpool(
-                    get_cache().put_route,
-                    cache_key,
-                    event["payload"],
-                    settings.route_cache_ttl_s,
+                    get_cache().put_route, cache_key, finished, settings.route_cache_ttl_s
                 )
+                cached = True
             yield _sse(event)
+
+    except asyncio.CancelledError:
+        # The client hung up. If the answer was already computed, keep it —
+        # every GraphHopper call behind it has been paid for either way.
+        if finished is not None and not cached:
+            try:
+                await run_in_threadpool(
+                    get_cache().put_route, cache_key, finished, settings.route_cache_ttl_s
+                )
+            except Exception:  # noqa: BLE001 — never mask the cancellation
+                log.warning("partial_cache_failed")
+        metrics.incr("client_disconnects_total")
+        log.info("stream_cancelled", extra={"had_result": finished is not None})
+        raise
     except RoutingError as exc:
         metrics.incr("upstream_failures_total")
         # The status line has already been sent, so the error has to travel as
         # an event. The client turns it back into its normal error banner.
         yield _sse({"type": "error", "kind": exc.kind, "message": exc.human_message})
+    except Exception:
+        metrics.incr("stream_failures_total")
+        log.exception("stream_failed")
+        yield _sse({
+            "type": "error",
+            "kind": "internal",
+            "message": "Something went wrong while building your routes. Please try again.",
+        })
+    finally:
+        _open_streams -= 1
+        await agen.aclose()
 
 
 @app.post("/api/routes")
