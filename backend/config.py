@@ -164,9 +164,13 @@ class Settings:
     log_level: str = "INFO"
 
     def missing_keys(self) -> list[str]:
-        """Keys absent from the environment, in the order a deployer should add them."""
+        """Keys absent from the environment, in the order a deployer should add them.
+
+        A self-hosted GraphHopper needs no key, so demanding one would make
+        MEANDER_STRICT_STARTUP refuse to boot a perfectly good deployment.
+        """
         missing = []
-        if not self.graphhopper_key:
+        if not self.graphhopper_key and not graphhopper_is_self_hosted():
             missing.append("GRAPHHOPPER_KEY")
         if not self.mapillary_token:
             missing.append("MAPILLARY_TOKEN")

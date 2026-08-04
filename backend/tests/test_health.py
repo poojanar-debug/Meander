@@ -49,3 +49,30 @@ def test_health_counters_are_aggregates_only(tmp_cache_db: Path) -> None:
                 "segments_scored_total", "unique_sessions_today"):
         assert key in counters
         assert isinstance(counters[key], int)
+
+
+def test_health_reports_which_routing_server_is_in_use(tmp_cache_db) -> None:
+    """Whether custom models can run at all is otherwise only discoverable by
+    getting a 400 out of the hosted API."""
+    with _client(tmp_cache_db) as client:
+        routing = client.get("/api/health").json()["routing"]
+
+    assert set(routing) == {"endpoint", "self_hosted", "custom_models_available", "path_details"}
+    assert isinstance(routing["self_hosted"], bool)
+    assert routing["custom_models_available"] == routing["self_hosted"]
+
+
+def test_a_self_hosted_deployment_does_not_demand_an_api_key(monkeypatch) -> None:
+    """MEANDER_STRICT_STARTUP would otherwise refuse to boot a perfectly good
+    self-hosted deployment over a key it has no use for."""
+    from backend import config
+
+    monkeypatch.setattr(config, "GRAPHHOPPER_URL", "http://localhost:8989/route")
+    assert "GRAPHHOPPER_KEY" not in config.Settings().missing_keys()
+
+
+def test_a_hosted_deployment_still_demands_an_api_key(monkeypatch) -> None:
+    from backend import config
+
+    monkeypatch.setattr(config, "GRAPHHOPPER_URL", "https://graphhopper.com/api/1/route")
+    assert "GRAPHHOPPER_KEY" in config.Settings().missing_keys()

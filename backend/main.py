@@ -673,10 +673,22 @@ def health() -> dict[str, Any]:
     from .fixtures import budget_snapshot, fixture_inventory
 
     cache = get_cache()
+    from .config import GRAPHHOPPER_URL, graphhopper_is_self_hosted, path_details
+
+    self_hosted = graphhopper_is_self_hosted()
     return {
         "status": "ok",
         "version": __version__,
         "clip_available": clip_available(),
+        # Which routing server, and therefore whether the nature and accessible
+        # presets can run at all — the hosted free tier cannot execute a custom
+        # model, and that fact is otherwise only discoverable by getting a 400.
+        "routing": {
+            "endpoint": GRAPHHOPPER_URL,
+            "self_hosted": self_hosted,
+            "custom_models_available": self_hosted,
+            "path_details": path_details(),
+        },
         "fixture_mode": settings.fixture_mode,
         "missing_keys": settings.missing_keys(),
         "cache": cache.stats(),
