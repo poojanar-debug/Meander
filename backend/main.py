@@ -404,6 +404,25 @@ async def route_events(req: RouteRequest) -> AsyncIterator[dict[str, Any]]:
     # fastest first when present: nature's duration cap is relative to it.
     ordered = sorted(objectives, key=lambda o: 0 if o == "fastest" else 1)
 
+    # `objectives` accepts any subset, so {"objectives": ["nature"]} is a valid
+    # public request. Without this, fastest is never routed, route_nature gets
+    # fastest=None, and **both** of its bars quietly switch off: the
+    # NATURE_DURATION_CAP and the "must be greener than fastest" floor. Every
+    # candidate then counts as acceptable and the winner ships labelled Nature
+    # with no preset_note — a label with nothing behind it, which is exactly
+    # what route_nature's own docstring says must never happen.
+    #
+    # So fastest is routed as a baseline whenever nature is asked for, and
+    # simply not emitted as a route. It costs one request, which is ~24 ms
+    # against a self-hosted router.
+    if "nature" in objectives and "fastest" not in objectives:
+        try:
+            fastest_route = await PRESETS["fastest"](origin, destination, req.minutes, mode)
+        except RoutingError as exc:
+            # Not fatal: the caller did not ask for this route. route_nature
+            # says on the card that the comparison could not be made.
+            log.info("nature_baseline_unavailable", extra={"kind": exc.kind})
+
     for index, objective in enumerate(ordered):
         label = ROUTE_LABELS.get(objective, objective.title())
         yield {

@@ -200,6 +200,16 @@ NATURE_BUDGET_FIT_WEIGHT = 0.4
 # card should say so rather than let someone assume it fills their budget.
 NATURE_BUDGET_UNDERSHOOT = 0.7
 
+# Said when there was no fastest route to measure against, so neither the
+# duration cap nor the greenness floor could be applied. The caller routes a
+# baseline specifically to avoid this, so reaching it means that baseline
+# request itself failed — rare, but the alternative is presenting an unchecked
+# route under a label that promises it was checked.
+UNCOMPARED_NOTE = (
+    "This route could not be compared against the fastest one, so we cannot "
+    "promise it is greener than the direct way or inside your time budget."
+)
+
 
 def _budget_fit(duration_min: float, requested_min: int) -> float:
     """1.0 when a route uses exactly the time asked for, falling off either side."""
@@ -660,6 +670,8 @@ async def route_nature(
                 "noticeably shorter than the time you asked for — nothing "
                 "greener was reachable within your budget."
             )
+        elif fastest is None:
+            chosen.preset_note = UNCOMPARED_NOTE
         return chosen
 
     assert fallback is not None  # at least one candidate always runs
