@@ -12,6 +12,7 @@ import hashlib
 import importlib.util
 import json
 import time
+import uuid
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
@@ -43,7 +44,7 @@ from .enrich import (
 from .enrich import RestStop as EnrichRestStop
 from .geometry import score_geometry
 from .health import check_routing
-from .logging_setup import configure_logging, get_logger
+from .logging_setup import configure_logging, get_logger, request_id_var
 from .metrics import metrics
 from .models import (
     BarrierReport,
@@ -173,6 +174,56 @@ app.add_middleware(
     expose_headers=["Retry-After", "X-Meander-Cache", "X-Request-Id"],
     max_age=600,
 )
+
+
+@app.middleware("http")
+async def request_context(request: Request, call_next: Any) -> Response:
+    """One id per request, on every log line it produces, and back in a header.
+
+    logging_setup disables uvicorn's access log — it echoes client IPs — and
+    replaced it with nothing at all, so a deployed instance had no per-request
+    record whatsoever. This is that record: method, path, status, duration,
+    request id, cache hit or miss. **No IP and no coordinates**, which is why
+    uvicorn's was turned off in the first place.
+
+    An inbound X-Amzn-Trace-Id is honoured so a line here can be joined to an
+    ALB access log entry without correlating on timestamps.
+    """
+    incoming = request.headers.get("x-amzn-trace-id") or request.headers.get("x-request-id")
+    request_id = incoming or uuid.uuid4().hex[:16]
+    token = request_id_var.set(request_id)
+    started = time.monotonic()
+    try:
+        response = await call_next(request)
+    except Exception:
+        log.exception(
+            "request_failed",
+            extra={
+                "method": request.method,
+                "path": request.url.path,
+                "duration_ms": round((time.monotonic() - started) * 1000, 1),
+            },
+        )
+        request_id_var.reset(token)
+        raise
+
+    duration_ms = round((time.monotonic() - started) * 1000, 1)
+    response.headers["X-Request-Id"] = request_id
+    # Probes are the overwhelming majority of requests on a load-balanced
+    # service and say nothing; logging them buries everything that does.
+    if request.url.path not in ("/healthz", "/readyz"):
+        log.info(
+            "request",
+            extra={
+                "method": request.method,
+                "path": request.url.path,
+                "status": response.status_code,
+                "duration_ms": duration_ms,
+                "cache": response.headers.get("X-Meander-Cache"),
+            },
+        )
+    request_id_var.reset(token)
+    return response
 
 
 def _error(kind: str, message: str, status: int) -> JSONResponse:

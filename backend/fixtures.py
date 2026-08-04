@@ -34,6 +34,7 @@ from __future__ import annotations
 import hashlib
 import json
 import threading
+import time
 from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
 from datetime import UTC, datetime
@@ -627,10 +628,7 @@ async def fetch(
         remaining = None
 
     client = get_client()
-    log.info(
-        "live_call",
-        extra={"service": service, "sig": sig, "cost": cost, "remaining": remaining},
-    )
+    started = time.monotonic()
     response = await client.request(
         method.upper(),
         url,
@@ -639,6 +637,20 @@ async def fetch(
         data=dict(data) if data else None,
         content=content,
         headers=dict(headers) if headers else None,
+    )
+    # Logged after, with the duration, so "which upstream is slow" is answerable
+    # from the logs rather than by guessing. This is how Overpass at 13.6 s
+    # against GraphHopper at 0.024 s became visible in the first place.
+    log.info(
+        "live_call",
+        extra={
+            "service": service,
+            "sig": sig,
+            "cost": cost,
+            "remaining": remaining,
+            "status": response.status_code,
+            "duration_ms": round((time.monotonic() - started) * 1000, 1),
+        },
     )
 
     if response.status_code >= 400:
