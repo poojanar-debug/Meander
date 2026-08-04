@@ -47,14 +47,40 @@ def test_geometry_is_lon_lat_pairs(api_client) -> None:
     assert first[0] > 70, "longitude must come first in GeoJSON order"
 
 
-def test_placeholder_scores_are_labelled_as_placeholders(api_client) -> None:
-    """A synthetic number presented as a measurement is the failure this prevents."""
+def test_scores_from_synthetic_geometry_stay_labelled_as_placeholders(api_client) -> None:
+    """The scoring maths is real, but it ran on invented terrain. That is not a
+    measurement of anywhere, and must not be presented as one."""
     routes = api_client.post("/api/routes", json=_body()).json()["routes"]
 
     for route in routes:
         assert route["scoring_method"] == "placeholder"
         assert route["confidence_note"]
         assert "placeholder" in route["confidence_note"].lower()
+
+
+def test_nature_score_ranks_the_nature_route_above_the_fastest(api_client) -> None:
+    by_id = {r["id"]: r for r in api_client.post("/api/routes", json=_body()).json()["routes"]}
+
+    assert by_id["nature"]["scores"]["nature"] > by_id["fastest"]["scores"]["nature"]
+    assert by_id["nature"]["scores"]["air"] > by_id["fastest"]["scores"]["air"]
+
+
+def test_unmeasured_scores_are_null_not_zero(api_client) -> None:
+    """Zero shade is a claim about a place; "not measured" is not the same claim."""
+    routes = api_client.post("/api/routes", json=_body()).json()["routes"]
+    ok = [r for r in routes if r["status"] == "ok"]
+
+    assert ok and all(r["scores"]["shade"] is None for r in ok)
+
+
+def test_a_blocked_route_reports_no_scores_at_all(api_client) -> None:
+    body = {"origin": {"lat": COLOMBO.lat, "lon": COLOMBO.lon}, "minutes": 30}
+    accessible = next(
+        r for r in api_client.post("/api/routes", json=body).json()["routes"]
+        if r["id"] == "accessible"
+    )
+
+    assert accessible["scores"] == {"nature": None, "air": None, "shade": None}
 
 
 def test_routes_built_from_synthetic_fixtures_say_so(api_client) -> None:

@@ -21,6 +21,7 @@ from fastapi.responses import JSONResponse
 from . import __version__
 from .cache import get_cache
 from .config import STRICT_STARTUP, settings
+from .geometry import score_geometry
 from .logging_setup import configure_logging, get_logger
 from .metrics import metrics
 from .models import (
@@ -50,14 +51,15 @@ limiter = RateLimiter(
     daily_ceiling=settings.global_daily_route_ceiling,
 )
 
-# Placeholder scores are flat and identical across routes on purpose. A varying
-# number would look like a measurement; a flat one plus
-# scoring_method:"placeholder" cannot be mistaken for one.
-PLACEHOLDER_SCORE = 0.5
 PLACEHOLDER_CONFIDENCE = 0.0
-PLACEHOLDER_NOTE = (
-    "Scenery and accessibility scoring is not yet running on this route. "
-    "The numbers shown are placeholders, not measurements."
+
+GEOMETRY_ONLY_NOTE = (
+    "Accessibility data has not been evaluated for this route yet. "
+    "Scenery is scored from the route's shape and its OpenStreetMap tags, not from imagery."
+)
+SYNTHETIC_NOTE = (
+    "This route was built from demonstration data, not a live routing response. "
+    "Every number on it is a placeholder, not a measurement."
 )
 
 # ~110 m. Two requests from the same street corner should share a cached answer.
@@ -180,7 +182,17 @@ def route_cache_key(req: RouteRequest) -> str:
     return hashlib.sha256(material.encode()).hexdigest()[:24]
 
 
-def _placeholder_route(route_id: str, label: str, raw: RawRoute) -> Route:
+def _scored_route(route_id: str, label: str, raw: RawRoute) -> Route:
+    """Turn a routed path into a wire Route, scored as well as it honestly can be.
+
+    A route built from a hand-authored fixture keeps `scoring_method:
+    "placeholder"` even though the scoring maths ran: the maths is real but the
+    geometry it ran on is not, and a number derived from invented terrain is not
+    a measurement of anywhere.
+    """
+    scores = score_geometry(raw.points, raw.elevations or None, raw.details)
+    synthetic = raw.synthetic_upstream
+
     return Route(
         id=route_id,
         label=label,
@@ -189,11 +201,13 @@ def _placeholder_route(route_id: str, label: str, raw: RawRoute) -> Route:
         duration_min=round(raw.duration_min, 1),
         distance_m=round(raw.distance_m),
         mode=raw.mode,
-        scores=Scores(nature=PLACEHOLDER_SCORE, air=PLACEHOLDER_SCORE, shade=PLACEHOLDER_SCORE),
-        scoring_method="placeholder",
+        # shade is null until enrich.py computes a real sun position — zero
+        # shade would be a claim about the place rather than an absence of data.
+        scores=Scores(nature=scores.nature, air=scores.air, shade=None),
+        scoring_method="placeholder" if synthetic else "geometry_only",
         confidence=PLACEHOLDER_CONFIDENCE,
-        synthetic_upstream=raw.synthetic_upstream,
-        confidence_note=PLACEHOLDER_NOTE,
+        synthetic_upstream=synthetic,
+        confidence_note=SYNTHETIC_NOTE if synthetic else GEOMETRY_ONLY_NOTE,
     )
 
 
@@ -206,7 +220,7 @@ def _blocked_route(route_id: str, label: str, mode: str, note: str) -> Route:
         duration_min=0.0,
         distance_m=0.0,
         mode=mode,  # type: ignore[arg-type]
-        scores=Scores(nature=0.0, air=0.0, shade=0.0),
+        scores=Scores(),
         scoring_method="placeholder",
         confidence=0.0,
         status_note=note,
@@ -268,7 +282,7 @@ async def _build_routes(req: RouteRequest) -> tuple[list[Route], str | None]:
 
         if objective == "fastest":
             fastest_duration = raw.duration_min
-        routes.append(_placeholder_route(objective, label, raw))
+        routes.append(_scored_route(objective, label, raw))
 
     if not any(r.status == "ok" for r in routes):
         raise failures[0] if failures else NoRouteFound("No route could be found from there.")

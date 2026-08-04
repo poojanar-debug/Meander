@@ -81,9 +81,16 @@ class RouteRequest(BaseModel):
 
 
 class Scores(BaseModel):
-    nature: float
-    air: float
-    shade: float
+    """Each score is null when it has not been computed.
+
+    Null rather than zero, deliberately: zero shade is a claim about a place,
+    and "we did not measure this" is not the same claim. The frontend renders
+    null as "not measured".
+    """
+
+    nature: float | None = None
+    air: float | None = None
+    shade: float | None = None
 
 
 class RestStop(BaseModel):

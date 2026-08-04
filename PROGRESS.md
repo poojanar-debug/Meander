@@ -302,3 +302,63 @@ five test locations.
 
 **Deviations:** none. **Nothing was deployed** — this phase produces configuration and
 documentation only.
+
+---
+
+## Phase F — Geometry scoring · 2026-08-04
+
+**Done**
+
+- `backend/geometry.py` gains real scoring, numpy only, no torch anywhere near it:
+  - **curviness** — accumulated heading change per 100 m, saturating at 45°/100 m. Length-normalised
+    so a long straight road and a short one are equally uncurvy; a long one would otherwise
+    accumulate more turning from vertex noise alone.
+  - **elevation variance** — standard deviation of the elevation profile, saturating at 15 m.
+    Returns `None`, not `0`, when the router gave no elevation.
+  - **naturalness** — length-weighted mean over OSM `road_class` and `surface` path details
+    (65/35), with `road_class` dominant because a paved path through a park is still a park path.
+  - **air proxy** — length-weighted `road_class` exposure to motor traffic. Labelled a proxy in the
+    code and in this log; real measurements arrive in Phase I.
+- `score_geometry()` renormalises the spec's weights when a term is missing, rather than scoring
+  out of 0.55 whenever CLIP is absent.
+- Wired into `/api/routes`. `Scores` fields are now `float | None`, and the frontend renders `null`
+  as "not measured" rather than an empty bar.
+
+**Verified**
+
+- 233 tests pass; 48 of them are new geometry tests checking the maths against hand-computable
+  cases (London→Paris distance, a right-angle turn measuring 90°, one degree of latitude) rather
+  than against whatever the code happened to return.
+- **The DoD case, on the real test locations:**
+
+  | route | Colombo Fort → Viharamahadevi | Hyde Park loop |
+  |---|---|---|
+  | fastest (arterial) | nature **0.257**, air 0.406 | nature **0.338**, air 0.386 |
+  | nature (park) | nature **0.659**, air 0.925 | nature **0.785**, air 0.899 |
+  | accessible | nature 0.271, air 0.648 | nature 0.383, air 0.745 |
+
+  A park route scores roughly 2.5× an arterial one, and the air proxy orders footway above
+  residential above arterial, as it should.
+- `test_untagged_spans_lower_coverage_but_never_move_the_score` pins the rule that an absent tag
+  can only reduce coverage, never raise or lower a score.
+- `test_missing_elevation_does_not_drag_the_nature_score_down` pins the renormalisation: without
+  it, a region where the router returns no elevation would look uniformly worse for a reason that
+  has nothing to do with the place.
+
+**Live API calls used:** 0.
+
+**Decisions**
+
+- **`scoring_method` stays `"placeholder"` on routes built from synthetic fixtures, even though
+  the scoring maths genuinely ran.** The maths is real; the terrain it ran on is invented. A
+  number derived from invented terrain is not a measurement of anywhere, and calling it
+  `geometry_only` would imply it was. Recording GraphHopper fixtures with a real key flips these
+  to `geometry_only` automatically.
+- `shade` is `null`, not `0.0`, until Phase I computes a real sun position. Zero shade is a claim
+  about a place; "not measured" is a different claim, and the contract now distinguishes them.
+- The naturalness and air tables are judgements, not measurements. That is exactly why every
+  response carries `scoring_method`, and why the CLIP path exists.
+- The test helper's metres-per-degree constant was switched from the usual 111_320 shorthand to
+  the value implied by `EARTH_RADIUS_M`, so assertions can be exact instead of approximate.
+
+**Deviations:** none.

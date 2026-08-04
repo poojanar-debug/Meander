@@ -609,6 +609,12 @@ fieldset.chips legend {
   text-align: right;
   font-variant-numeric: tabular-nums;
 }
+/* Spans the bar and the number: "not measured" is a sentence, not a value. */
+.scores__unmeasured {
+  grid-column: 2 / -1;
+  color: var(--ink-muted);
+  font-style: italic;
+}
 
 .card__method {
   font-size: 0.75rem;

@@ -69,21 +69,30 @@ export default function RouteCard({ route, selected, onSelect }) {
           </p>
 
           <dl className="scores">
-            {SCORE_ROWS.map((row) => (
-              <div className="scores__row" key={row.key}>
-                <dt>{row.label}</dt>
-                <dd className="scores__track" aria-hidden="true">
-                  <span
-                    className="scores__fill"
-                    style={{
-                      width: `${Math.round((route.scores?.[row.key] ?? 0) * 100)}%`,
-                      background: row.color,
-                    }}
-                  />
-                </dd>
-                <dd className="scores__value tabular">{fmtPct(route.scores?.[row.key])}</dd>
-              </div>
-            ))}
+            {SCORE_ROWS.map((row) => {
+              // null is "we did not measure this", which is a different
+              // statement from zero. It never renders as an empty bar.
+              const value = route.scores?.[row.key]
+              const measured = typeof value === 'number'
+              return (
+                <div className="scores__row" key={row.key}>
+                  <dt>{row.label}</dt>
+                  {measured ? (
+                    <>
+                      <dd className="scores__track" aria-hidden="true">
+                        <span
+                          className="scores__fill"
+                          style={{ width: `${Math.round(value * 100)}%`, background: row.color }}
+                        />
+                      </dd>
+                      <dd className="scores__value tabular">{fmtPct(value)}</dd>
+                    </>
+                  ) : (
+                    <dd className="scores__unmeasured">not measured</dd>
+                  )}
+                </div>
+              )
+            })}
           </dl>
         </>
       )}
