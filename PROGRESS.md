@@ -783,3 +783,78 @@ visible, not against the working tree:
 49 fixtures (18 synthetic GraphHopper, 31 recorded live from Nominatim, Open-Meteo and Overpass).
 
 **Deviations:** none. Nothing was deployed; `DEPLOY.md` remains a manual step.
+
+---
+
+## Self-hosted GraphHopper · 2026-08-04
+
+The hosted free tier cannot execute a `custom_model`, so `nature` and
+`accessible` came back blocked. Self-hosting removes that restriction — and
+turned out to add a capability the hosted API never had.
+
+**Built**
+
+- JDK 21 + GraphHopper 11.0, `graphhopper/config.yml`, `scripts/graphhopper.sh`
+  (`setup` / `serve` / `status` / `regions`).
+- Sri Lanka + Netherlands + Great Britain, merged with osmium into one 3.5 GB
+  extract → **18,556,187 nodes, 23,167,345 edges, 6.6 GB graph, 31 min import.**
+  One graph rather than three servers, so there is one endpoint and the app
+  needs no routing-by-region logic.
+- `MEANDER_GRAPHHOPPER_URL` points the app at it; `/api/health` reports which
+  server is live and whether custom models can run there.
+
+**Verified — `scripts/verify_selfhosted.py`, all four locations across all three regions**
+
+| Hyde Park, 35 min | duration | distance | barriers |
+|---|---|---|---|
+| fastest | 31 min | 2.5 km | 3 |
+| nature | 32 min | 2.5 km | 3 |
+| accessible | 37 min | 3.1 km | **1** |
+
+Three distinct geometries everywhere, `smoothness` present everywhere. The
+accessible route is longer *and* has fewer barriers — the custom model is
+steering around them, which is the whole point.
+
+**Six defects, every one found by running it rather than reasoning about it**
+
+1. `ch.disable` was sent on *every* request including `fastest`, which needs no
+   custom model — and it is a paid feature. "Free packages cannot use flexible
+   mode" took down the baseline and with it the whole request.
+2. `round_trip` needs `ch.disable` on a self-hosted server with CH prepared
+   ("algorithm=round_trip cannot be used with CH") but must **not** have it on
+   the hosted API, where flexible mode is paid. Now conditional on the server.
+3. The accessible model referenced `surface == EARTH`, which fails the whole
+   request. `EARTH` is a valid *OSM tag* but not a router enum value.
+   `accessibility.py` keeps the wider OSM vocabulary deliberately — it evaluates
+   tags rather than compiling them. The valid enum sets are now recorded in
+   `routing.py`, probed from a live server.
+4. `import.osm.ignored_highways` — GraphHopper's own example excludes `footway`,
+   `cycleway`, `path` and **`steps`**. Correct for a car-only server;
+   catastrophic here. **If steps are never imported the graph cannot contain
+   them, the hard accessibility check can never fire, and the app would
+   confidently report a staircase as step-free.**
+5. An 8 GB server heap against a 6.6 GB graph dies with `OutOfMemoryError`
+   *after* a 31-minute import has already succeeded — a confusing place to fail.
+6. The test suite was not hermetic: `MEANDER_GRAPHHOPPER_URL` decides which path
+   details are requested, and therefore the signature every committed fixture is
+   keyed on. A developer with it exported watched the whole suite fail on fixture
+   misses. conftest now forces it.
+
+**What self-hosting bought beyond the two presets**
+
+`smoothness` is now an encoded value, so the accessible model can *avoid* bad
+surfaces rather than only report them afterwards. It is one of the five hard
+constraints and the hosted API never exposed it — until now that constraint
+could not fire from routing data at all.
+
+**Known issue, not fixed**
+
+Colombo's nature loop returns 117 min against a 30-min budget — 2.8× the
+`fastest` duration, well past the 1.6× cap. The distance_influence ladder
+escalates and still cannot get under it, so `route_nature` returns the best of
+the three rungs. The other three locations are all within 5% of fastest, so this
+is Colombo-specific — sparse green infrastructure sends the model a long way.
+The cap is currently advisory when no rung satisfies it; it should either be
+enforced or the route should say it exceeded the budget.
+
+**Live API calls:** GraphHopper hosted 0 (self-hosted is unmetered), Nominatim 3.
