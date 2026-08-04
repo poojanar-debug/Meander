@@ -260,3 +260,45 @@ five test locations.
   and the exception is recorded here rather than left silent.
 - The map degrades explicitly: if WebGL is unavailable or the style host is blocked, a visible
   message says so and points at the list, which already carries the whole answer.
+
+---
+
+## Phase E — Deploy-ready · 2026-08-04
+
+**Done**
+
+- `render.yaml` — Blueprint for the backend. Every secret is `sync: false`, so Render prompts for
+  it and no key can end up in the file. `MEANDER_STRICT_STARTUP=1` and `MEANDER_FIXTURES=live` in
+  production.
+- `frontend/vercel.json` — SPA rewrite, immutable asset caching, and a real security header set
+  including a CSP that allows exactly `'self'` plus `tiles.openfreemap.org` and the API origin.
+- `DEPLOY.md` — step by step, with the two-part CORS/CSP closing step called out explicitly
+  because the site is broken until both are done, and a "things that look like bugs and are not"
+  table.
+- Frontend now honours `VITE_API_BASE`, defaulting to same-origin `/api` so local dev is unchanged.
+
+**Verified**
+
+- Fresh `python3.13 -m venv` + `pip install -r backend/requirements-deploy.txt` succeeds, and
+  `torch`, `open_clip` and `torchvision` are all absent (`find_spec` is `None` for each).
+- That build boots under uvicorn and serves both endpoints:
+  - `/api/health` → `"status": "ok"`, `"clip_available": false`, and a fixture inventory correctly
+    reporting 18 synthetic GraphHopper fixtures against 5 recorded Nominatim ones.
+  - `POST /api/routes` → three routes, 37.2 / 52.7 / 40.7 min, each labelled
+    `scoring_method: "placeholder"` and `synthetic_upstream: true`.
+
+**Live API calls used:** 0.
+
+**Decisions**
+
+- Split deployment uses `VITE_API_BASE` rather than a Vercel rewrite. A rewrite cannot read an
+  environment variable, so the backend host would have to be hard-coded into `vercel.json` — this
+  way the same commit deploys against any backend, and the CSP is the only place the host is named.
+- `MEANDER_CACHE_DB` points at `/tmp` on Render. The free plan's filesystem is ephemeral, so a
+  cache under the repo root would be silently discarded anyway; naming `/tmp` makes that explicit
+  instead of surprising. Segment scores survive because they live in the committed `data/cache.db`.
+- The daily ceiling defaults to 120 routed requests (~360 GraphHopper credits of the 500/day free
+  tier), leaving headroom for geocoding and retries.
+
+**Deviations:** none. **Nothing was deployed** — this phase produces configuration and
+documentation only.

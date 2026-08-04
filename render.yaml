@@ -1,0 +1,79 @@
+# Render blueprint for the Meander backend.
+#
+# The free instance has 512 MB of RAM. The build command installs
+# requirements-deploy.txt, which deliberately contains neither torch nor
+# open-clip-torch: CLIP needs 2-3 GB and would be killed at import. Scenery
+# scores come from data/cache.db, pre-warmed offline by backend/batch_score.py
+# and committed to the repo. Anything uncached falls back to numpy-only
+# geometry scoring, and the API says which path it used.
+#
+#   Render dashboard -> New -> Blueprint -> point at this repo.
+#
+# Every secret below is `sync: false`, meaning Render prompts for it and never
+# stores it in this file. Do not replace any of them with a literal value.
+
+services:
+  - type: web
+    name: meander-api
+    runtime: python
+    plan: free
+    # Pick the region closest to your users; this is only the default.
+    region: frankfurt
+    branch: main
+    rootDir: .
+    buildCommand: pip install --no-cache-dir -r backend/requirements-deploy.txt
+    startCommand: uvicorn backend.main:app --host 0.0.0.0 --port $PORT --workers 1
+    healthCheckPath: /api/health
+    autoDeploy: true
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.13.1"
+
+      # --- secrets: Render prompts for these, they are never committed ------
+      - key: GRAPHHOPPER_KEY
+        sync: false
+      - key: MAPILLARY_TOKEN
+        sync: false
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: OSM_DEV_TOKEN
+        sync: false
+
+      # Refuse to boot with a key missing, rather than silently degrading a
+      # production deployment to fixtures.
+      - key: MEANDER_STRICT_STARTUP
+        value: "1"
+
+      # `live` in production: the deployed service must answer real requests.
+      # Fixtures are a development tool.
+      - key: MEANDER_FIXTURES
+        value: live
+
+      # Comma-separated. Set this to your deployed frontend origin — CORS is
+      # locked to it plus localhost. Without it the browser will refuse every
+      # request and the failure looks like a backend outage.
+      - key: MEANDER_ALLOWED_ORIGINS
+        sync: false
+
+      # Rate limiting. The daily ceiling sits under the GraphHopper free tier:
+      # 500 credits/day at ~3 credits per routed request is ~166, so 120 leaves
+      # headroom for geocoding and retries.
+      - key: MEANDER_DAILY_ROUTE_CEILING
+        value: "120"
+      - key: MEANDER_RATE_CAPACITY
+        value: "12"
+      - key: MEANDER_RATE_REFILL_PER_MIN
+        value: "3"
+      - key: MEANDER_ROUTE_CACHE_TTL_S
+        value: "21600"
+
+      - key: MEANDER_LOG_LEVEL
+        value: INFO
+
+      # The free plan has an ephemeral filesystem: this database is reset on
+      # every deploy and every cold start. That is intentional — the committed
+      # data/cache.db provides the pre-warmed segment scores, and the
+      # whole-route cache is a performance optimisation, not state anyone
+      # depends on.
+      - key: MEANDER_CACHE_DB
+        value: /tmp/meander-cache.db

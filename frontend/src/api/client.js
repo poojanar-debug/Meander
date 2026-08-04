@@ -8,6 +8,18 @@
 
 const isMock = import.meta.env.VITE_MOCK_API === '1'
 
+/**
+ * Where the API lives.
+ *
+ * Empty by default, which means same-origin `/api` — correct for local dev
+ * (Vite proxies it) and for any deployment that puts both halves behind one
+ * host. Split deployments set `VITE_API_BASE` to the backend's origin at build
+ * time, and that origin must appear in the backend's `MEANDER_ALLOWED_ORIGINS`.
+ */
+const API_BASE = (import.meta.env.VITE_API_BASE ?? '').replace(/\/$/, '')
+
+const url = (path) => `${API_BASE}${path}`
+
 export function usingMockApi() {
   return isMock
 }
@@ -60,7 +72,7 @@ async function toApiError(res) {
 async function realFetchRoutes(req, { signal, onProgress, onRoute }) {
   let res
   try {
-    res = await fetch('/api/routes', {
+    res = await fetch(url('/api/routes'), {
       method: 'POST',
       signal,
       headers: { 'Content-Type': 'application/json', Accept: 'text/event-stream' },
@@ -117,7 +129,7 @@ async function realFetchRoutes(req, { signal, onProgress, onRoute }) {
 async function realGeocode(q, { signal }) {
   let res
   try {
-    res = await fetch(`/api/geocode?q=${encodeURIComponent(q)}`, { signal })
+    res = await fetch(url(`/api/geocode?q=${encodeURIComponent(q)}`), { signal })
   } catch (err) {
     if (err?.name === 'AbortError') throw err
     throw new ApiError('Could not reach the place search.')
