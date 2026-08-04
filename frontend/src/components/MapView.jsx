@@ -9,8 +9,13 @@ const INITIAL_CENTER = [79.8521, 6.921]
 const INITIAL_ZOOM = 12.6
 
 // How long to wait for the basemap before giving up on it and showing the
-// fallback. Generous: a cold CDN on a slow connection is not a failure.
-const MAP_LOAD_TIMEOUT_MS = 8000
+// fallback. Deliberately generous: a cold tile CDN fetching style, sprites,
+// glyphs and a first ring of vector tiles can take well over ten seconds on a
+// slow connection, and flashing "the map could not load" at someone whose map
+// is merely loading is worse than making them wait. This only needs to catch a
+// map that is never coming — a blocked tile host, a CSP that forgot
+// connect-src, a stalled worker — none of which resolve themselves.
+const MAP_LOAD_TIMEOUT_MS = 20000
 
 const prefersReducedMotion = () =>
   typeof window !== 'undefined' &&
@@ -57,68 +62,109 @@ export default function MapView({ routes, selected, origin, dest, onSelect }) {
   useEffect(() => {
     if (!containerRef.current || mapRef.current) return undefined
 
-    let map
-    try {
-      map = new maplibregl.Map({
-        container: containerRef.current,
-        style: STYLE_URL,
-        center: INITIAL_CENTER,
-        zoom: INITIAL_ZOOM,
-        attributionControl: { compact: true },
-      })
-    } catch (err) {
-      // WebGL unavailable, or the style host is blocked. The route list still
-      // carries the whole answer, so this degrades rather than breaking.
-      console.warn('Meander: map could not start —', err)
-      setFailed(true)
-      return undefined
-    }
+    // Creation is deferred by one frame, and that is load-bearing.
+    //
+    // React StrictMode runs every effect twice in development: mount, clean up,
+    // mount again, synchronously. Creating the map inline therefore builds one,
+    // calls map.remove() on it while its workers are still starting, and builds
+    // a second. MapLibre does not survive that — the second map loads its style
+    // and its sprites and then requests no tiles at all, forever, with no error
+    // event. The symptom is a blank basemap in `npm run dev` while the
+    // production build works, which is a miserable thing to debug.
+    //
+    // Deferring past that synchronous cycle means the teardown cancels the
+    // pending creation before any map exists, so exactly one is ever built.
+    //
+    // setTimeout rather than requestAnimationFrame: rAF does not fire at all in
+    // a hidden tab, so opening the app in a background tab would leave the map
+    // permanently uncreated rather than merely unpainted.
+    let cancelled = false
+    let map = null
+    let deadline
+    let observer
+    let onVisibility
 
-    // A map that never finishes loading is the failure mode this has to catch.
-    // MapLibre can sit in style-loading indefinitely — a sandboxed WebGL
-    // context, a stalled worker, a proxy that holds the connection open — and
-    // it emits no `error` for any of them. Without a deadline the user gets an
-    // unexplained grey rectangle forever, which is worse than being told the
-    // map is unavailable and pointed at the list that has the whole answer.
-    let settled = false
-    const deadline = setTimeout(() => {
-      if (!settled) {
-        console.warn('Meander: map did not finish loading; falling back to the route list')
+    const pending = setTimeout(() => {
+      if (cancelled || !containerRef.current) return
+      try {
+        map = new maplibregl.Map({
+          container: containerRef.current,
+          style: STYLE_URL,
+          center: INITIAL_CENTER,
+          zoom: INITIAL_ZOOM,
+          attributionControl: { compact: true },
+        })
+      } catch (err) {
+        // WebGL unavailable, or the style host is blocked. The route list still
+        // carries the whole answer, so this degrades rather than breaking.
+        console.warn('Meander: map could not start —', err)
         setFailed(true)
+        return
       }
-    }, MAP_LOAD_TIMEOUT_MS)
+      start(map)
+    }, 0)
 
-    map.on('load', () => {
-      settled = true
-      clearTimeout(deadline)
-      setReady(true)
-      setFailed(false)
-    })
-    map.on('error', (event) => {
-      if (event?.error?.status === 404 || event?.error?.message?.includes('style')) {
+    function start(map) {
+      // A map that never finishes loading is the failure mode this has to
+      // catch. MapLibre can sit in style-loading indefinitely — a blocked tile
+      // host, a CSP missing connect-src, a stalled worker — and emits no
+      // `error` for any of them. Without a deadline the user gets an
+      // unexplained grey rectangle forever, which is worse than being told the
+      // map is unavailable and pointed at the list that has the whole answer.
+      // The deadline only runs while the page is actually visible. A hidden tab
+      // does not render, so MapLibre legitimately never reaches `load`, and a
+      // plain timer would blame the map for the browser's own power saving —
+      // showing "the map could not load" on a tab nobody has looked at yet.
+      let settled = false
+      const startDeadline = () => {
+        clearTimeout(deadline)
+        deadline = setTimeout(() => {
+          if (settled) return
+          console.warn('Meander: map did not finish loading; falling back to the route list')
+          setFailed(true)
+        }, MAP_LOAD_TIMEOUT_MS)
+      }
+      if (!document.hidden) startDeadline()
+
+      onVisibility = () => {
+        if (!settled && !document.hidden) startDeadline()
+      }
+      document.addEventListener('visibilitychange', onVisibility)
+
+      map.on('load', () => {
         settled = true
         clearTimeout(deadline)
-        setFailed(true)
-      }
-    })
-    map.addControl(new maplibregl.NavigationControl({ showCompass: false }), 'top-right')
-    mapRef.current = map
+        setReady(true)
+        setFailed(false)
+      })
+      map.on('error', (event) => {
+        if (event?.error?.status === 404 || event?.error?.message?.includes('style')) {
+          settled = true
+          clearTimeout(deadline)
+          setFailed(true)
+        }
+      })
+      map.addControl(new maplibregl.NavigationControl({ showCompass: false }), 'top-right')
+      mapRef.current = map
 
-    // The container is sized by a CSS clamp and by the 860px breakpoint, so it
-    // changes height without the window necessarily changing size — rotating a
-    // phone, or a desktop crossing the breakpoint. MapLibre's own trackResize
-    // did not pick that up here: the canvas stayed at its initial height and
-    // left a band of empty container below it. Observing the element directly
-    // is reliable regardless of how the resize was caused.
-    const observer = new ResizeObserver(() => map.resize())
-    observer.observe(containerRef.current)
+      // The container is sized by a CSS clamp and by the 860px breakpoint, so
+      // it changes height without the window necessarily changing size — a
+      // phone rotating, or a desktop crossing the breakpoint. MapLibre's own
+      // trackResize did not pick that up here: the canvas kept its initial
+      // height and left a band of empty container below it.
+      observer = new ResizeObserver(() => map.resize())
+      observer.observe(containerRef.current)
+    }
 
     return () => {
+      cancelled = true
+      clearTimeout(pending)
       clearTimeout(deadline)
-      observer.disconnect()
+      if (onVisibility) document.removeEventListener('visibilitychange', onVisibility)
+      observer?.disconnect()
       markersRef.current.forEach((m) => m.remove())
       markersRef.current = []
-      map.remove()
+      map?.remove()
       mapRef.current = null
       setReady(false)
     }

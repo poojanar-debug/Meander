@@ -116,6 +116,39 @@ uvicorn backend.main:app --reload --port 8000
 curl -s localhost:8000/api/health | python3 -m json.tool
 ```
 
+### Making it work for any location, not just the demo ones
+
+Out of the box the backend runs on **recorded fixtures**, so only five demo
+locations answer — Colombo Fort, Viharamahadevi Park, Hyde Park, Euston Road and
+Vondelpark. Anything else returns *"this server is running from recorded
+fixtures and has none for that request"*.
+
+Two changes make it work anywhere. **One free API key, and one line in `.env`.**
+
+1. Get a GraphHopper key — free, 500 credits/day:
+   https://www.graphhopper.com/ → Dashboard → API keys
+2. In `.env`, set `GRAPHHOPPER_KEY=` to it and `MEANDER_FIXTURES=live`
+3. Raise the `MEANDER_BUDGET_*` caps. **This step is not optional and the
+   failure is confusing without it:** those are lifetime development guard
+   rails, and 80 GraphHopper calls is about 26 route requests, after which the
+   service silently drops back to replay-only and every new location fails as
+   though the key were wrong. `.env.example` has the values.
+4. Restart the backend.
+
+Everything else already works for any location with no key at all: place search
+(Nominatim), rest stops (Overpass), air quality and cloud cover (Open-Meteo),
+and sun position (computed locally).
+
+Two things stay optional:
+
+| | without it |
+|---|---|
+| `MAPILLARY_TOKEN` + `python3 -m backend.batch_score` | scenery is scored from route shape and OSM tags; every route reports `scoring_method: "geometry_only"` instead of `"clip"` |
+| `ANTHROPIC_API_KEY` | `narration` stays `null` and the card says the description is still being written |
+
+Watch your quota at `/api/health` under `rate_limit.served_today`. The default
+daily ceiling of 120 routed requests is ~360 of the 500 credits.
+
 ### Frontend
 
 ```bash

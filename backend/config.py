@@ -11,7 +11,15 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Literal
 
+from dotenv import load_dotenv
+
 REPO_ROOT = Path(__file__).resolve().parent.parent
+
+# Load .env before anything below reads the environment. `override=False` is the
+# important part: a real environment variable always beats the file, so a
+# deployment's dashboard-set secrets are never shadowed by a stray .env that
+# ended up in the image. Missing file is a no-op.
+load_dotenv(REPO_ROOT / ".env", override=False)
 DATA_DIR = REPO_ROOT / "data"
 FIXTURE_DIR = REPO_ROOT / "fixtures"
 CACHE_DB_PATH = Path(os.environ.get("MEANDER_CACHE_DB") or (DATA_DIR / "cache.db"))
@@ -40,31 +48,6 @@ SERVICE_HOSTS: dict[str, str] = {
     "api06.dev.openstreetmap.org": "osm_dev",
 }
 
-# Hard ceilings on live network calls for the whole project, enforced in
-# fixtures.py. Hitting a cap downgrades that service to replay-only rather than
-# failing the run.
-LIVE_CALL_BUDGET: dict[str, int] = {
-    "graphhopper": 80,
-    "mapillary": 200,
-    "overpass": 50,
-    "anthropic": 20,
-    "open_meteo": 100,
-    "nominatim": 40,
-    "osm_dev": 20,
-}
-
-# Query params and headers that carry secrets. Stripped from the fixture
-# signature (so a fixture is portable between developers) and redacted from the
-# fixture file on disk.
-SECRET_QUERY_PARAMS = frozenset({"key", "access_token", "api_key"})
-SECRET_HEADERS = frozenset({"authorization", "x-api-key", "anthropic-api-key"})
-
-# Every request goes through these. Kept low so a wedged upstream degrades the
-# response instead of holding a request open.
-HTTP_TIMEOUT_S = 12.0
-HTTP_CONNECT_TIMEOUT_S = 5.0
-
-
 def _env_flag(name: str, default: bool = False) -> bool:
     raw = os.environ.get(name)
     if raw is None:
@@ -80,6 +63,58 @@ def _env_int(name: str, default: int) -> int:
         return int(raw)
     except ValueError:
         return default
+
+
+# Hard ceilings on live network calls, enforced in fixtures.py. Hitting a cap
+# downgrades that service to replay-only rather than failing the run.
+#
+# These are *development* guard rails: their job is to stop an iteration loop
+# quietly draining a 500-credit/day quota and then failing in a way that looks
+# exactly like a code bug. They are lifetime totals, not per-day, and they
+# persist in fixtures/_budget.json.
+#
+# **They are far too small for real use.** At 3 credits per route request an
+# 80-call GraphHopper budget is about 26 route requests, after which every new
+# location returns "no fixture for that request". Running the app for arbitrary
+# locations means raising these — see MEANDER_BUDGET_* below. In production the
+# quota is protected by the rate limiter and the daily ceiling instead, which
+# are per-day and reset.
+_DEV_LIVE_CALL_BUDGET: dict[str, int] = {
+    "graphhopper": 80,
+    "mapillary": 200,
+    "overpass": 50,
+    "anthropic": 20,
+    "open_meteo": 100,
+    "nominatim": 40,
+    "osm_dev": 20,
+}
+
+
+def _resolve_live_call_budget() -> dict[str, int]:
+    """Per-service caps, overridable with MEANDER_BUDGET_<SERVICE>.
+
+    ``MEANDER_BUDGET_GRAPHHOPPER=100000`` effectively removes the cap for that
+    service. Set them all when you want the app to answer for any location
+    rather than only the recorded demo ones.
+    """
+    return {
+        service: _env_int(f"MEANDER_BUDGET_{service.upper()}", default)
+        for service, default in _DEV_LIVE_CALL_BUDGET.items()
+    }
+
+
+LIVE_CALL_BUDGET: dict[str, int] = _resolve_live_call_budget()
+
+# Query params and headers that carry secrets. Stripped from the fixture
+# signature (so a fixture is portable between developers) and redacted from the
+# fixture file on disk.
+SECRET_QUERY_PARAMS = frozenset({"key", "access_token", "api_key"})
+SECRET_HEADERS = frozenset({"authorization", "x-api-key", "anthropic-api-key"})
+
+# Every request goes through these. Kept low so a wedged upstream degrades the
+# response instead of holding a request open.
+HTTP_TIMEOUT_S = 12.0
+HTTP_CONNECT_TIMEOUT_S = 5.0
 
 
 @dataclass(frozen=True)
