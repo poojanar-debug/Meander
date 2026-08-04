@@ -42,6 +42,7 @@ from .enrich import (
 )
 from .enrich import RestStop as EnrichRestStop
 from .geometry import score_geometry
+from .health import check_routing
 from .logging_setup import configure_logging, get_logger
 from .metrics import metrics
 from .models import (
@@ -921,8 +922,57 @@ async def report_barrier(report: BarrierReport, request: Request) -> Any:
 # ---------------------------------------------------------------------------
 
 
+@app.get("/healthz")
+async def healthz() -> dict[str, str]:
+    """Liveness. No disk, no upstream, no dependencies.
+
+    This is what the load balancer polls, so it must keep answering while the
+    instance is degraded: a readiness failure should take an instance out of
+    rotation, not have it killed and restarted straight back into the same
+    failure. If this process can execute this function, it is alive.
+    """
+    return {"status": "ok", "version": __version__}
+
+
+@app.get("/readyz")
+async def readyz(response: Response) -> dict[str, Any]:
+    """Readiness. 503 when this instance genuinely cannot serve a route.
+
+    ⚠ "Required" here is Settings.missing_required_keys(), which is a much
+    shorter list than missing_keys(). The latter names MAPILLARY_TOKEN and
+    ANTHROPIC_API_KEY whenever they are unset, and neither is needed to serve
+    routes — CLIP is cache-read-only in the deploy image and narration is
+    simply skipped without a key. Wiring readiness to that list would 503 a
+    perfectly healthy instance for ever and the target would never register.
+    """
+    checks: dict[str, Any] = {}
+
+    missing = settings.missing_required_keys()
+    checks["keys"] = {"ok": not missing, "missing": missing}
+
+    try:
+        await run_in_threadpool(get_cache().segment_count)
+        checks["cache"] = {"ok": True}
+    except Exception as exc:  # noqa: BLE001 — any cache failure is unreadiness
+        checks["cache"] = {"ok": False, "detail": type(exc).__name__}
+
+    routing_ok, routing_detail = await check_routing()
+    checks["routing"] = {"ok": routing_ok, "detail": routing_detail}
+
+    ready = all(c["ok"] for c in checks.values())
+    if not ready:
+        response.status_code = 503
+    return {"status": "ready" if ready else "not_ready", "checks": checks}
+
+
 @app.get("/api/health")
-def health() -> dict[str, Any]:
+def health(verbose: int = Query(0, ge=0, le=1)) -> dict[str, Any]:
+    """The rich human diagnostic. Not a probe — see /healthz and /readyz.
+
+    Deliberately does not name which secrets are unset, and does not publish
+    how much of the rate-limit budget is left: both are free reconnaissance for
+    an anonymous caller, and neither helps the operator more than keys_ok does.
+    """
     from .fixtures import budget_regime, budget_snapshot, fixture_inventory
 
     cache = get_cache()
@@ -949,15 +999,29 @@ def health() -> dict[str, Any]:
             "path_details": path_details(),
         },
         "fixture_mode": settings.fixture_mode,
-        "missing_keys": settings.missing_keys(),
+        # Not the list of names: telling an anonymous caller exactly which
+        # secrets this deployment is missing is free reconnaissance. The
+        # operator needs the boolean; the names are in the startup log.
+        "keys_ok": not settings.missing_keys(),
+        "required_keys_ok": not settings.missing_required_keys(),
         "cache": cache.stats(),
-        "live_call_budget": {**budget_regime(), **budget_snapshot()},
-        "fixtures": fixture_inventory(),
+        "live_call_budget": budget_regime(),
         "counters": metrics.snapshot(),
         "rate_limit": {
             "per_ip_capacity": settings.per_ip_bucket_capacity,
             "per_ip_refill_per_min": settings.per_ip_refill_per_min,
             "daily_ceiling": settings.global_daily_route_ceiling,
+            # served_today, but never `remaining`: publishing how much headroom
+            # is left tells anyone who asks exactly how much more to send to
+            # take the service down for the day.
             "served_today": limiter.served_today(),
         },
+        # fixture_inventory() walks the whole fixture tree and JSON-parses every
+        # file — 150-odd files, on every call, on an endpoint anyone can hit.
+        # Behind ?verbose=1, and the budget counters with it.
+        **(
+            {"fixtures": fixture_inventory(), "live_call_counters": budget_snapshot()}
+            if verbose
+            else {}
+        ),
     }

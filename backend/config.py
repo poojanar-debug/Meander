@@ -261,6 +261,9 @@ class Settings:
 
         A self-hosted GraphHopper needs no key, so demanding one would make
         MEANDER_STRICT_STARTUP refuse to boot a perfectly good deployment.
+
+        ⚠ This is a *completeness* list, not a readiness list. Two of the three
+        are optional at runtime — see missing_required_keys().
         """
         missing = []
         if not self.graphhopper_key and not graphhopper_is_self_hosted():
@@ -270,6 +273,26 @@ class Settings:
         if not self.anthropic_api_key:
             missing.append("ANTHROPIC_API_KEY")
         return missing
+
+    def missing_required_keys(self) -> list[str]:
+        """Keys without which this instance genuinely cannot serve a route.
+
+        Deliberately much shorter than missing_keys(), and readiness must use
+        this one. MAPILLARY_TOKEN and ANTHROPIC_API_KEY are in missing_keys()
+        whenever they are unset, and **neither is needed to serve routes**: CLIP
+        is cache-read-only in the deploy image, and narration is simply skipped
+        without a key. Wiring readiness to missing_keys() would 503 a perfectly
+        healthy instance for ever and the load-balancer target would never come
+        into service.
+
+        In replay mode nothing is required at all — that is the keyless demo,
+        and it answers for the recorded locations without any credentials.
+        """
+        if self.fixture_mode == "replay":
+            return []
+        if not self.graphhopper_key and not graphhopper_is_self_hosted():
+            return ["GRAPHHOPPER_KEY"]
+        return []
 
 
 def _resolve_fixture_mode() -> FixtureMode:
