@@ -34,3 +34,8 @@ Thumbs.db
 .idea/
 .vscode/
 *.swp
+
+# Agent tooling scratch. Nothing the project needs lives here — in particular
+# .claude/worktrees/ holds checkouts of this very repository, and committing it
+# would nest the repo inside itself.
+.claude/
