@@ -51,6 +51,7 @@ from .config import (
     SECRET_HEADERS,
     SECRET_QUERY_PARAMS,
     SERVICE_HOSTS,
+    graphhopper_is_self_hosted,
     settings,
 )
 from .logging_setup import get_logger
@@ -175,8 +176,19 @@ def fixture_path(service: str, sig: str) -> Path:
 # ---------------------------------------------------------------------------
 
 
+def utc_day() -> str:
+    """Today's UTC date. A seam, so the rollover can be tested without waiting."""
+    return datetime.now(UTC).date().isoformat()
+
+
 class LiveCallBudget:
-    """Per-service hard ceiling on live calls, persisted across processes.
+    """Per-service ceiling on live calls, persisted across processes.
+
+    **Per UTC day, not per lifetime.** It used to be a lifetime total with no
+    reset anywhere — `reset()` existed but had no caller in production or in
+    tests — so the only way to get more calls was to know that
+    ``fixtures/_budget.json`` existed and delete it. Nobody should have to
+    learn that.
 
     Single-process locking only. Two backends sharing one checkout could
     overshoot slightly; the caps have enough headroom that this does not matter.
@@ -188,6 +200,7 @@ class LiveCallBudget:
         self.caps = dict(caps if caps is not None else LIVE_CALL_BUDGET)
         self._lock = threading.Lock()
         self._warned: set[str] = set()
+        self._day: str = utc_day()
         self._state: dict[str, int] = self._load()
 
     def _load(self) -> dict[str, int]:
@@ -198,13 +211,30 @@ class LiveCallBudget:
         except (OSError, json.JSONDecodeError) as exc:
             log.warning("budget_file_unreadable", extra={"error": str(exc)})
             return {}
+        # A file from a previous day is stale, not authoritative. Counters from
+        # yesterday must not eat into today's allowance.
+        if raw.get("day") != self._day:
+            return {}
         counts = raw.get("live_calls", {})
         return {k: int(v) for k, v in counts.items() if isinstance(v, int | float)}
+
+    def _roll_if_new_day(self) -> None:
+        """Zero the counters when the UTC date has moved on. Caller holds the lock."""
+        today = utc_day()
+        if today != self._day:
+            log.info("live_call_budget_rolled", extra={"from_day": self._day, "to_day": today})
+            self._day = today
+            self._state = {}
+            self._warned = set()
 
     def _save(self) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         payload = {
-            "note": "Machine-local live-call counters. Gitignored. Delete to reset.",
+            "note": (
+                "Machine-local live-call counters, per UTC day. Gitignored. "
+                "Resets on its own at midnight UTC."
+            ),
+            "day": self._day,
             "updated_at": datetime.now(UTC).isoformat(),
             "caps": self.caps,
             "live_calls": self._state,
@@ -219,14 +249,17 @@ class LiveCallBudget:
         return self.caps.get(service, 0)
 
     def spent(self, service: str) -> int:
-        return self._state.get(service, 0)
+        with self._lock:
+            self._roll_if_new_day()
+            return self._state.get(service, 0)
 
     def remaining(self, service: str) -> int:
         return max(0, self.cap_for(service) - self.spent(service))
 
     def try_spend(self, service: str, cost: int = 1) -> bool:
-        """Reserve ``cost`` live calls. False means the cap is reached."""
+        """Reserve ``cost`` live calls. False means today's cap is reached."""
         with self._lock:
+            self._roll_if_new_day()
             used = self._state.get(service, 0)
             if used + cost > self.cap_for(service):
                 if service not in self._warned:
@@ -245,19 +278,24 @@ class LiveCallBudget:
             self._save()
             return True
 
-    def snapshot(self) -> dict[str, dict[str, int]]:
+    def snapshot(self) -> dict[str, Any]:
         with self._lock:
+            self._roll_if_new_day()
             return {
-                service: {
-                    "cap": cap,
-                    "spent": self._state.get(service, 0),
-                    "remaining": max(0, cap - self._state.get(service, 0)),
-                }
-                for service, cap in sorted(self.caps.items())
+                "day": self._day,
+                "services": {
+                    service: {
+                        "cap": cap,
+                        "spent": self._state.get(service, 0),
+                        "remaining": max(0, cap - self._state.get(service, 0)),
+                    }
+                    for service, cap in sorted(self.caps.items())
+                },
             }
 
     def reset(self) -> None:
         with self._lock:
+            self._day = utc_day()
             self._state = {}
             self._warned = set()
             self._save()
@@ -276,8 +314,52 @@ def get_budget() -> LiveCallBudget:
     return _budget
 
 
-def budget_snapshot() -> dict[str, dict[str, int]]:
+def budget_snapshot() -> dict[str, Any]:
     return get_budget().snapshot()
+
+
+def budget_applies(service: str) -> tuple[bool, str]:
+    """Should the live-call budget be consulted for this request, and why not?
+
+    The budget exists for exactly one job: stop a **development loop** quietly
+    draining a 500-credit/day quota and then failing in a way that looks like a
+    bug in the routing code. It was never a production control, but it behaved
+    like one — ``fetch()`` skipped the fixture read in live mode and still
+    called ``try_spend()``, so the cap applied to a deployed instance.
+
+    Do the arithmetic that made this a launch blocker. ``_post_route`` passes
+    ``cost=3``, and one round-trip request runs up to 6 nature candidates plus
+    fastest plus accessible: 8 x 3 = 24 units against an 80-unit cap. **Three
+    route requests per container, ever**, and then 503 until someone deleted a
+    file they had never heard of.
+
+    Two exemptions, both structural rather than configured:
+
+    * **live mode** — production. It is protected by the per-IP rate limiter and
+      the daily route ceiling, which are per-day and reset. Setting five
+      MEANDER_BUDGET_* variables was a workaround for this, and forgetting one
+      produced a service that worked for three requests and then stopped.
+    * **a self-hosted router** — there is no quota to protect. Metering a server
+      you own and pay nothing to query at 3 credits a call is nonsense.
+    """
+    if current_mode() == "live":
+        return False, "live_mode"
+    if service == "graphhopper" and graphhopper_is_self_hosted():
+        return False, "self_hosted_router"
+    return True, "enforced"
+
+
+def budget_regime() -> dict[str, Any]:
+    """Which regime is in force, for /api/health."""
+    applies, reason = budget_applies("graphhopper")
+    return {
+        "enforced": applies,
+        "reason": reason,
+        "note": (
+            "Development guard rail only. Production is protected by the per-IP "
+            "rate limiter and the daily route ceiling."
+        ),
+    }
 
 
 def reset_budget_singleton() -> None:
@@ -509,27 +591,31 @@ async def fetch(
         if mode == "replay":
             raise FixtureMissing(service, sig, url)
 
-    budget = get_budget()
-    if not budget.try_spend(service, cost):
-        # Cap reached. Try the fixture one more time (in live mode we skipped it),
-        # then give up on this request without stopping the run.
-        cached = read_fixture(service, sig)
-        if cached is not None:
-            return cached
-        raise BudgetExhausted(
-            f"{service} live-call cap of {budget.cap_for(service)} reached and no fixture "
-            f"exists for {sig}. This request is being skipped, not retried."
-        )
+    metered, _ = budget_applies(service)
+    if metered:
+        # Only reachable in `record` mode, and only for a signature with no
+        # fixture — the read above already returned for anything cached. So an
+        # exhausted budget can never block a request that could have been
+        # served from disk, and there is nothing left to retry here. (The
+        # re-read that used to sit in this branch existed because live mode
+        # skipped the first one; live mode no longer reaches the budget at all.)
+        budget = get_budget()
+        if not budget.try_spend(service, cost):
+            raise BudgetExhausted(
+                f"{service} live-call cap of {budget.cap_for(service)} reached for today "
+                f"and no fixture exists for {sig}. This request is being skipped, not "
+                f"retried. The cap resets at midnight UTC."
+            )
+        remaining: int | None = budget.remaining(service)
+    else:
+        # No counter is touched and no JSON is written — this is the production
+        # path, and it used to do a synchronous disk write per upstream call.
+        remaining = None
 
     client = get_client()
     log.info(
         "live_call",
-        extra={
-            "service": service,
-            "sig": sig,
-            "cost": cost,
-            "remaining": budget.remaining(service),
-        },
+        extra={"service": service, "sig": sig, "cost": cost, "remaining": remaining},
     )
     response = await client.request(
         method.upper(),

@@ -131,20 +131,25 @@ def _env_int(name: str, default: int) -> int:
         return default
 
 
-# Hard ceilings on live network calls, enforced in fixtures.py. Hitting a cap
+# Ceilings on live network calls, enforced in fixtures.py. Hitting a cap
 # downgrades that service to replay-only rather than failing the run.
 #
-# These are *development* guard rails: their job is to stop an iteration loop
-# quietly draining a 500-credit/day quota and then failing in a way that looks
-# exactly like a code bug. They are lifetime totals, not per-day, and they
-# persist in fixtures/_budget.json.
+# These are *development* guard rails and nothing else: their job is to stop an
+# iteration loop quietly draining a 500-credit/day quota and then failing in a
+# way that looks exactly like a code bug. They are **per UTC day** and reset on
+# their own; the counters live in fixtures/_budget.json.
 #
-# **They are far too small for real use.** At 3 credits per route request an
-# 80-call GraphHopper budget is about 26 route requests, after which every new
-# location returns "no fixture for that request". Running the app for arbitrary
-# locations means raising these — see MEANDER_BUDGET_* below. In production the
-# quota is protected by the rate limiter and the daily ceiling instead, which
-# are per-day and reset.
+# fixtures.budget_applies() decides when they are consulted at all. They are
+# skipped entirely in live mode — production is protected by the rate limiter
+# and the daily route ceiling — and skipped for a self-hosted GraphHopper,
+# which has no quota to protect. Before that was true, a deployed instance
+# metered its own router at 3 credits a call against an 80-call *lifetime* cap,
+# which is three route requests per container and then 503 forever.
+#
+# Raising them with MEANDER_BUDGET_* is still available for a long recording
+# session against the hosted API, but is no longer load-bearing for a
+# deployment: forgetting one used to produce a service that worked three times
+# and then stopped.
 _DEV_LIVE_CALL_BUDGET: dict[str, int] = {
     "graphhopper": 80,
     "mapillary": 200,

@@ -682,7 +682,7 @@ async def report_barrier(report: BarrierReport, request: Request) -> Any:
 
 @app.get("/api/health")
 def health() -> dict[str, Any]:
-    from .fixtures import budget_snapshot, fixture_inventory
+    from .fixtures import budget_regime, budget_snapshot, fixture_inventory
 
     cache = get_cache()
     from .config import GRAPHHOPPER_URL, graphhopper_is_self_hosted, path_details
@@ -710,7 +710,7 @@ def health() -> dict[str, Any]:
         "fixture_mode": settings.fixture_mode,
         "missing_keys": settings.missing_keys(),
         "cache": cache.stats(),
-        "live_call_budget": budget_snapshot(),
+        "live_call_budget": {**budget_regime(), **budget_snapshot()},
         "fixtures": fixture_inventory(),
         "counters": metrics.snapshot(),
         "rate_limit": {

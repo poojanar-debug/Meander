@@ -234,14 +234,27 @@ def test_budget_snapshot_shape(tmp_path: Path) -> None:
     budget = fx.LiveCallBudget(tmp_path / "b.json", caps={"graphhopper": 80})
     budget.try_spend("graphhopper", 3)
 
-    assert budget.snapshot()["graphhopper"] == {"cap": 80, "spent": 3, "remaining": 77}
+    snap = budget.snapshot()
+    assert snap["day"] == fx.utc_day()
+    assert snap["services"]["graphhopper"] == {"cap": 80, "spent": 3, "remaining": 77}
 
 
 @pytest.mark.asyncio
-async def test_exhausted_budget_falls_back_to_a_fixture(tmp_fixture_dir: Path, fixture_mode,
-                                                        monkeypatch) -> None:
-    """Hitting a cap downgrades the service to replay-only; it must not stop the run."""
-    fixture_mode("live")
+async def test_an_exhausted_budget_never_blocks_a_request_that_has_a_fixture(
+    tmp_fixture_dir: Path, fixture_mode, monkeypatch
+) -> None:
+    """Hitting a cap downgrades the service to replay-only; it must not stop the run.
+
+    In `record` mode, not `live`: the budget is deliberately not consulted in
+    live mode any more, because that is production and the cap was only ever a
+    development guard rail. See test_live_call_budget.py.
+
+    The ordering is the point. The fixture read happens *before* the budget is
+    consulted, so a zero budget cannot stop a request that could have been
+    served from disk — which is also why the exhausted branch has nothing left
+    to retry.
+    """
+    fixture_mode("record")
     monkeypatch.setattr(fx, "_budget", fx.LiveCallBudget(tmp_fixture_dir / "b.json",
                                                          caps={"open_meteo": 0}))
     url = "https://api.open-meteo.com/v1/forecast"
