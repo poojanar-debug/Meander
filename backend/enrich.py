@@ -354,14 +354,6 @@ async def fetch_rest_stop_nodes(points: Sequence[LatLon]) -> list[dict[str, Any]
         return None
 
 
-async def fetch_rest_stops(points: Sequence[LatLon]) -> list[RestStop] | None:
-    """Rest stops along one route. Convenience wrapper over the two steps."""
-    elements = await fetch_rest_stop_nodes(points)
-    if elements is None:
-        return None
-    return rest_stops_on_route(points, elements)
-
-
 def rest_stops_on_route(points: Sequence[LatLon], elements: list[dict[str, Any]]
                         ) -> list[RestStop]:
     cum = cumulative_distance_m(points)

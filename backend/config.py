@@ -101,14 +101,6 @@ class Settings:
 
     log_level: str = "INFO"
 
-    def key_for(self, service: str) -> str | None:
-        return {
-            "graphhopper": self.graphhopper_key,
-            "mapillary": self.mapillary_token,
-            "anthropic": self.anthropic_api_key,
-            "osm_dev": self.osm_dev_token,
-        }.get(service)
-
     def missing_keys(self) -> list[str]:
         """Keys absent from the environment, in the order a deployer should add them."""
         missing = []

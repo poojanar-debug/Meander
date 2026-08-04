@@ -44,10 +44,6 @@ class Point(BaseModel):
     def to_latlon(self) -> LatLon:
         return LatLon(self.lat, self.lon)
 
-    @classmethod
-    def from_latlon(cls, p: LatLon) -> Point:
-        return cls(lat=p.lat, lon=p.lon)
-
 
 class RouteRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")

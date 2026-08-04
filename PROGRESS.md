@@ -650,3 +650,105 @@ correct: rest stops come back `null`, everything else is unaffected, and the res
   has been sent. The client turns it back into its normal error banner.
 
 **Deviations:** none.
+
+---
+
+## Phase K — Hostile self-audit · 2026-08-04
+
+Re-read as somebody trying to find a reason not to trust this. Findings first, then what was
+checked and came back clean.
+
+### Findings, all fixed
+
+**1 · Coordinates could reach the logs from the request path.** `_shape_upstream_error` logged
+GraphHopper's raw error text, and that text routinely embeds the caller's coordinates — *"Cannot
+find point 0: 51.5074889,-0.1622074"*. The project's own rule is that coordinates are never logged.
+Now classified into a coordinate-free label (`point_not_snappable`, `no_connection`, …) and the
+message itself is discarded. This was the most serious finding: it was in the request path, it
+would have shipped, and nothing in the test suite was looking for it.
+
+**2 · A segment key is a coordinate.** `cache.py` logged `segment_key` on a corrupt row, which is a
+rounded lat/lon pair. Corrupt rows are counted now, not named. `BANNED_FIELDS` in the logging
+filter also gained `segment_key`, `bbox`, `origin`, `destination`, `points` and `upstream_message`,
+so the backstop catches those shapes by name as well.
+
+**3 · `batch_score` logged a raw exception message.** Offline only, and the message happened not to
+contain coordinates, but "happened not to" is not a guarantee. It logs the exception type now.
+
+**4 · An unverified accessible route read like a step-free claim.** A route with no recorded
+barriers was returned `status: "ok"` with `confidence: 0.0`. Both facts were true and the
+confidence sentence said "do not rely on it", but a reader could still take the green card at face
+value. The accessible objective now carries an explicit `status_note` when coverage is below 30%:
+*"No barriers were found, but almost nothing along this route has been recorded in OpenStreetMap.
+That is an absence of data, not a step-free route."* Three tests pin it.
+
+**5 · The deployment would have thrown away its own pre-warmed scores.** `render.yaml` set
+`MEANDER_CACHE_DB=/tmp/meander-cache.db`. That path is outside the repository, so the committed
+`data/cache.db` — the entire reason the 512 MB instance can serve real CLIP scores without torch —
+would never have been read. Every route would have quietly dropped to `geometry_only` and nothing
+would have looked broken. The override is removed, with a comment explaining why it must stay
+removed, and DEPLOY.md now warns against re-adding it.
+
+**6 · Three dead functions.** `enrich.fetch_rest_stops`, `models.Point.from_latlon` and
+`config.Settings.key_for` had no callers left after later refactors. Removed.
+
+**7 · Stale documentation.** DEPLOY.md's verification `curl` used pre-realignment coordinates, and
+told the reader to `git add -f` a file that is not gitignored.
+
+### Checked and clean
+
+| check | result |
+|---|---|
+| `.env` ever added to git | never — `.env.example` is the only `.env*` in history |
+| key-shaped strings in tracked files | none |
+| literal assignment to a key variable | none |
+| unredacted auth material in any fixture | none — every secret param/header is `<redacted>` |
+| `torch` / `open-clip-torch` in `requirements-deploy.txt` | absent |
+| module-level torch import anywhere in `backend/` | none; all four are inside functions |
+| deploy venv imports `backend.main` and `backend.scoring` | yes, with torch absent |
+| `TODO` / `FIXME` / commented-out code | none |
+| truthiness test on a `Verdict` | none — every comparison uses `is` |
+| `road_class` alone granting a PASS | impossible by construction |
+| synthetic route labelled anything but `placeholder` | impossible; pinned by two tests |
+| production OSM API referenced | only in tests asserting those hosts are refused |
+| browser storage APIs in the frontend | none |
+| third-party network hosts in the frontend | one: `tiles.openfreemap.org` |
+| privacy filter actually redacts a coordinate field | verified by executing it |
+| every command in the docs resolves | all 8 |
+| every file the docs reference exists | all, once `data/cache.db`'s absence was documented |
+| orphaned functions | none remaining |
+
+### Clean-clone test
+
+`git clone` into an empty directory, then the README's own steps, nothing else:
+
+- `.env` absent, `.env.example` present
+- `pip install -r backend/requirements-deploy.txt` succeeds
+- `uvicorn backend.main:app` boots; `/api/health` returns `status: ok`, `clip_available: false`
+- `POST /api/routes` returns three routes with 11, 9 and 17 real OSM rest stops and a
+  best-departure time
+- `pytest backend/tests` — 367 passed, 2 skipped
+- `npm install && npm run build` succeeds
+- the full `requirements.txt` pins all resolve
+
+### Final state
+
+- **367 tests pass, 2 skipped** (the CLIP inference tests, which run under the full environment).
+- Green in both environments: the deploy venv with torch absent, and the full venv with it present.
+- `ruff` clean across `backend/` and `scripts/`, with `BLE001` enabled so every blind
+  `except Exception` is annotated with why it must be blind.
+- Frontend builds; axe-core reports 0 WCAG 2.1 AA violations across 46 rules.
+
+### What a reviewer should still be sceptical about
+
+- **Routing data is synthetic.** No GraphHopper key was available, so the routes are hand-built.
+  Everything downstream is exercised, and every route says `synthetic_upstream: true`, but no real
+  route has been produced by this code.
+- **The CLIP prompt choice rests on generated images.** The spec's own prompt pair inverted on
+  them. That is worth acting on but not worth trusting; it needs real imagery.
+- **`data/cache.db` ships with no CLIP rows**, so `scoring_method` is `geometry_only` in practice
+  everywhere.
+- **The naturalness and air-blend weightings are judgements**, not measurements. They are written
+  down in this log and in the README rather than buried.
+
+All four are in BLOCKED.md or the README limitations section, with the commands to resolve them.

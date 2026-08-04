@@ -70,10 +70,12 @@ services:
       - key: MEANDER_LOG_LEVEL
         value: INFO
 
-      # The free plan has an ephemeral filesystem: this database is reset on
-      # every deploy and every cold start. That is intentional — the committed
-      # data/cache.db provides the pre-warmed segment scores, and the
-      # whole-route cache is a performance optimisation, not state anyone
-      # depends on.
-      - key: MEANDER_CACHE_DB
-        value: /tmp/meander-cache.db
+      # MEANDER_CACHE_DB is deliberately NOT set. It defaults to data/cache.db,
+      # the file in the repository, which is what carries the pre-warmed CLIP
+      # segment scores this instance cannot compute for itself. Pointing it at
+      # /tmp would silently discard them and every route would quietly drop to
+      # geometry-only scoring.
+      #
+      # Render's filesystem is writable but ephemeral, which is exactly right
+      # here: the whole-route cache written alongside those scores is a
+      # performance optimisation, and losing it on each deploy costs nothing.

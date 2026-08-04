@@ -43,6 +43,9 @@ MEANDER_FIXTURES=record python3 -m backend.batch_score --location hyde-park-lond
 git add data/cache.db && git commit -m "chore(cache): pre-warm CLIP segment scores"
 ```
 
+The file does not exist until you run that command — the backend creates it on first boot if it
+is absent, empty of CLIP rows.
+
 Skip this and everything still works — every route just comes back with
 `scoring_method: "geometry_only"` and a lower confidence, which the UI states plainly.
 
@@ -84,9 +87,11 @@ false` is correct and expected** — torch is deliberately absent from the deplo
 - **It sleeps after 15 minutes of inactivity.** The next request takes 30–60 seconds to wake it.
   The frontend shows its loading banner throughout, so it looks slow rather than broken, but it is
   the first thing testers will notice.
-- **The filesystem is ephemeral.** `MEANDER_CACHE_DB` points at `/tmp`, so the whole-route cache
-  resets on every deploy and every wake. Segment scores come from the committed `data/cache.db` and
-  survive, because they are part of the repo.
+- **The filesystem is writable but ephemeral.** The cache lives at `data/cache.db` — the file in
+  the repository — so the pre-warmed CLIP segment scores from Step 0 are read on every boot, and
+  the whole-route cache written alongside them is discarded on each deploy. That is the intended
+  behaviour. **Do not set `MEANDER_CACHE_DB` to a path outside the repo**: doing so silently
+  discards the pre-warmed scores and every route quietly drops to `geometry_only`.
 - **512 MB of RAM.** Do not add `torch` to `requirements-deploy.txt`. The instance will OOM at
   import and the failure is confusing — it looks like a crash loop with no error.
 
@@ -138,7 +143,7 @@ curl -s https://meander-api.onrender.com/api/health | python3 -m json.tool
 ```
 
 ```bash
-curl -s -X POST https://meander-api.onrender.com/api/routes -H 'Content-Type: application/json' -d '{"origin":{"lat":51.5073,"lon":-0.1657},"minutes":35,"mode":"auto"}' | python3 -m json.tool
+curl -s -X POST https://meander-api.onrender.com/api/routes -H 'Content-Type: application/json' -d '{"origin":{"lat":51.507489,"lon":-0.162207},"minutes":35,"mode":"auto"}' | python3 -m json.tool
 ```
 
 Then in the browser, on the deployed site:
