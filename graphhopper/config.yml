@@ -1,0 +1,102 @@
+# GraphHopper server configuration for Meander.
+#
+# Why self-host at all: the nature and accessible presets steer the router with
+# a `custom_model`, custom models require flexible mode (`ch.disable: true`),
+# and flexible mode is a paid feature of the hosted API — a free package answers
+# "Free packages cannot use flexible mode". The open-source server has no such
+# restriction, so both presets work here and nowhere else. See BLOCKED.md #0.
+#
+# Built by scripts/graphhopper.sh. Do not edit datareader.file by hand; the
+# script writes the merged extract it builds.
+
+graphhopper:
+  datareader.file: data/meander-regions.osm.pbf
+  graph.location: data/graph-cache
+
+  # Only these three profiles exist, matching backend/models.py's EffectiveMode.
+  # The *_elevation custom models make foot and bike prefer flatter ways, which
+  # matters for a routing app whose accessible preset rejects gradients over 8%.
+  profiles:
+    - name: foot
+      custom_model_files: [foot.json, foot_elevation.json]
+    - name: bike
+      custom_model_files: [bike.json, bike_elevation.json]
+    - name: car
+      custom_model_files: [car.json]
+
+  # Contraction hierarchies: fast, but incompatible with a custom model. This is
+  # what serves the `fastest` preset and round trips.
+  profiles_ch:
+    - profile: foot
+    - profile: bike
+    - profile: car
+
+  # Landmarks: what makes a *custom model* query fast. Without these, every
+  # nature and accessible request falls back to plain Dijkstra over the whole
+  # graph, which on a Great-Britain-sized extract takes seconds per request.
+  # This is the preparation that makes self-hosting worth doing.
+  profiles_lm:
+    - profile: foot
+    - profile: bike
+    - profile: car
+
+  # Every tag the custom models and Meander's accessibility engine read.
+  #
+  # `smoothness` is here specifically for accessibility.py: it is one of the
+  # five hard constraints and the hosted API never exposed it, so that
+  # constraint could not fire from routing data at all until now.
+  #
+  # `average_slope` and `max_slope` are what let the incline constraint be
+  # checked against the router's own view rather than only against the
+  # elevation profile.
+  graph.encoded_values:
+    road_class,
+    road_class_link,
+    road_environment,
+    road_access,
+    surface,
+    smoothness,
+    max_slope,
+    average_slope,
+    hike_rating,
+    mtb_rating,
+    foot_access,
+    foot_priority,
+    foot_average_speed,
+    bike_access,
+    bike_priority,
+    bike_average_speed,
+    car_access,
+    car_average_speed,
+    get_off_bike,
+    roundabout,
+    track_type
+
+  # Elevation. Required for the *_elevation custom models above, for the slope
+  # encoded values, and for Meander's own incline checks and elevation-variance
+  # scoring. Cached so a rebuild does not re-download the tiles.
+  graph.elevation.provider: srtm
+  graph.elevation.cache_dir: ./data/srtm
+  graph.elevation.dataaccess: RAM_STORE
+
+  # Round trips are an algorithm, not a profile, and work on any of the above.
+  routing.non_ch.max_waypoint_distance: 1000000
+  routing.max_visited_nodes: 1000000
+
+server:
+  application_connectors:
+    - type: http
+      port: 8989
+      bind_host: 127.0.0.1
+  admin_connectors:
+    - type: http
+      port: 8990
+      bind_host: 127.0.0.1
+
+logging:
+  appenders:
+    - type: console
+      threshold: INFO
+      timeZone: UTC
+  loggers:
+    com.graphhopper: INFO
