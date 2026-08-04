@@ -66,8 +66,7 @@ async def _record_graphhopper(force: bool) -> int:
                 if name == "fastest":
                     fastest = await route_fastest(origin, dest, scenario.minutes, scenario.mode)
                 elif name == "nature":
-                    await route_nature(origin, dest, scenario.minutes, scenario.mode,
-                                       fastest.duration_min if fastest else None)
+                    await route_nature(origin, dest, scenario.minutes, scenario.mode, fastest)
                 else:
                     await route_accessible(origin, dest, scenario.minutes, scenario.mode)
             # A recording run must survive one bad scenario: the point is to

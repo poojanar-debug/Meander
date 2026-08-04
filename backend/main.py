@@ -270,11 +270,13 @@ def _scored_route(
         confidence_note=(
             SYNTHETIC_NOTE if synthetic else (access.sentence() if access else UNASSESSED_NOTE)
         ),
-        status_note=_status_note(route_id, blocked, access),
+        status_note=_status_note(route_id, blocked, access, raw),
     )
 
 
-def _status_note(route_id: str, blocked: bool, access: Any) -> str | None:
+def _status_note(
+    route_id: str, blocked: bool, access: Any, raw: RawRoute | None = None
+) -> str | None:
     """Why a route is blocked — or, for the accessible route, why it is not a claim.
 
     A route with no recorded barriers is not a verified route: it is a route
@@ -284,6 +286,8 @@ def _status_note(route_id: str, blocked: bool, access: Any) -> str | None:
     """
     if blocked:
         return "Hard accessibility constraints reject this route."
+    if raw is not None and raw.preset_note:
+        return raw.preset_note
     if route_id != "accessible" or access is None:
         return None
     if access.coverage < VERY_LOW_CONFIDENCE_THRESHOLD:
@@ -386,7 +390,7 @@ async def route_events(req: RouteRequest) -> AsyncIterator[dict[str, Any]]:
 
     routes: list[Route] = []
     routed: list[tuple[str, str, RawRoute]] = []
-    fastest_duration: float | None = None
+    fastest_route: RawRoute | None = None
     failures: list[RoutingError] = []
 
     # fastest first when present: nature's duration cap is relative to it.
@@ -412,7 +416,7 @@ async def route_events(req: RouteRequest) -> AsyncIterator[dict[str, Any]]:
 
         try:
             if objective == "nature":
-                raw = await preset_fn(origin, destination, req.minutes, mode, fastest_duration)
+                raw = await preset_fn(origin, destination, req.minutes, mode, fastest_route)
             else:
                 raw = await preset_fn(origin, destination, req.minutes, mode)
         except NoRouteFound as exc:
@@ -432,7 +436,7 @@ async def route_events(req: RouteRequest) -> AsyncIterator[dict[str, Any]]:
             continue
 
         if objective == "fastest":
-            fastest_duration = raw.duration_min
+            fastest_route = raw
         routed.append((objective, label, raw))
 
     yield {

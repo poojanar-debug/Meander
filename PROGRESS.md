@@ -847,14 +847,47 @@ surfaces rather than only report them afterwards. It is one of the five hard
 constraints and the hosted API never exposed it — until now that constraint
 could not fire from routing data at all.
 
-**Known issue, not fixed**
+**The nature cap — fixed, and it was not what it looked like**
 
-Colombo's nature loop returns 117 min against a 30-min budget — 2.8× the
-`fastest` duration, well past the 1.6× cap. The distance_influence ladder
-escalates and still cannot get under it, so `route_nature` returns the best of
-the three rungs. The other three locations are all within 5% of fastest, so this
-is Colombo-specific — sparse green infrastructure sends the model a long way.
-The cap is currently advisory when no rung satisfies it; it should either be
-enforced or the route should say it exceeded the budget.
+Colombo's nature loop returned 117 min against a 30-min budget: 2.8× fastest,
+well past the 1.6× cap. The obvious reading is "the ladder does not climb high
+enough". Measuring said otherwise:
+
+| distance_influence | 20 | 45 | 90 | 150 | 250 | 400 | 700 | 1200 |
+|---|---|---|---|---|---|---|---|---|
+| duration | 117.7 | 117.7 | 117.7 | 115.9 | 114.7 | 108.4 | 69.8 | 69.8 |
+
+Sixty-fold on the lever moves the answer by 40%, and it plateaus above the cap.
+Scaling `round_trip.distance` instead is worse — not weak but *discontinuous*:
+1.0 and 0.7 both give 117.7 min, 0.5 gives 18.0. GraphHopper's round-trip
+algorithm picks a candidate loop, and a small nudge to either input flips it to
+an entirely different one. **No monotonic search over either parameter is
+meaningful**, which is why a ladder could never have worked.
+
+So `route_nature` now generates a small candidate set and picks between them,
+which is what the spec asks for in as many words. A candidate must clear two
+bars: inside the duration cap, and **greener than the fastest route**. The
+second is not optional — picking on budget-fit alone produced a "nature" route
+at Euston Road that was *less* green than the plain one, which makes the label a
+lie. Among those that clear both, greenness is balanced 60/40 against how well
+the route uses the time asked for; on greenness alone a 30-minute request came
+back as an 18-minute loop.
+
+Judging costs nothing extra: `geometry.py` is local, so candidates are compared
+without more requests. The search runs fully against a self-hosted server and
+stops at the first acceptable candidate against the metered hosted one.
+
+| location | asked | fastest | nature | cap | greenness |
+|---|---|---|---|---|---|
+| Colombo Fort | 30 min | 42.1 | **18.0** (was 117.7) | 67.3 | 0.54 → 0.57 |
+| Hyde Park | 35 min | 30.5 | 32.3 | 48.8 | greener |
+| Vondelpark | 35 min | 33.8 | 34.0 | 54.1 | greener |
+| Viharamahadevi | 45 min | 45.8 | 38.0 | 73.2 | 0.52 → 0.56 |
+| Euston Road | 60 min | 47.4 | 37.4 | 75.8 | greener |
+
+5/5 within the cap and greener than fastest. When a promise still cannot be
+kept, `preset_note` says which one — Colombo's card now reads *"the greenest
+route available near you, but noticeably shorter than the time you asked for"*
+rather than silently handing over an 18-minute walk.
 
 **Live API calls:** GraphHopper hosted 0 (self-hosted is unmetered), Nominatim 3.

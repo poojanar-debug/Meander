@@ -1,6 +1,6 @@
 {
   "_meander_provenance": "recorded",
-  "_meander_recorded_at": "2026-08-04T17:01:18.452880+00:00",
+  "_meander_recorded_at": "2026-08-04T17:01:18.467568+00:00",
   "_meander_note": "Written by backend/fixtures.py. Secrets are redacted and excluded from the request signature.",
   "request": {
     "method": "POST",
@@ -27,8 +27,45 @@
         ]
       ],
       "algorithm": "round_trip",
-      "round_trip.distance": 2625,
+      "round_trip.distance": 1837,
       "round_trip.seed": 42,
+      "custom_model": {
+        "priority": [
+          {
+            "if": "road_environment == FERRY",
+            "multiply_by": "0"
+          },
+          {
+            "if": "road_class == MOTORWAY || road_class == TRUNK || road_class == PRIMARY",
+            "multiply_by": "0.05"
+          },
+          {
+            "if": "road_class == SECONDARY",
+            "multiply_by": "0.25"
+          },
+          {
+            "if": "road_class == TERTIARY",
+            "multiply_by": "0.5"
+          },
+          {
+            "if": "road_class == PATH || road_class == FOOTWAY || road_class == TRACK || road_class == BRIDLEWAY || road_class == CYCLEWAY",
+            "multiply_by": "1.0"
+          },
+          {
+            "if": "road_class == PEDESTRIAN || road_class == LIVING_STREET",
+            "multiply_by": "0.9"
+          },
+          {
+            "if": "road_environment == TUNNEL",
+            "multiply_by": "0.2"
+          },
+          {
+            "if": "surface == GROUND || surface == DIRT || surface == GRASS || surface == COMPACTED || surface == FINE_GRAVEL",
+            "multiply_by": "1.0"
+          }
+        ],
+        "distance_influence": 45
+      },
       "ch.disable": true
     },
     "data": {},
@@ -45,8 +82,8 @@
     },
     "json": {
       "hints": {
-        "visited_nodes.sum": 724,
-        "visited_nodes.average": 362.0
+        "visited_nodes.sum": 308,
+        "visited_nodes.average": 154.0
       },
       "info": {
         "copyrights": [
@@ -58,15 +95,15 @@
       },
       "paths": [
         {
-          "distance": 2489.745,
-          "weight": 1708.177851,
-          "time": 1830596,
+          "distance": 1809.384,
+          "weight": 1398.804385,
+          "time": 1381531,
           "transfers": 0,
           "legs": [],
           "points_encoded": false,
           "bbox": [
             -0.163357,
-            51.499208,
+            51.501947,
             -0.158509,
             51.50791
           ],
@@ -209,154 +246,14 @@
                 24.0
               ],
               [
-                -0.160227,
-                51.501981,
-                24.0
+                -0.159501,
+                51.502113,
+                28.0
               ],
               [
-                -0.160217,
-                51.50196,
-                24.0
-              ],
-              [
-                -0.160184,
-                51.501896,
-                24.0
-              ],
-              [
-                -0.160176,
-                51.501879,
-                24.0
-              ],
-              [
-                -0.160084,
-                51.501899,
-                24.0
-              ],
-              [
-                -0.160073,
-                51.501881,
-                24.0
-              ],
-              [
-                -0.160026,
-                51.501801,
-                24.0
-              ],
-              [
-                -0.160009,
-                51.501773,
-                24.0
-              ],
-              [
-                -0.160182,
-                51.50173,
-                24.0
-              ],
-              [
-                -0.160202,
-                51.501717,
-                24.0
-              ],
-              [
-                -0.160202,
-                51.501696,
-                24.0
-              ],
-              [
-                -0.159729,
-                51.500251,
-                22.0
-              ],
-              [
-                -0.159694,
-                51.500111,
-                22.0
-              ],
-              [
-                -0.159858,
-                51.500095,
-                22.0
-              ],
-              [
-                -0.159903,
-                51.500091,
-                26.0
-              ],
-              [
-                -0.159798,
-                51.499711,
-                22.0
-              ],
-              [
-                -0.159718,
-                51.499376,
-                20.0
-              ],
-              [
-                -0.159692,
-                51.499317,
-                20.0
-              ],
-              [
-                -0.159681,
-                51.49926,
-                20.0
-              ],
-              [
-                -0.15966,
-                51.499253,
-                20.0
-              ],
-              [
-                -0.159643,
-                51.499208,
-                20.0
-              ],
-              [
-                -0.159545,
-                51.499219,
-                20.0
-              ],
-              [
-                -0.159815,
-                51.500201,
-                22.0
-              ],
-              [
-                -0.159387,
-                51.50025,
-                22.0
-              ],
-              [
-                -0.159687,
-                51.501317,
-                25.0
-              ],
-              [
-                -0.15913,
-                51.501375,
-                25.0
-              ],
-              [
-                -0.159294,
-                51.501964,
-                25.0
-              ],
-              [
-                -0.159248,
-                51.501974,
-                25.0
-              ],
-              [
-                -0.158654,
-                51.502109,
-                27.0
-              ],
-              [
-                -0.15873,
-                51.502274,
-                27.0
+                -0.159434,
+                51.502137,
+                28.0
               ],
               [
                 -0.158594,
@@ -524,37 +421,37 @@
               ],
               [
                 15,
+                26,
+                "missing"
+              ],
+              [
+                26,
                 42,
                 "missing"
               ],
               [
                 42,
-                70,
-                "missing"
-              ],
-              [
-                70,
-                73,
+                45,
                 "good"
               ],
               [
-                73,
-                74,
+                45,
+                46,
                 "excellent"
               ],
               [
-                74,
-                81,
+                46,
+                53,
                 "good"
               ],
               [
-                81,
-                84,
+                53,
+                56,
                 "missing"
               ],
               [
-                84,
-                85,
+                56,
+                57,
                 "good"
               ]
             ],
@@ -576,114 +473,44 @@
               ],
               [
                 24,
-                27,
+                26,
                 "paving_stones"
               ],
               [
-                27,
-                28,
-                "missing"
-              ],
-              [
-                28,
+                26,
                 29,
-                "asphalt"
-              ],
-              [
-                29,
-                32,
                 "paving_stones"
               ],
               [
-                32,
-                33,
-                "asphalt"
-              ],
-              [
-                33,
+                29,
                 34,
-                "missing"
+                "asphalt"
               ],
               [
                 34,
                 38,
-                "paving_stones"
-              ],
-              [
-                38,
-                40,
-                "missing"
-              ],
-              [
-                40,
-                41,
-                "paving_stones"
-              ],
-              [
-                41,
-                42,
-                "missing"
-              ],
-              [
-                42,
-                47,
-                "missing"
-              ],
-              [
-                47,
-                53,
-                "asphalt"
-              ],
-              [
-                53,
-                54,
-                "missing"
-              ],
-              [
-                54,
-                55,
-                "paving_stones"
-              ],
-              [
-                55,
-                56,
-                "missing"
-              ],
-              [
-                56,
-                57,
-                "paving_stones"
-              ],
-              [
-                57,
-                62,
-                "asphalt"
-              ],
-              [
-                62,
-                66,
                 "sand"
               ],
               [
-                66,
-                67,
+                38,
+                39,
                 "compacted"
               ],
               [
-                67,
-                85,
+                39,
+                57,
                 "asphalt"
               ]
             ],
             "road_environment": [
               [
                 0,
-                42,
+                26,
                 "road"
               ],
               [
-                42,
-                85,
+                26,
+                57,
                 "road"
               ]
             ],
@@ -700,68 +527,48 @@
               ],
               [
                 6,
-                42,
+                26,
                 "footway"
               ],
               [
-                42,
-                47,
+                26,
+                32,
                 "footway"
               ],
               [
-                47,
-                48,
-                "residential"
-              ],
-              [
-                48,
-                49,
-                "primary"
-              ],
-              [
-                49,
-                53,
-                "residential"
-              ],
-              [
-                53,
-                60,
-                "footway"
-              ],
-              [
-                60,
-                62,
+                32,
+                34,
                 "cycleway"
               ],
               [
-                62,
-                65,
+                34,
+                37,
                 "bridleway"
               ],
               [
-                65,
-                68,
+                37,
+                40,
                 "cycleway"
               ],
               [
-                68,
-                73,
+                40,
+                45,
                 "footway"
               ],
               [
-                73,
-                74,
+                45,
+                46,
                 "pedestrian"
               ],
               [
-                74,
-                85,
+                46,
+                57,
                 "footway"
               ]
             ]
           },
-          "ascend": 45.0,
-          "descend": 45.0,
+          "ascend": 36.0,
+          "descend": 36.0,
           "snapped_waypoints": {
             "type": "LineString",
             "coordinates": [
@@ -771,9 +578,9 @@
                 30.0
               ],
               [
-                -0.159798,
-                51.499711,
-                22.0
+                -0.160414,
+                51.501947,
+                24.0
               ],
               [
                 -0.161988,

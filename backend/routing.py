@@ -164,10 +164,48 @@ def nature_custom_model(distance_influence: int) -> dict[str, Any]:
     }
 
 
-# Escalating ladder for the nature preset. A lower distance_influence wanders
-# further; if the result breaks the 1.6x duration cap we climb one rung and try
-# again rather than returning something over budget.
+# Candidates for the nature preset, as (distance_influence, loop_distance_scale).
+#
+# A single escalating ladder does not work. For a point-to-point route,
+# distance_influence is a usable lever: higher values pull the route back
+# towards the direct one. For a **round trip** neither parameter behaves
+# monotonically — GraphHopper's round_trip algorithm picks a candidate loop, and
+# a small change to either input flips it to an entirely different loop. Measured
+# in Colombo: distance_influence 20 through 400 all returned the same 117-minute
+# loop against a 42-minute baseline, while scaling round_trip.distance by 0.7
+# also returned 117 minutes and 0.5 returned 18. Searching monotonically over
+# either one is meaningless.
+#
+# So the presets are generated as a small candidate set and the greenest one
+# that fits the duration cap wins — which is what the specification actually
+# asks for: maximum greenery, capped at 1.6x the fastest duration.
 NATURE_DISTANCE_INFLUENCE_LADDER = (20, 45, 90)
+NATURE_LOOP_CANDIDATES: tuple[tuple[int, float], ...] = (
+    (20, 1.0),
+    (20, 0.8),
+    (20, 0.6),
+    (20, 0.45),
+    (45, 0.7),
+    (90, 0.35),
+)
+
+# How a candidate is judged. Greenness is the objective, but a route that
+# undershoots the time budget is a bad answer to "I have thirty minutes" even if
+# it is green — picking purely on greenness turned a 30-minute request into an
+# 18-minute loop. These weights are a judgement, not a measurement.
+NATURE_GREENNESS_WEIGHT = 0.6
+NATURE_BUDGET_FIT_WEIGHT = 0.4
+
+# Below this fraction of the requested time, a route is short enough that the
+# card should say so rather than let someone assume it fills their budget.
+NATURE_BUDGET_UNDERSHOOT = 0.7
+
+
+def _budget_fit(duration_min: float, requested_min: int) -> float:
+    """1.0 when a route uses exactly the time asked for, falling off either side."""
+    if requested_min <= 0:
+        return 0.0
+    return max(0.0, 1.0 - abs(duration_min - requested_min) / requested_min)
 
 
 def accessible_custom_model(with_smoothness: bool | None = None) -> dict[str, Any]:
@@ -237,6 +275,11 @@ class RawRoute:
     details: dict[str, list[tuple[int, int, Any]]] = field(default_factory=dict)
     synthetic_upstream: bool = False
     preset: str = "fastest"
+    # Set when the preset could not fully deliver what it promises — over the
+    # duration cap, well under the time budget, or no greener than fastest. The
+    # route is still the best available; the caller must not present it as
+    # though the caveat does not exist.
+    preset_note: str | None = None
 
     @property
     def has_elevation(self) -> bool:
@@ -453,6 +496,7 @@ def build_request_body(
     mode: EffectiveMode,
     preset: str = "fastest",
     distance_influence: int | None = None,
+    loop_distance_scale: float = 1.0,
 ) -> dict[str, Any]:
     """The exact body sent to GraphHopper for a given preset.
 
@@ -463,7 +507,9 @@ def build_request_body(
     if destination is None:
         body["points"] = [to_post_point(origin)]
         body["algorithm"] = "round_trip"
-        body["round_trip.distance"] = round(LOOP_SPEED_M_PER_MIN[mode] * minutes)
+        body["round_trip.distance"] = round(
+            LOOP_SPEED_M_PER_MIN[mode] * minutes * loop_distance_scale
+        )
         # Fixed seed: a stable input must produce a stable route, or the cache
         # never hits and every reload spends credits.
         body["round_trip.seed"] = 42
@@ -501,37 +547,115 @@ async def route_fastest(origin: LatLon, destination: LatLon | None, minutes: int
     return await _post_route(body, mode, "fastest")
 
 
-async def route_nature(origin: LatLon, destination: LatLon | None, minutes: int,
-                       mode: EffectiveMode, fastest_duration_min: float | None = None
-                       ) -> RawRoute:
-    """Greenest route within ``NATURE_DURATION_CAP`` x the fastest duration.
+async def route_nature(
+    origin: LatLon,
+    destination: LatLon | None,
+    minutes: int,
+    mode: EffectiveMode,
+    fastest: RawRoute | None = None,
+) -> RawRoute:
+    """The greenest route that fits inside ``NATURE_DURATION_CAP`` x fastest.
 
-    Climbs the distance_influence ladder rather than returning an over-budget
-    route. Each rung is another routing call, so the loop stops at the first
-    result inside the cap.
+    Generates a few candidates and picks the best, rather than walking a ladder
+    until something fits. That is what the specification asks for in as many
+    words, and it is the only thing that works for round trips, where
+    GraphHopper responds discontinuously to both available levers (see
+    NATURE_LOOP_CANDIDATES).
+
+    A candidate has to clear two bars before it is even considered: inside the
+    duration cap, and **greener than the fastest route**. The second is not
+    optional — a "nature" route no greener than the plain one is a label
+    without a thing behind it. Among those, greenness is balanced against how
+    well the route uses the time asked for, because picking on greenness alone
+    turned a thirty-minute request into an eighteen-minute loop.
+
+    Both terms come from geometry.py, which is local and free, so comparing
+    candidates costs no extra requests.
+
+    When no candidate clears the bars, the closest one is returned with
+    ``preset_note`` explaining which promise it missed.
     """
-    cap = fastest_duration_min * NATURE_DURATION_CAP if fastest_duration_min else None
-    best: RawRoute | None = None
+    from .geometry import score_geometry
 
-    for influence in NATURE_DISTANCE_INFLUENCE_LADDER:
-        body = build_request_body(origin, destination, minutes, mode, "nature", influence)
+    def greenness(route: RawRoute) -> float:
+        return score_geometry(route.points, route.elevations or None, route.details).nature
+
+    cap = fastest.duration_min * NATURE_DURATION_CAP if fastest else None
+    floor = greenness(fastest) if fastest else None
+    is_loop = destination is None
+
+    # Searching costs one routing request per candidate: free against a
+    # self-hosted server, three credits a time against the hosted one, so the
+    # metered path takes the first acceptable candidate.
+    unmetered = graphhopper_is_self_hosted()
+    if is_loop:
+        candidates = NATURE_LOOP_CANDIDATES if unmetered else NATURE_LOOP_CANDIDATES[:2]
+    else:
+        candidates = tuple((infl, 1.0) for infl in NATURE_DISTANCE_INFLUENCE_LADDER)
+
+    acceptable: list[tuple[float, RawRoute]] = []
+    fallback: tuple[float, RawRoute] | None = None
+
+    for influence, scale in candidates:
+        body = build_request_body(
+            origin, destination, minutes, mode, "nature", influence, scale
+        )
         candidate = await _post_route(body, mode, "nature")
-
-        if cap is None or candidate.duration_min <= cap:
-            return candidate
-        if best is None or candidate.duration_min < best.duration_min:
-            best = candidate
-        log.info(
-            "nature_over_duration_cap",
-            extra={
-                "distance_influence": influence,
-                "duration_min": round(candidate.duration_min, 1),
-                "cap_min": round(cap, 1),
-            },
+        green = greenness(candidate)
+        within = cap is None or candidate.duration_min <= cap
+        greener = floor is None or green > floor
+        merit = (
+            NATURE_GREENNESS_WEIGHT * green
+            + NATURE_BUDGET_FIT_WEIGHT * _budget_fit(candidate.duration_min, minutes)
         )
 
-    assert best is not None  # the ladder always runs at least once
-    return best
+        if within and greener:
+            acceptable.append((merit, candidate))
+            if not unmetered:
+                break
+        else:
+            log.info(
+                "nature_candidate_rejected",
+                extra={
+                    "distance_influence": influence,
+                    "loop_scale": scale,
+                    "over_cap": not within,
+                    "not_greener": not greener,
+                },
+            )
+            # Keep the least-bad option in case nothing clears both bars,
+            # preferring one that at least fits the cap.
+            better = fallback is None or (within and merit > fallback[0])
+            if better:
+                fallback = (merit, candidate)
+
+    if acceptable:
+        acceptable.sort(key=lambda pair: pair[0], reverse=True)
+        chosen = acceptable[0][1]
+        if minutes > 0 and chosen.duration_min < minutes * NATURE_BUDGET_UNDERSHOOT:
+            chosen.preset_note = (
+                "This is the greenest route available near you, but it is "
+                "noticeably shorter than the time you asked for — nothing "
+                "greener was reachable within your budget."
+            )
+        return chosen
+
+    assert fallback is not None  # at least one candidate always runs
+    _, chosen = fallback
+    over_cap = cap is not None and chosen.duration_min > cap
+    log.warning(
+        "nature_no_acceptable_candidate",
+        extra={"over_cap": over_cap, "candidates": len(candidates)},
+    )
+    chosen.preset_note = (
+        "No greener route was found inside your time budget. This is the "
+        "shortest one that is meaningfully greener, and it is longer than you "
+        "asked for."
+        if over_cap
+        else "No route near you was greener than the fastest one, so this is "
+             "much the same way."
+    )
+    return chosen
 
 
 async def route_accessible(origin: LatLon, destination: LatLon | None, minutes: int,

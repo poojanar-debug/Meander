@@ -221,7 +221,7 @@ def test_explicit_mode_overrides_the_ladder() -> None:
 )
 async def test_three_presets_produce_measurably_different_routes(origin, dest, minutes, mode) -> None:
     fastest = await route_fastest(origin, dest, minutes, mode)
-    nature = await route_nature(origin, dest, minutes, mode, fastest.duration_min)
+    nature = await route_nature(origin, dest, minutes, mode, fastest)
     accessible = await route_accessible(origin, dest, minutes, mode)
 
     geometries = {
@@ -237,7 +237,7 @@ async def test_three_presets_produce_measurably_different_routes(origin, dest, m
 @pytest.mark.asyncio
 async def test_nature_respects_the_duration_cap() -> None:
     fastest = await route_fastest(COLOMBO, VIHARA, 25, "foot")
-    nature = await route_nature(COLOMBO, VIHARA, 25, "foot", fastest.duration_min)
+    nature = await route_nature(COLOMBO, VIHARA, 25, "foot", fastest)
 
     assert nature.duration_min <= fastest.duration_min * NATURE_DURATION_CAP
 
@@ -254,7 +254,7 @@ async def test_round_trip_returns_to_the_origin() -> None:
 @pytest.mark.asyncio
 async def test_round_trip_presets_also_differ() -> None:
     fastest = await route_fastest(VONDEL, None, 60, "bike")
-    nature = await route_nature(VONDEL, None, 60, "bike", fastest.duration_min)
+    nature = await route_nature(VONDEL, None, 60, "bike", fastest)
 
     assert fastest.points != nature.points
     assert loop_returned_to_origin(nature, VONDEL)
@@ -353,3 +353,82 @@ def test_path_details_can_be_overridden(monkeypatch) -> None:
 
     monkeypatch.setenv("MEANDER_PATH_DETAILS", "surface, road_class")
     assert config.path_details() == ["surface", "road_class"]
+
+
+# ---------------------------------------------------------------------------
+# the nature duration cap
+# ---------------------------------------------------------------------------
+
+
+def test_budget_fit_peaks_at_the_requested_duration() -> None:
+    from backend.routing import _budget_fit
+
+    assert _budget_fit(30, 30) == 1.0
+    assert _budget_fit(21, 30) == pytest.approx(0.7)
+    assert _budget_fit(39, 30) == pytest.approx(0.7)
+    # A route twice the budget scores nothing, rather than going negative.
+    assert _budget_fit(60, 30) == 0.0
+    assert _budget_fit(300, 30) == 0.0
+
+
+def test_budget_fit_of_a_zero_budget_is_not_a_division_by_zero() -> None:
+    from backend.routing import _budget_fit
+
+    assert _budget_fit(10, 0) == 0.0
+
+
+def test_loop_distance_scale_shrinks_the_round_trip_target() -> None:
+    """The only lever that moves a round trip. distance_influence does not:
+    measured in Colombo, values from 20 to 400 all returned the same loop."""
+    full = build_request_body(COLOMBO, None, 30, "foot", "nature")
+    half = build_request_body(COLOMBO, None, 30, "foot", "nature", 20, 0.5)
+
+    assert half["round_trip.distance"] == pytest.approx(full["round_trip.distance"] / 2, abs=1)
+
+
+def test_loop_distance_scale_does_not_apply_to_point_to_point() -> None:
+    body = build_request_body(COLOMBO, VIHARA, 30, "foot", "nature", 20, 0.5)
+    assert "round_trip.distance" not in body
+
+
+def test_the_loop_candidate_set_spans_a_useful_range() -> None:
+    """A single ladder cannot work when the router responds discontinuously, so
+    the candidates have to actually sample the space."""
+    from backend.routing import NATURE_LOOP_CANDIDATES
+
+    scales = [scale for _, scale in NATURE_LOOP_CANDIDATES]
+    assert max(scales) == 1.0
+    assert min(scales) <= 0.4
+    assert len(set(scales)) >= 4
+
+
+@pytest.mark.asyncio
+async def test_nature_stays_inside_the_cap_when_a_candidate_fits() -> None:
+    fastest = await route_fastest(COLOMBO, VIHARA, 25, "foot")
+    nature = await route_nature(COLOMBO, VIHARA, 25, "foot", fastest)
+
+    assert nature.duration_min <= fastest.duration_min * NATURE_DURATION_CAP
+    assert nature.preset_note is None
+
+
+@pytest.mark.asyncio
+async def test_nature_is_greener_than_fastest_or_says_why_not() -> None:
+    """A nature route no greener than the plain one is a label with nothing
+    behind it. It is allowed to happen — some places have no greener way — but
+    it is never allowed to happen silently."""
+    from backend.geometry import score_geometry
+
+    fastest = await route_fastest(COLOMBO, VIHARA, 25, "foot")
+    nature = await route_nature(COLOMBO, VIHARA, 25, "foot", fastest)
+
+    def green(r):
+        return score_geometry(r.points, r.elevations or None, r.details).nature
+
+    assert green(nature) > green(fastest) or nature.preset_note is not None
+
+
+@pytest.mark.asyncio
+async def test_nature_without_a_baseline_applies_no_cap() -> None:
+    """Called with no fastest route there is nothing to be capped against."""
+    nature = await route_nature(COLOMBO, VIHARA, 25, "foot", None)
+    assert nature.duration_min > 0

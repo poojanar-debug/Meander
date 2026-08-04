@@ -1,6 +1,6 @@
 {
   "_meander_provenance": "recorded",
-  "_meander_recorded_at": "2026-08-04T17:01:18.452880+00:00",
+  "_meander_recorded_at": "2026-08-04T17:01:18.459574+00:00",
   "_meander_note": "Written by backend/fixtures.py. Secrets are redacted and excluded from the request signature.",
   "request": {
     "method": "POST",
@@ -27,8 +27,45 @@
         ]
       ],
       "algorithm": "round_trip",
-      "round_trip.distance": 2625,
+      "round_trip.distance": 2100,
       "round_trip.seed": 42,
+      "custom_model": {
+        "priority": [
+          {
+            "if": "road_environment == FERRY",
+            "multiply_by": "0"
+          },
+          {
+            "if": "road_class == MOTORWAY || road_class == TRUNK || road_class == PRIMARY",
+            "multiply_by": "0.05"
+          },
+          {
+            "if": "road_class == SECONDARY",
+            "multiply_by": "0.25"
+          },
+          {
+            "if": "road_class == TERTIARY",
+            "multiply_by": "0.5"
+          },
+          {
+            "if": "road_class == PATH || road_class == FOOTWAY || road_class == TRACK || road_class == BRIDLEWAY || road_class == CYCLEWAY",
+            "multiply_by": "1.0"
+          },
+          {
+            "if": "road_class == PEDESTRIAN || road_class == LIVING_STREET",
+            "multiply_by": "0.9"
+          },
+          {
+            "if": "road_environment == TUNNEL",
+            "multiply_by": "0.2"
+          },
+          {
+            "if": "surface == GROUND || surface == DIRT || surface == GRASS || surface == COMPACTED || surface == FINE_GRAVEL",
+            "multiply_by": "1.0"
+          }
+        ],
+        "distance_influence": 20
+      },
       "ch.disable": true
     },
     "data": {},
@@ -45,8 +82,8 @@
     },
     "json": {
       "hints": {
-        "visited_nodes.sum": 724,
-        "visited_nodes.average": 362.0
+        "visited_nodes.sum": 566,
+        "visited_nodes.average": 283.0
       },
       "info": {
         "copyrights": [
@@ -58,15 +95,15 @@
       },
       "paths": [
         {
-          "distance": 2489.745,
-          "weight": 1708.177851,
-          "time": 1830596,
+          "distance": 2052.935,
+          "weight": 1519.001308,
+          "time": 1528306,
           "transfers": 0,
           "legs": [],
           "points_encoded": false,
           "bbox": [
             -0.163357,
-            51.499208,
+            51.501069,
             -0.158509,
             51.50791
           ],
@@ -264,83 +301,83 @@
                 24.0
               ],
               [
-                -0.159729,
-                51.500251,
-                22.0
+                -0.160377,
+                51.50165,
+                24.0
               ],
               [
-                -0.159694,
-                51.500111,
-                22.0
+                -0.160408,
+                51.501642,
+                24.0
               ],
               [
-                -0.159858,
-                51.500095,
-                22.0
+                -0.160358,
+                51.501562,
+                24.0
               ],
               [
-                -0.159903,
-                51.500091,
-                26.0
-              ],
-              [
-                -0.159798,
-                51.499711,
-                22.0
-              ],
-              [
-                -0.159718,
-                51.499376,
+                -0.160243,
+                51.501225,
                 20.0
               ],
               [
-                -0.159692,
-                51.499317,
+                -0.160248,
+                51.50118,
                 20.0
               ],
               [
-                -0.159681,
-                51.49926,
+                -0.160248,
+                51.50118,
                 20.0
               ],
               [
-                -0.15966,
-                51.499253,
+                -0.160239,
+                51.501121,
                 20.0
               ],
               [
-                -0.159643,
-                51.499208,
+                -0.160235,
+                51.501108,
                 20.0
               ],
               [
-                -0.159545,
-                51.499219,
+                -0.160201,
+                51.50109,
                 20.0
               ],
               [
-                -0.159815,
-                51.500201,
-                22.0
+                -0.16019,
+                51.501069,
+                20.0
               ],
               [
-                -0.159387,
-                51.50025,
-                22.0
+                -0.160004,
+                51.50109,
+                20.0
               ],
               [
-                -0.159687,
-                51.501317,
-                25.0
+                -0.160202,
+                51.501717,
+                24.0
               ],
               [
-                -0.15913,
-                51.501375,
-                25.0
+                -0.160182,
+                51.50173,
+                24.0
               ],
               [
-                -0.159294,
-                51.501964,
+                -0.160009,
+                51.501773,
+                24.0
+              ],
+              [
+                -0.159878,
+                51.501819,
+                24.0
+              ],
+              [
+                -0.15935,
+                51.50195,
                 25.0
               ],
               [
@@ -606,33 +643,48 @@
               ],
               [
                 34,
-                38,
+                37,
                 "paving_stones"
               ],
               [
+                37,
                 38,
-                40,
-                "missing"
-              ],
-              [
-                40,
-                41,
-                "paving_stones"
-              ],
-              [
-                41,
-                42,
-                "missing"
-              ],
-              [
-                42,
-                47,
-                "missing"
-              ],
-              [
-                47,
-                53,
                 "asphalt"
+              ],
+              [
+                38,
+                39,
+                "missing"
+              ],
+              [
+                39,
+                42,
+                "paving_stones"
+              ],
+              [
+                42,
+                43,
+                "paving_stones"
+              ],
+              [
+                43,
+                44,
+                "missing"
+              ],
+              [
+                44,
+                47,
+                "paving_stones"
+              ],
+              [
+                47,
+                48,
+                "missing"
+              ],
+              [
+                48,
+                53,
+                "paving_stones"
               ],
               [
                 53,
@@ -705,26 +757,6 @@
               ],
               [
                 42,
-                47,
-                "footway"
-              ],
-              [
-                47,
-                48,
-                "residential"
-              ],
-              [
-                48,
-                49,
-                "primary"
-              ],
-              [
-                49,
-                53,
-                "residential"
-              ],
-              [
-                53,
                 60,
                 "footway"
               ],
@@ -760,8 +792,8 @@
               ]
             ]
           },
-          "ascend": 45.0,
-          "descend": 45.0,
+          "ascend": 39.0,
+          "descend": 39.0,
           "snapped_waypoints": {
             "type": "LineString",
             "coordinates": [
@@ -771,9 +803,9 @@
                 30.0
               ],
               [
-                -0.159798,
-                51.499711,
-                22.0
+                -0.160248,
+                51.50118,
+                20.0
               ],
               [
                 -0.161988,

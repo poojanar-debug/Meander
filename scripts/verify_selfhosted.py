@@ -65,7 +65,7 @@ async def check(spot: Spot) -> list[str]:
     for name, fn in (("nature", route_nature), ("accessible", route_accessible)):
         try:
             routes[name] = (
-                await fn(spot.point, None, spot.minutes, spot.mode, fastest.duration_min)
+                await fn(spot.point, None, spot.minutes, spot.mode, fastest)
                 if name == "nature"
                 else await fn(spot.point, None, spot.minutes, spot.mode)
             )
