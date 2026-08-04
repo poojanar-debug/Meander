@@ -70,7 +70,10 @@ graphhopper:
     car_average_speed,
     get_off_bike,
     roundabout,
-    track_type
+    track_type,
+    country,
+    foot_road_access,
+    bike_road_access
 
   # Elevation. Required for the *_elevation custom models above, for the slope
   # encoded values, and for Meander's own incline checks and elevation-variance
@@ -78,6 +81,15 @@ graphhopper:
   graph.elevation.provider: srtm
   graph.elevation.cache_dir: ./data/srtm
   graph.elevation.dataaccess: RAM_STORE
+
+  # Import every highway type. GraphHopper requires this key to be set and its
+  # own example excludes footway, cycleway, path and **steps** — sensible for a
+  # car-only server, catastrophic here. Meander's single most important
+  # accessibility check is "does this route contain steps"; if steps are never
+  # imported, the graph cannot contain them, the check can never fire, and the
+  # app would confidently report a staircase as step-free. footway, path and
+  # cycleway are likewise the entire substance of the nature preset.
+  import.osm.ignored_highways: ""
 
   # Round trips are an algorithm, not a profile, and work on any of the above.
   routing.non_ch.max_waypoint_distance: 1000000
@@ -97,6 +109,6 @@ logging:
   appenders:
     - type: console
       threshold: INFO
-      timeZone: UTC
+      time_zone: UTC
   loggers:
     com.graphhopper: INFO
