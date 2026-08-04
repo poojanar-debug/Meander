@@ -51,6 +51,38 @@ Skip this and everything still works — every route just comes back with
 
 ---
 
+## Step 0b · Decide which GraphHopper you are deploying against
+
+This determines whether two of your three routes exist at all.
+
+| | hosted free tier | hosted paid | self-hosted |
+|---|---|---|---|
+| `fastest` | ✅ | ✅ | ✅ |
+| round trips | ✅ | ✅ | ✅ |
+| `nature`, `accessible` | ❌ **blocked** | ✅ | ✅ |
+| `smoothness` for the accessibility engine | ❌ | ❌ | ✅ |
+| cost | free, 500 credits/day | from ~€50/month | your own hardware |
+
+The nature and accessible presets steer the router with a `custom_model`, which
+requires flexible mode — a paid feature. On a free package those two come back
+`status: "blocked"` with the reason, which is honest but is not the app you
+probably want to show people.
+
+**Self-hosting is the free way to get all three.** It is not deployable to
+Render's free tier — the graph for Great Britain alone is several GB — so it
+means a VM with disk and a few GB of RAM. `scripts/graphhopper.sh` builds and
+runs it; set `MEANDER_GRAPHHOPPER_URL` on the backend to point at it, and note
+that a self-hosted server needs **no** `GRAPHHOPPER_KEY`, so
+`MEANDER_STRICT_STARTUP=1` will not demand one.
+
+Whichever you pick, `/api/health` tells you which one is live:
+
+```json
+"routing": { "endpoint": "...", "self_hosted": true, "custom_models_available": true }
+```
+
+---
+
 ## Step 1 · Backend on Render
 
 1. Push this repo to GitHub.
@@ -190,7 +222,8 @@ design and the only persistent artefact, `data/cache.db`, is versioned in git wi
 | First request after a quiet period takes ~45 s | Render free tier cold start. |
 | `clip_available: false` | Correct. The deployed build has no torch, by design. |
 | `scoring_method: "geometry_only"` | No pre-warmed CLIP scores for that area. Run Step 0 for it. |
-| Every route identical | GraphHopper is ignoring `custom_model`. Check that `"ch.disable": true` is still in `build_request_body` — this is the classic failure and it is silent. |
+| Every route identical | GraphHopper accepted `custom_model` and ignored it. `ch.disable` must accompany it — this is the classic failure and it is silent. `scripts/verify_selfhosted.py` checks for exactly this. |
+| `nature` and `accessible` blocked, "flexible routing mode" | Free GraphHopper package. Expected — see Step 0b. |
 | 429 with "used up its routing allowance" | The daily ceiling. Working as intended. |
 | Routes appear but the map is blank | CSP `connect-src`/`img-src` is missing `https://tiles.openfreemap.org`. |
 | "Could not reach the Meander server" | CORS. Step 2's two edits. |
