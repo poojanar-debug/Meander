@@ -41,6 +41,7 @@ from .routing import (
     RoutingError,
     geometry_for_wire,
 )
+from .scoring import ClipTerm, clip_term_for_route
 
 configure_logging(settings.log_level)
 log = get_logger(__name__)
@@ -61,6 +62,16 @@ SYNTHETIC_NOTE = (
     "This route was built from demonstration data, not a live routing response. "
     "Every number on it is a placeholder, not a measurement."
 )
+CLIP_NOTE_TEMPLATE = (
+    "Accessibility data has not been evaluated for this route yet. "
+    "Scenery is scored from street-level imagery covering {pct}% of the route."
+)
+
+
+def _scoring_note(clip: ClipTerm) -> str:
+    if clip.score is None:
+        return GEOMETRY_ONLY_NOTE
+    return CLIP_NOTE_TEMPLATE.format(pct=round(clip.coverage * 100))
 
 # ~110 m. Two requests from the same street corner should share a cached answer.
 CACHE_COORD_DECIMALS = 3
@@ -190,8 +201,20 @@ def _scored_route(route_id: str, label: str, raw: RawRoute) -> Route:
     geometry it ran on is not, and a number derived from invented terrain is not
     a measurement of anywhere.
     """
-    scores = score_geometry(raw.points, raw.elevations or None, raw.details)
+    # Cache read only — this never imports torch, and returns nothing for any
+    # region batch_score.py has not pre-warmed.
+    clip = clip_term_for_route(raw.points)
+    scores = score_geometry(
+        raw.points, raw.elevations or None, raw.details, clip_score=clip.score
+    )
     synthetic = raw.synthetic_upstream
+
+    if synthetic:
+        method = "placeholder"
+    elif clip.score is not None:
+        method = "clip"
+    else:
+        method = "geometry_only"
 
     return Route(
         id=route_id,
@@ -204,10 +227,10 @@ def _scored_route(route_id: str, label: str, raw: RawRoute) -> Route:
         # shade is null until enrich.py computes a real sun position — zero
         # shade would be a claim about the place rather than an absence of data.
         scores=Scores(nature=scores.nature, air=scores.air, shade=None),
-        scoring_method="placeholder" if synthetic else "geometry_only",
+        scoring_method=method,
         confidence=PLACEHOLDER_CONFIDENCE,
         synthetic_upstream=synthetic,
-        confidence_note=SYNTHETIC_NOTE if synthetic else GEOMETRY_ONLY_NOTE,
+        confidence_note=SYNTHETIC_NOTE if synthetic else _scoring_note(clip),
     )
 
 

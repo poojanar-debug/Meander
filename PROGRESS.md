@@ -362,3 +362,89 @@ documentation only.
   the value implied by `EARTH_RADIUS_M`, so assertions can be exact instead of approximate.
 
 **Deviations:** none.
+
+---
+
+## Phase G — CLIP scoring · 2026-08-04
+
+**Done**
+
+- `backend/scoring.py` — CLIP ViT-B-32 (`laion2b_s34b_b79k`), contrastive zero-shot over a
+  positive/negative prompt pair, softmax, positive probability. **Every torch and open_clip import
+  is inside a function**, with a test that greps the module source to keep it that way.
+- Mapillary client sampling one bounding box per point along the polyline, half-width 0.002° —
+  a 0.004° box, inside the 0.01° limit that changed on 2026-01-16.
+- `clip_term_for_route()` — the only function the request path calls. Cache reads only: no torch,
+  no network. Returns `None` for any region that has not been pre-warmed, which is the signal to
+  fall back to geometry scoring and say so.
+- `backend/batch_score.py` — offline pre-warm, never in the request path. Refuses to start without
+  torch, without a token, or in replay mode, each with a specific message. Stops cleanly when the
+  Mapillary budget runs out instead of failing mid-run, and writes each point as it goes so a
+  crash never loses completed work.
+- `scripts/compare_prompts.py` — runs all seven variants and prints a ranking.
+- `/api/routes` now emits `scoring_method: "clip"` when cached CLIP segments cover the route.
+
+**Prompt variants — seven tried, and the result was not what the spec assumed**
+
+Run: `python3 -m scripts.compare_prompts` on **procedurally generated reference images** (a foliage
+texture against an asphalt texture with lane markings).
+
+| variant | green | grim | separation | correct? |
+|---|---|---|---|---|
+| `v5_street` — "leafy, quiet, attractive street" / "bleak, traffic-dominated street" | 0.869 | 0.047 | **+0.821** | yes |
+| `v7_park` — "in a park or woodland" / "beside a busy road or car park" | 0.785 | 0.002 | **+0.783** | yes |
+| `v3_nature` — "green natural place with trees and plants" / "bare place made of concrete and asphalt" | 0.751 | 0.000 | **+0.751** | yes |
+| `v1_extreme` — the spec's pair, "extremely scenic" / "extremely ugly" | 0.002 | 0.005 | −0.004 | **no** |
+| `v2_plain` — "beautiful place" / "ugly place" | 0.012 | 0.048 | −0.036 | **no** |
+| `v4_walk` — "pleasant to walk through" / "unpleasant to walk through" | 0.076 | 0.195 | −0.119 | **no** |
+| `v6_restorative` — "calm restorative place" / "harsh place someone would hurry through" | 0.006 | 0.349 | −0.344 | **no** |
+
+The four abstract aesthetic pairs — including the spec's own `v1_extreme` — **invert** on this
+set: they score the asphalt image *higher*. Only the three concrete, descriptive pairs separate in
+the right direction. That is a strong enough signal to act on, but it is **not** a finding about
+real streets: these are synthetic textures, and part of why the abstract pairs fail may simply be
+that a generated foliage texture does not read as "scenic" to CLIP.
+
+**Verified**
+
+- 277 tests pass. Two are skipped without torch and run under the full environment.
+- `test_scoring_module_has_no_module_level_torch_import` greps the source for top-level torch and
+  open_clip imports — the deployed instance would die at startup on one, so a comment was not
+  enough.
+- `backend.scoring` and `backend.main` both import cleanly in the deploy venv with torch absent.
+- `test_clip_ranks_a_green_scene_above_a_grim_one` runs real CLIP inference on MPS and confirms
+  the active pair is not inverted.
+- `scoring_method` transitions verified directly: `clip` with cached segments, `geometry_only`
+  without, and **`placeholder` on a synthetic route even when real CLIP scores are cached** —
+  real inference over invented geometry is still not a measurement of anywhere.
+- The bounding box is asserted under 0.01° square, centred on its point, and in
+  `minLon,minLat,maxLon,maxLat` order — a transposed one would silently return imagery from
+  somewhere else.
+
+**Live API calls used:** Mapillary 0 (no token). The CLIP weights (~600 MB) were downloaded once
+from the Hugging Face hub; that is a model download, not a metered API, and the test suite runs
+with `HF_HUB_OFFLINE=1` so it never repeats it.
+
+**Decisions**
+
+- **`ACTIVE_PROMPT_VARIANT` is `v3_nature`, not the spec's `v1_extreme`.** The spec's pair
+  inverted on every reference image tried. Of the three that worked, `v5_street` separated widest,
+  but `v3_nature` names the thing actually being scored — greenery — and on synthetic textures the
+  margin between the three is not meaningful. `v1_extreme` is retained in `PROMPT_VARIANTS`, and a
+  test pins its exact wording, so the comparison can be rerun. **This choice needs re-validating on
+  real imagery before it is trusted** — BLOCKED.md #2 has the command.
+- A point with fewer than two usable images is cached with a `NULL` score, not a low one. One
+  blurry frame is not evidence about a place, and caching the null stops a later run paying to
+  rediscover the same absence.
+- Image downloads go through `fetch(..., persist=False)`: the budget still counts them, but no
+  fixture is written. Committing street imagery would add megabytes for no benefit, because the
+  expensive derived thing — the score — is itself persisted, in `data/cache.db`.
+- Sampling is capped at 40 points per route at 150 m spacing. Each point is one Mapillary request
+  plus up to four image downloads, so an uncapped 360-minute car route would drain the 200-call
+  budget in a single run.
+
+**Deviations**
+
+- `data/cache.db` ships with no CLIP rows, so every route is `geometry_only` (or `placeholder`)
+  until someone with a Mapillary token runs `batch_score.py`. The response states which path it
+  used on every route, so this is visible rather than silent.

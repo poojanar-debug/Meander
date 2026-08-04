@@ -476,11 +476,18 @@ async def fetch(
     headers: Mapping[str, Any] | None = None,
     cost: int = 1,
     service: str | None = None,
+    persist: bool = True,
 ) -> httpx.Response:
     """Fetch through the record/replay layer.
 
     ``cost`` is how many live calls this request consumes from the service
     budget — GraphHopper charges roughly three credits per route request.
+
+    ``persist=False`` still counts the call against the budget but never writes
+    a fixture. It exists for binary payloads: committing megabytes of street
+    imagery would bloat the repository, and those responses do not need
+    replaying because the expensive thing derived from them — the CLIP score —
+    is itself persisted, in data/cache.db.
     """
     service = service or service_for_url(url)
     sig = signature(
@@ -534,7 +541,7 @@ async def fetch(
         headers=dict(headers) if headers else None,
     )
 
-    if response.status_code < 400:
+    if response.status_code < 400 and persist:
         path = write_fixture(
             service,
             sig,

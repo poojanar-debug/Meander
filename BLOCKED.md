@@ -56,15 +56,38 @@ That command replaces every synthetic GraphHopper fixture with a recorded one an
 Same cause as (1): `MAPILLARY_TOKEN` is unset, so no street-level imagery can be fetched and the
 CLIP prompt-variant comparison has nothing real to rank.
 
-**How it was worked around** — see Phase G notes in PROGRESS.md. The scoring path, the cache
-read/write and the prompt-variant harness are all built and unit-tested; the ranking experiment
-needs imagery to produce a real number.
+**How it was worked around**
+
+`backend/scoring.py`, `backend/batch_score.py` and `scripts/compare_prompts.py` are complete and
+unit-tested: the bounding-box sizing, the contrastive softmax, the cache read/write, the
+`scoring_method` transition to `clip`, and the rule that a point with too little imagery is
+recorded as *no score* rather than a low one. `scripts/compare_prompts.py` falls back to
+procedurally generated reference images — a foliage texture against an asphalt texture — which
+verifies the model loads and the prompt polarity is right, but says nothing reliable about how a
+prompt pair behaves on real street photography.
+
+**So the following is still unmeasured:**
+
+- which prompt variant actually performs best on real imagery
+- whether CLIP ranks Hyde Park above Euston Road, which is the Phase G acceptance criterion
+- any real `scoring_method: "clip"` route, since `data/cache.db` ships empty of CLIP rows
 
 **What you need to do**
 
 1. Create a client token at https://www.mapillary.com/dashboard/developers
 2. `echo 'MAPILLARY_TOKEN=...' >> .env`
-3. `MEANDER_FIXTURES=record python3 -m backend.batch_score --location hyde-park-london --location euston-road-london`
+3. Rank the prompt variants on real imagery:
+
+```bash
+MEANDER_FIXTURES=record python3 -m scripts.compare_prompts --location
+```
+
+4. If a different variant wins, set `ACTIVE_PROMPT_VARIANT` in `backend/scoring.py` to it, then
+   pre-warm the cache and commit the result:
+
+```bash
+MEANDER_FIXTURES=record python3 -m backend.batch_score --location hyde-park-london --location euston-road-london
+```
 
 ---
 
