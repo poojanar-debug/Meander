@@ -13,6 +13,7 @@ from datetime import UTC, datetime
 
 import pytest
 
+from backend.config import TEST_LOCATIONS_BY_SLUG
 from backend.enrich import (
     DEPARTURE_HORIZON_H,
     DEPARTURE_STEP_MIN,
@@ -34,9 +35,20 @@ from backend.geometry import EARTH_RADIUS_M, LatLon
 
 M_PER_DEG = math.pi * EARTH_RADIUS_M / 180.0
 
-LONDON = LatLon(51.5073, -0.1657)
-COLOMBO = LatLon(6.9344, 79.8428)
-VONDEL = LatLon(52.3580, 4.8686)
+
+def _at(slug: str) -> LatLon:
+    """Coordinates come from the config, never hard-coded.
+
+    A copy of a coordinate in a test file drifts the moment the config changes,
+    and the failure looks like a missing fixture rather than a stale test.
+    """
+    loc = TEST_LOCATIONS_BY_SLUG[slug]
+    return LatLon(loc.lat, loc.lon)
+
+
+LONDON = _at("hyde-park-london")
+COLOMBO = _at("colombo-fort")
+VONDEL = _at("amsterdam-vondelpark")
 
 
 def _line(start: LatLon, metres: float, n: int = 41) -> list[LatLon]:
@@ -246,15 +258,28 @@ def test_the_corridor_is_narrow_enough_to_mean_something() -> None:
 
 @pytest.mark.asyncio
 async def test_recorded_overpass_data_finds_real_benches() -> None:
-    """Recorded live from Overpass on 2026-08-04 around Vondelpark."""
-    from backend.routing import route_nature
+    """Recorded live from Overpass on 2026-08-04 around Vondelpark.
 
-    route = await route_nature(VONDEL, None, 60, "bike")
-    nodes = await fetch_rest_stop_nodes(route.points)
+    Goes through `enrich_context` rather than a single route, because that is
+    what the request path does: one query over the union of every route's
+    geometry. Querying per route here would need a fixture production never
+    asks for.
+    """
+    from backend.enrich import enrich_context
+    from backend.routing import route_accessible, route_fastest, route_nature
 
-    assert nodes is not None
-    assert len(nodes) > 0
-    assert any((n.get("tags") or {}).get("amenity") == "bench" for n in nodes)
+    routes = [
+        (await route_fastest(VONDEL, None, 60, "bike")).points,
+        (await route_nature(VONDEL, None, 60, "bike")).points,
+        (await route_accessible(VONDEL, None, 60, "bike")).points,
+    ]
+    context = await enrich_context(routes)
+
+    assert context.rest_stop_nodes is not None
+    assert len(context.rest_stop_nodes) > 0
+    assert any(
+        (n.get("tags") or {}).get("amenity") == "bench" for n in context.rest_stop_nodes
+    )
 
 
 @pytest.mark.asyncio

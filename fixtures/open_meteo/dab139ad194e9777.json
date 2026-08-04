@@ -1,13 +1,13 @@
 {
   "_meander_provenance": "recorded",
-  "_meander_recorded_at": "2026-08-04T13:37:07.420358+00:00",
+  "_meander_recorded_at": "2026-08-04T13:37:07.001635+00:00",
   "_meander_note": "Written by backend/fixtures.py. Secrets are redacted and excluded from the request signature.",
   "request": {
     "method": "GET",
     "url": "https://api.open-meteo.com/v1/forecast",
     "params": {
-      "latitude": 6.915,
-      "longitude": 79.861,
+      "latitude": 6.934,
+      "longitude": 79.85,
       "hourly": "cloud_cover",
       "forecast_days": 1
     },
@@ -21,17 +21,17 @@
   "response": {
     "status": 200,
     "headers": {
-      "date": "Tue, 04 Aug 2026 13:37:07 GMT",
+      "date": "Tue, 04 Aug 2026 13:37:06 GMT",
       "content-type": "application/json; charset=utf-8"
     },
     "json": {
       "latitude": 6.924429,
       "longitude": 79.90725,
-      "generationtime_ms": 0.030159950256347656,
+      "generationtime_ms": 0.026941299438476562,
       "utc_offset_seconds": 0,
       "timezone": "GMT",
       "timezone_abbreviation": "GMT",
-      "elevation": 11.0,
+      "elevation": 8.0,
       "hourly_units": {
         "time": "iso8601",
         "cloud_cover": "%"

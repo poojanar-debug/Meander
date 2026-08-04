@@ -117,7 +117,7 @@ async def _record_enrichment(force: bool) -> int:
     once per request over the union of every route's geometry, so that is the
     query whose signature has to exist.
     """
-    from .main import _build_routes
+    from .main import route_events
     from .models import Point, RouteRequest
 
     scenarios = _scenarios()
@@ -138,15 +138,16 @@ async def _record_enrichment(force: bool) -> int:
             mode=scenario.mode,
         )
         try:
-            _routes, _reason, context = await _build_routes(request)
+            # Drain the same generator the API serves from, so the fixtures
+            # recorded are exactly the requests production makes.
+            async for _event in route_events(request):
+                pass
         # One scenario failing must not abandon the rest of the pass.
         except Exception as exc:  # noqa: BLE001 — an offline run must not abort part-way
             print(f"  ! {scenario.slug}: {type(exc).__name__}: {exc}", file=sys.stderr)
             continue
 
-        stops = "unreachable" if context.rest_stop_nodes is None else len(context.rest_stop_nodes)
-        print(f"  + {scenario.slug}: {stops} amenity nodes, "
-              f"air={context.air.aqi if context.air else None}, shade={context.shade_score}")
+        print(f"  + {scenario.slug}")
         recorded += 1
         # Overpass rate-limits aggressively; give it room between queries.
         await asyncio.sleep(OVERPASS_PAUSE_S)

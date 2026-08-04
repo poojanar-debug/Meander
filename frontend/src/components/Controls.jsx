@@ -26,8 +26,14 @@ export default function Controls({
   onLocate,
 }) {
   return (
-    <form className="controls" onSubmit={(e) => e.preventDefault()}>
-      <h2 className="visually-hidden">Route options</h2>
+    <form
+      className="controls"
+      aria-labelledby="controls-heading"
+      onSubmit={(e) => e.preventDefault()}
+    >
+      <h2 className="visually-hidden" id="controls-heading">
+        Route options
+      </h2>
 
       <div className="field">
         <PlaceInput

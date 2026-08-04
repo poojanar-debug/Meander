@@ -443,6 +443,7 @@ class GeocodeError(RuntimeError):
 
 
 GEOCODE_RESULT_LIMIT = 6
+GEOCODE_COORD_DECIMALS = 6
 
 
 async def geocode_search(query: str) -> list[GeocodeResult]:
@@ -496,8 +497,12 @@ async def geocode_search(query: str) -> list[GeocodeResult]:
             results.append(
                 GeocodeResult(
                     name=str(item["display_name"]),
-                    lat=float(item["lat"]),
-                    lon=float(item["lon"]),
+                    # Six decimal places is ~0.1 m, far finer than routing needs.
+                    # Rounding here means two people searching the same place get
+                    # byte-identical requests, so the route cache hits and the
+                    # demo fixtures match what the search returns.
+                    lat=round(float(item["lat"]), GEOCODE_COORD_DECIMALS),
+                    lon=round(float(item["lon"]), GEOCODE_COORD_DECIMALS),
                 )
             )
         except (KeyError, TypeError, ValueError):

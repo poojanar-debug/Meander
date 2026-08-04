@@ -587,3 +587,66 @@ correct: rest stops come back `null`, everything else is unaffected, and the res
   two degradation guards and five in offline scripts that must not abort part-way through a run.
 
 **Deviations:** none.
+
+---
+
+## Phase J — Polish · 2026-08-04
+
+**Done**
+
+- **SSE streaming.** Route production is now a single async generator, `route_events()`, that both
+  transports consume. Routes are emitted the moment they exist; narration arrives as a second pass
+  over the same ids, which the client merges rather than appends. A cache hit still speaks SSE so
+  the client has one code path, and a failure part-way through becomes an `error` event because the
+  status line has already gone out.
+- **Barrier reporting** to `api06.dev.openstreetmap.org`, with the host asserted at call time in
+  `osm_report.py` rather than only configured. Rate-limited like everything else.
+- **Accessibility audit harness** — `frontend/a11y.html` plus `src/a11y.jsx`, which mounts the real
+  app, drives it until three route cards exist, and runs axe-core. Auditing an empty page would
+  prove nothing.
+- **README limitations section** — the honest one, covering what OSM tagging does not know, what
+  each `scoring_method` actually means, why the CLIP prompt choice is not yet trustworthy, and that
+  the demo runs on hand-built routing data.
+
+**Verified**
+
+- **axe-core, WCAG 2.0/2.1 A and AA, on the fully rendered app with three routes: 46 rules passed,
+  0 violations, 0 incomplete.** Best-practice rules were run separately and also come back clean
+  after two fixes below.
+- The harness never ships: `npm run build` produces 46 modules and no axe or a11y chunk, because
+  Vite's production build takes `index.html` as its only entry.
+- Streaming verified in a real browser against the real backend, not just in tests: response is
+  `text/event-stream`, progress events arrive in ascending order, all three routes stream, and a
+  request with no fixture produces `progress → progress → error` over the wire.
+- The full flow now works through the app's own search: type "Hyde Park, London" → arrow → enter →
+  three routes with 11, 9 and 17 real OSM rest stops and 12 map markers.
+
+**Live API calls used:** Open-Meteo 42 of 100, Overpass 19 of 50, Nominatim 5 of 40.
+
+**Three real defects found and fixed**
+
+1. **axe flagged two landmark failures** — no `<main>`, and content outside any landmark. Added a
+   `<main>` and gave the controls form an accessible name. Both are best-practice rather than AA,
+   but "content not in a landmark" is a real navigation problem for a screen-reader user.
+2. **Searching for a demo location did not work.** `TEST_LOCATIONS` held hand-picked coordinates
+   30–800 m away from what Nominatim actually returns for those names, so the app's own search
+   produced a request no fixture matched and the demo answered "no fixture for that request".
+   `TEST_LOCATIONS` is now defined *as* the geocoder's output for each name.
+3. **Even then it missed by seven decimal places.** Nominatim returns `51.5074889`; the config held
+   `51.507489`. `geocode_search` now rounds to six decimal places (~0.1 m, far finer than routing
+   needs), so two people searching the same place produce byte-identical requests and the
+   whole-route cache can actually hit. Pinned by
+   `test_searching_for_a_demo_location_lands_on_its_fixture`.
+
+**Decisions**
+
+- `axe-core` added as a **dev** dependency (not in the stack list; reason recorded here). It is the
+  standard automated WCAG checker, and "no violations in an automated pass" is a much weaker claim
+  from a hand-rolled script. It is never bundled.
+- Test coordinates are now derived from `TEST_LOCATIONS` in the test files too. A copied coordinate
+  drifts the moment the config changes, and the failure looks like a missing fixture rather than a
+  stale test.
+- The SSE error event exists because there is no other way to report a failure once the status line
+  has been sent. The client turns it back into its normal error banner.
+
+**Deviations:** none.

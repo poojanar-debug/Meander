@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Meander — accessibility audit harness</title>
+  </head>
+  <body>
+    <!--
+      Development harness only. Vite's production build takes index.html as its
+      single entry, so this page and axe-core are never bundled or shipped.
+
+        npm --prefix frontend run dev:mock
+        open http://localhost:5173/a11y.html
+
+      Results land on window.__axeResults and are printed to the console.
+    -->
+    <div id="root"></div>
+    <script type="module" src="/src/a11y.jsx"></script>
+  </body>
+</html>

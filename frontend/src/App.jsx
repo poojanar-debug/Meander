@@ -273,7 +273,7 @@ export default function App() {
 
       <Header />
 
-      <div className="app__main">
+      <main className="app__main">
         <Controls
           minutes={state.minutes}
           mode={state.mode}
@@ -324,7 +324,7 @@ export default function App() {
             </p>
           )}
         </div>
-      </div>
+      </main>
 
       <footer className="footer">
         <p>

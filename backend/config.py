@@ -173,6 +173,12 @@ class TestLocation:
 
     Fixed on purpose: a new coordinate is a fixture cache miss and therefore a
     live API call against a 500-credit/day quota.
+
+    Each one is **the coordinate Nominatim returns for that name**, not a
+    hand-picked centre. Searching for a demo location in the app then produces
+    exactly the request the fixtures were recorded for, so the whole demo works
+    end to end without a key. Picking them by hand left every search 30-800 m
+    off its own fixture and the app answered "no fixture for that request".
     """
 
     slug: str
@@ -187,40 +193,40 @@ TEST_LOCATIONS: tuple[TestLocation, ...] = (
     TestLocation(
         "colombo-fort",
         "Colombo Fort, Sri Lanka",
-        6.9344,
-        79.8428,
+        6.933727,
+        79.850080,
         "Dense arterial grid beside Galle Face Green. Origin for most fixtures.",
         ("urban", "arterial"),
     ),
     TestLocation(
         "viharamahadevi",
         "Viharamahadevi Park, Colombo",
-        6.9147,
-        79.8612,
+        6.914899,
+        79.861364,
         "Large city park. Expected to score above the arterial baseline.",
         ("park", "green"),
     ),
     TestLocation(
         "hyde-park-london",
         "Hyde Park, London",
-        51.5073,
-        -0.1657,
+        51.507489,
+        -0.162207,
         "Dense Mapillary coverage and rich OSM accessibility tagging.",
         ("park", "green", "well-tagged"),
     ),
     TestLocation(
         "euston-road-london",
         "Euston Road, London",
-        51.5265,
-        -0.1337,
+        51.524718,
+        -0.138530,
         "Six-lane arterial. The grim control for CLIP ranking.",
         ("urban", "arterial"),
     ),
     TestLocation(
         "amsterdam-vondelpark",
         "Vondelpark, Amsterdam",
-        52.3580,
-        4.8686,
+        52.357197,
+        4.864119,
         "Flat, exceptionally well tagged for surface and smoothness.",
         ("park", "green", "well-tagged"),
     ),

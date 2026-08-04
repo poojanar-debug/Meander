@@ -50,3 +50,27 @@ def test_endpoint_shapes_a_miss_as_an_error_object(api_client) -> None:
 
     assert response.status_code == 503
     assert response.json()["error"]["kind"] == "geocode"
+
+
+@pytest.mark.asyncio
+async def test_results_are_rounded_so_the_same_search_is_the_same_request() -> None:
+    """Nominatim returns seven decimal places. Two people searching the same
+    place must produce byte-identical routing requests, or the whole-route cache
+    never hits and every search costs credits."""
+    from backend.routing import GEOCODE_COORD_DECIMALS
+
+    for result in await geocode_search("Hyde Park, London"):
+        assert result.lat == round(result.lat, GEOCODE_COORD_DECIMALS)
+        assert result.lon == round(result.lon, GEOCODE_COORD_DECIMALS)
+
+
+@pytest.mark.asyncio
+async def test_searching_for_a_demo_location_lands_on_its_fixture() -> None:
+    """The demo has to work through the app's own search, not only through
+    hand-entered coordinates."""
+    from backend.config import TEST_LOCATIONS_BY_SLUG
+
+    for slug in ("hyde-park-london", "colombo-fort", "amsterdam-vondelpark"):
+        location = TEST_LOCATIONS_BY_SLUG[slug]
+        first = (await geocode_search(location.name))[0]
+        assert (first.lat, first.lon) == (location.lat, location.lon), slug
