@@ -1,0 +1,27 @@
+# Tool configuration only. Meander is run from a checkout, not installed as a
+# package, so there is deliberately no [build-system] or [project] table.
+
+[tool.pytest.ini_options]
+testpaths = ["backend/tests"]
+addopts = "-q --strict-markers"
+asyncio_mode = "strict"
+asyncio_default_fixture_loop_scope = "function"
+filterwarnings = ["error::DeprecationWarning:backend.*"]
+markers = [
+    "live: needs real network access and a real API key; deselected by default",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+exclude = ["frontend", "fixtures", ".venv"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "C4", "SIM", "RUF"]
+ignore = [
+    "B008",    # FastAPI's Depends()/Query() defaults are the documented idiom.
+    "SIM108",  # A ternary is not always clearer than an if/else.
+]
+
+[tool.ruff.lint.per-file-ignores]
+"backend/tests/*" = ["E501"]

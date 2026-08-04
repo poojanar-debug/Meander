@@ -1,0 +1,18 @@
+# Full local development environment: everything the deployed service needs,
+# plus CLIP inference and the test tooling.
+#
+# Use this locally. Use requirements-deploy.txt on Render.
+
+-r requirements-deploy.txt
+
+# CLIP scoring — local only, never deployed (see requirements-deploy.txt).
+# torch < 2.6 has no cp313 wheels; 2.9.x is the current stable line with MPS
+# support on Apple Silicon. open-clip is held on the 2.x API.
+torch==2.9.1
+open-clip-torch==2.32.0
+pillow==11.1.0
+
+# Tests and lint.
+pytest==8.3.4
+pytest-asyncio==0.25.2
+ruff==0.9.2

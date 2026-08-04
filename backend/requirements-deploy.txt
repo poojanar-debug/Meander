@@ -1,0 +1,16 @@
+# Runtime dependencies for the deployed backend (Render free tier, 512 MB).
+#
+# torch and open-clip-torch are DELIBERATELY ABSENT. CLIP inference needs 2-3 GB
+# of RAM and runs offline via backend/batch_score.py, which writes its results
+# into data/cache.db. The deployed service reads that file and falls back to
+# numpy-only geometry scoring for anything uncached.
+#
+# Adding torch here will OOM the instance at import time. Do not.
+
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+httpx==0.28.1
+pydantic==2.10.5
+numpy==2.2.1
+anthropic==0.42.0
+python-dotenv==1.0.1
