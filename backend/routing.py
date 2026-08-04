@@ -400,6 +400,20 @@ def _shape_upstream_error(response: httpx.Response) -> RoutingError:
         )
 
     if status in (401, 403):
+        # A self-hosted GraphHopper has no concept of an API key, so "the key is
+        # missing or rejected" is not merely unhelpful there, it is a wrong
+        # diagnosis that sends an operator hunting for a credential that does
+        # not exist. A 401/403 from our own router is a proxy, a security group
+        # or an auth layer in front of it.
+        if graphhopper_is_self_hosted():
+            return RoutingError(
+                "auth",
+                "The routing service refused this request. That server is one this "
+                "deployment runs itself, so this is something in front of it — a "
+                "proxy or an access rule — rather than an API key. Nothing you did "
+                "caused this.",
+                status_code=503,
+            )
         return RoutingError(
             "auth",
             "Routing is not configured on this server — its GraphHopper key is missing or "
@@ -436,7 +450,15 @@ def _shape_upstream_error(response: httpx.Response) -> RoutingError:
 
 
 async def _post_route(body: dict[str, Any], mode: EffectiveMode, preset: str) -> RawRoute:
-    params = {"key": settings.graphhopper_key} if settings.graphhopper_key else None
+    # Only the hosted API is sent the key.
+    #
+    # It travels as a *query parameter*, so a deployment that keeps
+    # GRAPHHOPPER_KEY configured for fallback — which is a perfectly sensible
+    # thing to do — was putting it in the query string of every request to its
+    # own router, and therefore into that server's access log, in plaintext,
+    # forever. A self-hosted server has no use for it either way.
+    send_key = settings.graphhopper_key and not graphhopper_is_self_hosted()
+    params = {"key": settings.graphhopper_key} if send_key else None
     try:
         response = await fetch(
             "POST",
