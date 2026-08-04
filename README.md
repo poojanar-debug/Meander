@@ -30,8 +30,18 @@ negotiable; that is not.
 
 ## Status
 
-Under construction. See [PROGRESS.md](PROGRESS.md) for what works today and
-[BLOCKED.md](BLOCKED.md) for what does not.
+All eleven build phases are done and tagged (`phase-a` … `phase-k`). 367 tests pass offline, the
+frontend has no WCAG 2.1 AA violations in an automated pass, and the deploy build boots with torch
+absent.
+
+**It has never produced a real route.** There was no GraphHopper API key available when it was
+built, so the routing fixtures are hand-made — every route says so, in the response and on the
+card. Add a key and re-record to change that. [BLOCKED.md](BLOCKED.md) has the three things that
+need a human and the exact command for each; [PROGRESS.md](PROGRESS.md) is the full build log,
+including the hostile self-audit and what a reviewer should still be sceptical about.
+
+Nothing here is deployed. [DEPLOY.md](DEPLOY.md) is written to be followed without asking
+questions.
 
 ---
 
