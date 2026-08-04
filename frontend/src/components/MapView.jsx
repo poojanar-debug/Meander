@@ -8,6 +8,10 @@ const STYLE_URL = 'https://tiles.openfreemap.org/styles/positron'
 const INITIAL_CENTER = [79.8521, 6.921]
 const INITIAL_ZOOM = 12.6
 
+// How long to wait for the basemap before giving up on it and showing the
+// fallback. Generous: a cold CDN on a slow connection is not a failure.
+const MAP_LOAD_TIMEOUT_MS = 8000
+
 const prefersReducedMotion = () =>
   typeof window !== 'undefined' &&
   window.matchMedia?.('(prefers-reduced-motion: reduce)').matches === true
@@ -70,16 +74,48 @@ export default function MapView({ routes, selected, origin, dest, onSelect }) {
       return undefined
     }
 
-    map.on('load', () => setReady(true))
+    // A map that never finishes loading is the failure mode this has to catch.
+    // MapLibre can sit in style-loading indefinitely — a sandboxed WebGL
+    // context, a stalled worker, a proxy that holds the connection open — and
+    // it emits no `error` for any of them. Without a deadline the user gets an
+    // unexplained grey rectangle forever, which is worse than being told the
+    // map is unavailable and pointed at the list that has the whole answer.
+    let settled = false
+    const deadline = setTimeout(() => {
+      if (!settled) {
+        console.warn('Meander: map did not finish loading; falling back to the route list')
+        setFailed(true)
+      }
+    }, MAP_LOAD_TIMEOUT_MS)
+
+    map.on('load', () => {
+      settled = true
+      clearTimeout(deadline)
+      setReady(true)
+      setFailed(false)
+    })
     map.on('error', (event) => {
       if (event?.error?.status === 404 || event?.error?.message?.includes('style')) {
+        settled = true
+        clearTimeout(deadline)
         setFailed(true)
       }
     })
     map.addControl(new maplibregl.NavigationControl({ showCompass: false }), 'top-right')
     mapRef.current = map
 
+    // The container is sized by a CSS clamp and by the 860px breakpoint, so it
+    // changes height without the window necessarily changing size — rotating a
+    // phone, or a desktop crossing the breakpoint. MapLibre's own trackResize
+    // did not pick that up here: the canvas stayed at its initial height and
+    // left a band of empty container below it. Observing the element directly
+    // is reliable regardless of how the resize was caused.
+    const observer = new ResizeObserver(() => map.resize())
+    observer.observe(containerRef.current)
+
     return () => {
+      clearTimeout(deadline)
+      observer.disconnect()
       markersRef.current.forEach((m) => m.remove())
       markersRef.current = []
       map.remove()

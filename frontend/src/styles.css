@@ -435,9 +435,18 @@ fieldset.chips legend {
   overflow: hidden;
   background: var(--recessed);
 }
+/* MapLibre adds .maplibregl-map to whatever element it is handed, and that
+   class sets `position: relative` — which overrides the `position: absolute`
+   here, so `inset: 0` stops sizing the element and it collapses to zero height.
+   The explicit 100% holds under either position value. Symptom when this is
+   wrong: the canvas keeps its initial height inside a taller container and
+   leaves a band of empty grey, but only above the 860px breakpoint, because
+   below it the container is 300px and coincidentally matches. */
 .map__canvas {
   position: absolute;
   inset: 0;
+  width: 100%;
+  height: 100%;
 }
 .map__fallback {
   position: absolute;
