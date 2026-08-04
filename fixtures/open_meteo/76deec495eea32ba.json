@@ -1,6 +1,6 @@
 {
   "_meander_provenance": "recorded",
-  "_meander_recorded_at": "2026-08-04T13:37:08.133626+00:00",
+  "_meander_recorded_at": "2026-08-04T15:37:06.306023+00:00",
   "_meander_note": "Written by backend/fixtures.py. Secrets are redacted and excluded from the request signature.",
   "request": {
     "method": "GET",
@@ -21,13 +21,13 @@
   "response": {
     "status": 200,
     "headers": {
-      "date": "Tue, 04 Aug 2026 13:37:08 GMT",
+      "date": "Tue, 04 Aug 2026 15:37:06 GMT",
       "content-type": "application/json; charset=utf-8"
     },
     "json": {
       "latitude": 51.52945,
       "longitude": -0.12983704,
-      "generationtime_ms": 0.02968311309814453,
+      "generationtime_ms": 0.028252601623535156,
       "utc_offset_seconds": 0,
       "timezone": "GMT",
       "timezone_abbreviation": "GMT",
@@ -76,18 +76,18 @@
           34,
           0,
           2,
-          8,
-          89,
+          2,
+          72,
           100,
           100,
-          67,
+          100,
+          39,
           30,
-          23,
-          5,
-          38,
-          33,
-          13,
-          45
+          2,
+          14,
+          22,
+          0,
+          0
         ]
       }
     }

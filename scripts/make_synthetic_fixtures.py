@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import hashlib
 import json
 import math
 import random
@@ -97,7 +98,15 @@ SCENARIOS: tuple[Scenario, ...] = (
 
 
 def _seed_for(scenario: Scenario, preset: str) -> int:
-    return abs(hash((scenario.slug, preset))) % (2**31)
+    """A seed that is the same on every machine and every run.
+
+    Python salts `hash()` of a string per process, so seeding from it made this
+    generator produce different geometry every time it ran — which defeats the
+    point of committing the fixtures, and silently invalidates every enrichment
+    fixture keyed on the resulting bounding box.
+    """
+    digest = hashlib.sha256(f"{scenario.slug}/{preset}".encode()).digest()
+    return int.from_bytes(digest[:4], "big")
 
 
 def _offset(p: LatLon, north_m: float, east_m: float) -> LatLon:

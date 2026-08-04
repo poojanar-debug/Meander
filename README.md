@@ -139,6 +139,14 @@ Everything else already works for any location with no key at all: place search
 (Nominatim), rest stops (Overpass), air quality and cloud cover (Open-Meteo),
 and sun position (computed locally).
 
+> **The free GraphHopper tier routes `fastest` only.** The nature and accessible
+> presets steer the router with a custom model, and custom models need flexible
+> mode, which free packages do not include — the API answers *"Free packages
+> cannot use flexible mode"*. Those two come back `status: "blocked"` with that
+> reason rather than silently repeating the fastest route. Round trips, path
+> details, and therefore the whole accessibility engine, are unaffected. See
+> [BLOCKED.md](BLOCKED.md) #0 for the options.
+
 Two things stay optional:
 
 | | without it |

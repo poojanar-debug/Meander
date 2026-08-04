@@ -1,6 +1,6 @@
 {
   "_meander_provenance": "recorded",
-  "_meander_recorded_at": "2026-08-04T13:28:24.766273+00:00",
+  "_meander_recorded_at": "2026-08-04T15:23:37.491227+00:00",
   "_meander_note": "Written by backend/fixtures.py. Secrets are redacted and excluded from the request signature.",
   "request": {
     "method": "POST",
@@ -8,7 +8,7 @@
     "params": {},
     "json": null,
     "data": {
-      "data": "[out:json][timeout:25];node[\"amenity\"~\"^(bench|drinking_water|toilets|shelter)$\"](51.50649,-0.16452,51.52583,-0.13753);out body 200;"
+      "data": "[out:json][timeout:25];node[\"amenity\"~\"^(bench|drinking_water|toilets|shelter)$\"](51.50649,-0.16457,51.52581,-0.13753);out body 200;"
     },
     "content": null,
     "headers": {
@@ -18,14 +18,14 @@
   "response": {
     "status": 200,
     "headers": {
-      "date": "Tue, 04 Aug 2026 13:28:21 GMT",
+      "date": "Tue, 04 Aug 2026 15:23:36 GMT",
       "content-type": "application/json"
     },
     "json": {
       "version": 0.6,
       "generator": "Overpass API 0.7.62.11 87bfad18",
       "osm3s": {
-        "timestamp_osm_base": "2026-08-04T13:27:21Z",
+        "timestamp_osm_base": "2026-08-04T15:21:45Z",
         "copyright": "The data included in this document is from www.openstreetmap.org. The data is made available under ODbL."
       },
       "elements": [
@@ -766,17 +766,6 @@
             "amenity": "bench",
             "backrest": "yes",
             "check_date": "2025-01-14",
-            "source": "gps+mapnoter"
-          }
-        },
-        {
-          "type": "node",
-          "id": 3741911201,
-          "lat": 51.5258272,
-          "lon": -0.1475443,
-          "tags": {
-            "amenity": "bench",
-            "backrest": "yes",
             "source": "gps+mapnoter"
           }
         },
@@ -2177,6 +2166,19 @@
           "id": 8208073065,
           "lat": 51.5226639,
           "lon": -0.1397951,
+          "tags": {
+            "amenity": "bench",
+            "armrest": "yes",
+            "backrest": "yes",
+            "check_date": "2024-02-20",
+            "material": "wood"
+          }
+        },
+        {
+          "type": "node",
+          "id": 8228712620,
+          "lat": 51.5226164,
+          "lon": -0.140303,
           "tags": {
             "amenity": "bench",
             "armrest": "yes",

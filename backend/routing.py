@@ -63,6 +63,20 @@ class NoRouteFound(RoutingError):
         super().__init__("no_route", human_message, status_code=422)
 
 
+class PresetUnavailable(RoutingError):
+    """This objective cannot be routed on the current GraphHopper plan.
+
+    A first-class outcome, not a bug: the nature and accessible presets steer
+    the router with a custom model, and custom models need flexible mode, which
+    free packages do not include. The honest response is to report that preset
+    as blocked with the reason, rather than quietly returning the fastest route
+    a second time under a different name.
+    """
+
+    def __init__(self, human_message: str) -> None:
+        super().__init__("plan_limitation", human_message, status_code=422)
+
+
 # ---------------------------------------------------------------------------
 # the one coordinate converter
 # ---------------------------------------------------------------------------
@@ -181,15 +195,23 @@ class RawRoute:
 
 
 def _base_body(profile: str, elevation: bool = True) -> dict[str, Any]:
+    """Everything common to a request. `ch.disable` is added only when needed.
+
+    A custom model requires flexible mode (`ch.disable: true`) — without it
+    GraphHopper rejects the request, and older versions silently discarded the
+    model, which returned the fastest route under every preset with no error at
+    all. But flexible mode is a **paid feature**: a free package answers any
+    request carrying `ch.disable` with 400 "Free packages cannot use flexible
+    mode". Setting it unconditionally therefore broke even the fastest preset,
+    which needs no custom model. It is now added by build_request_body only for
+    the presets that actually carry one.
+    """
     return {
         "profile": profile,
         "points_encoded": False,
         "instructions": False,
         "calc_points": True,
         "elevation": elevation,
-        # Without this, custom_model is silently discarded and every preset
-        # returns the same geometry as fastest.
-        "ch.disable": True,
         "details": list(PATH_DETAILS),
     }
 
@@ -246,6 +268,7 @@ def _parse_path(path: dict[str, Any], mode: EffectiveMode, synthetic: bool, pres
 _UPSTREAM_CLASSIFICATIONS = (
     ("cannot find point", "point_not_snappable"),
     ("connection between locations not found", "no_connection"),
+    ("flexible mode", "plan_lacks_flexible_mode"),
     ("profile", "bad_profile"),
     ("custom_model", "bad_custom_model"),
     ("query param", "bad_parameter"),
@@ -267,6 +290,23 @@ def _shape_upstream_error(response: httpx.Response) -> RoutingError:
         message = ""
 
     status = response.status_code
+    lowered = message.lower()
+
+    if "flexible mode" in lowered or (
+        "custom_model" in lowered and "speed mode" in lowered
+    ):
+        return PresetUnavailable(
+            "This objective needs GraphHopper's flexible routing mode, which free "
+            "API packages do not include. The fastest route still works, and "
+            "everything else — accessibility checks, rest stops, air quality — is "
+            "unaffected. A paid GraphHopper plan enables it."
+        )
+    if "profile parameter can only be one of" in lowered:
+        return PresetUnavailable(
+            "This travel mode is not available on the current GraphHopper plan. "
+            "Free packages allow car, bike and foot only."
+        )
+
     if status in (401, 403):
         return RoutingError(
             "auth",
@@ -390,6 +430,11 @@ def build_request_body(
         )
     elif preset == "accessible":
         body["custom_model"] = accessible_custom_model()
+
+    # Flexible mode is required for a custom model and rejected outright without
+    # one on a free package, so it travels with the model and never alone.
+    if "custom_model" in body:
+        body["ch.disable"] = True
     return body
 
 
@@ -540,6 +585,7 @@ __all__ = [
     "NATURE_DURATION_CAP",
     "GeocodeError",
     "NoRouteFound",
+    "PresetUnavailable",
     "RawRoute",
     "RoutingError",
     "accessible_custom_model",

@@ -82,12 +82,32 @@ def test_converter_survives_a_southern_latitude() -> None:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("preset", ["fastest", "nature", "accessible"])
-def test_every_request_body_disables_contraction_hierarchies(preset: str) -> None:
-    """Without ch.disable, GraphHopper silently ignores custom_model and every
-    preset returns the fastest route. There is no error to notice."""
+@pytest.mark.parametrize("preset", ["nature", "accessible"])
+def test_a_custom_model_always_travels_with_flexible_mode(preset: str) -> None:
+    """A custom model without ch.disable is rejected, and older GraphHopper
+    versions discarded it silently — returning the fastest route under every
+    preset with no error at all."""
     body = build_request_body(COLOMBO, VIHARA, 25, "foot", preset)
+    assert "custom_model" in body
     assert body["ch.disable"] is True
+
+
+def test_flexible_mode_is_never_requested_without_a_custom_model() -> None:
+    """ch.disable is a paid GraphHopper feature: a free package rejects any
+    request carrying it with "Free packages cannot use flexible mode". Sending
+    it on the fastest preset, which needs no custom model, broke the baseline
+    route on the free tier and took the whole request down with it."""
+    body = build_request_body(COLOMBO, VIHARA, 25, "foot", "fastest")
+    assert "custom_model" not in body
+    assert "ch.disable" not in body
+
+
+def test_a_round_trip_does_not_request_flexible_mode() -> None:
+    """Round trips work on a free package; they only stop working if ch.disable
+    is bolted on."""
+    body = build_request_body(COLOMBO, None, 30, "foot", "fastest")
+    assert body["algorithm"] == "round_trip"
+    assert "ch.disable" not in body
 
 
 def test_nature_body_carries_a_custom_model() -> None:

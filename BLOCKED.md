@@ -4,6 +4,56 @@ Things this run could not finish, what was tried, and what needs a human.
 
 ---
 
+## 0 · The GraphHopper free tier cannot route the nature or accessible presets
+
+**Discovered:** 2026-08-04, on the first live request with a real API key.
+
+**What happens**
+
+Both presets steer the router with a `custom_model`. A custom model requires
+flexible mode (`"ch.disable": true`), and flexible mode is a paid feature:
+
+```
+POST /api/1/route   ->  400  "Free packages cannot use flexible mode"
+POST /api/1/route   ->  400  "The 'custom_model' parameter is currently not
+                              supported for speed mode"
+```
+
+**What the free tier does allow**, established by probing it directly:
+
+| | |
+|---|---|
+| profiles | `car`, `bike`, `foot` only — `hike` is rejected |
+| point-to-point routing | works |
+| **round trips** (`algorithm=round_trip`) | **works**, as long as `ch.disable` is not also sent |
+| **path details** (`surface`, `road_class`, `road_environment`) | **works** — so the accessibility engine, geometry scoring and confidence are all unaffected |
+| `custom_model` | rejected |
+
+**How it behaves now**
+
+`fastest` works everywhere, and so does everything downstream of it: real
+accessibility assessment, blockers, rest stops, air quality, shade, best
+departure. `nature` and `accessible` return `status: "blocked"` with the reason
+quoted above, rather than quietly returning the fastest route a second time
+under a different name.
+
+**What you need to do — pick one**
+
+1. **A paid GraphHopper plan** enables flexible mode, and both presets start
+   working with no code change.
+2. **Self-host GraphHopper.** The open-source server has no such restriction;
+   point `GRAPHHOPPER_URL` in `backend/config.py` at it.
+3. **Accept two of three.** The app is honest about it and still does the thing
+   it exists for on the fastest route — it will still tell you about the steps,
+   the cobbles and the gradients on the way.
+
+A fourth option not yet built: approximate the nature preset on the free tier by
+routing through a green waypoint found via Overpass, which needs no custom
+model. That is a real feature rather than a config change, so it is not done.
+
+
+---
+
 ## 1 · No `GRAPHHOPPER_KEY` in the environment — routing fixtures are synthetic
 
 **Discovered:** Phase A, 2026-08-04

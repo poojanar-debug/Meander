@@ -1,0 +1,156 @@
+{
+  "_meander_provenance": "recorded",
+  "_meander_recorded_at": "2026-08-04T15:17:07.905316+00:00",
+  "_meander_note": "Written by backend/fixtures.py. Secrets are redacted and excluded from the request signature.",
+  "request": {
+    "method": "GET",
+    "url": "https://nominatim.openstreetmap.org/search",
+    "params": {
+      "q": "Princes Street, Edinburgh",
+      "format": "jsonv2",
+      "limit": 6,
+      "addressdetails": 0
+    },
+    "json": null,
+    "data": {},
+    "content": null,
+    "headers": {
+      "Accept": "application/json"
+    }
+  },
+  "response": {
+    "status": 200,
+    "headers": {
+      "content-type": "application/json; charset=utf-8",
+      "date": "Tue, 04 Aug 2026 15:17:07 GMT"
+    },
+    "json": [
+      {
+        "place_id": 273018693,
+        "licence": "Data \u00a9 OpenStreetMap contributors, ODbL 1.0. http://osm.org/copyright",
+        "osm_type": "way",
+        "osm_id": 4237334,
+        "lat": "55.9523260",
+        "lon": "-3.1950406",
+        "category": "highway",
+        "type": "unclassified",
+        "place_rank": 26,
+        "importance": 0.43087867614901804,
+        "addresstype": "road",
+        "name": "Princes Street",
+        "display_name": "Princes Street, The Mound, New Town, New Town/Broughton, City of Edinburgh, Alba / Scotland, EH2 2DQ, United Kingdom",
+        "boundingbox": [
+          "55.9520566",
+          "55.9526233",
+          "-3.1966876",
+          "-3.1933981"
+        ]
+      },
+      {
+        "place_id": 273037134,
+        "licence": "Data \u00a9 OpenStreetMap contributors, ODbL 1.0. http://osm.org/copyright",
+        "osm_type": "way",
+        "osm_id": 2956326,
+        "lat": "55.9518092",
+        "lon": "-3.1981019",
+        "category": "highway",
+        "type": "unclassified",
+        "place_rank": 26,
+        "importance": 0.43087867614901804,
+        "addresstype": "road",
+        "name": "Princes Street",
+        "display_name": "Princes Street, New Town, New Town/Broughton, City of Edinburgh, Alba / Scotland, EH2 2ER, United Kingdom",
+        "boundingbox": [
+          "55.9515674",
+          "55.9520566",
+          "-3.1995172",
+          "-3.1966876"
+        ]
+      },
+      {
+        "place_id": 277218667,
+        "licence": "Data \u00a9 OpenStreetMap contributors, ODbL 1.0. http://osm.org/copyright",
+        "osm_type": "way",
+        "osm_id": 42178341,
+        "lat": "55.9530834",
+        "lon": "-3.1903905",
+        "category": "highway",
+        "type": "tertiary",
+        "place_rank": 26,
+        "importance": 0.43087867614901804,
+        "addresstype": "road",
+        "name": "Princes Street",
+        "display_name": "Princes Street, Abbeyhill, Old Town, City of Edinburgh, Alba / Scotland, EH2 2AN, United Kingdom",
+        "boundingbox": [
+          "55.9528923",
+          "55.9532453",
+          "-3.1913724",
+          "-3.1894008"
+        ]
+      },
+      {
+        "place_id": 274993736,
+        "licence": "Data \u00a9 OpenStreetMap contributors, ODbL 1.0. http://osm.org/copyright",
+        "osm_type": "way",
+        "osm_id": 69403899,
+        "lat": "55.9527247",
+        "lon": "-3.1928294",
+        "category": "highway",
+        "type": "tertiary",
+        "place_rank": 26,
+        "importance": 0.43087867614901804,
+        "addresstype": "road",
+        "name": "Princes Street",
+        "display_name": "Princes Street, New Town, New Town/Broughton, City of Edinburgh, Alba / Scotland, EH2 2BY, United Kingdom",
+        "boundingbox": [
+          "55.9526233",
+          "55.9527993",
+          "-3.1933981",
+          "-3.1922574"
+        ]
+      },
+      {
+        "place_id": 272943658,
+        "licence": "Data \u00a9 OpenStreetMap contributors, ODbL 1.0. http://osm.org/copyright",
+        "osm_type": "way",
+        "osm_id": 4684193,
+        "lat": "55.9503534",
+        "lon": "-3.2066066",
+        "category": "highway",
+        "type": "primary",
+        "place_rank": 26,
+        "importance": 0.43087867614901804,
+        "addresstype": "road",
+        "name": "Princes Street",
+        "display_name": "Princes Street, Haymarket, West End, City of Edinburgh, Alba / Scotland, EH2 4BL, United Kingdom",
+        "boundingbox": [
+          "55.9502626",
+          "55.9504443",
+          "-3.2071430",
+          "-3.2060703"
+        ]
+      },
+      {
+        "place_id": 273564741,
+        "licence": "Data \u00a9 OpenStreetMap contributors, ODbL 1.0. http://osm.org/copyright",
+        "osm_type": "way",
+        "osm_id": 2956325,
+        "lat": "55.9528711",
+        "lon": "-3.1918236",
+        "category": "highway",
+        "type": "tertiary",
+        "place_rank": 26,
+        "importance": 0.43087867614901804,
+        "addresstype": "road",
+        "name": "Princes Street",
+        "display_name": "Princes Street, Greenside, New Town, New Town/Broughton, City of Edinburgh, Alba / Scotland, EH2 2AZ, United Kingdom",
+        "boundingbox": [
+          "55.9527993",
+          "55.9529497",
+          "-3.1922574",
+          "-3.1913909"
+        ]
+      }
+    ]
+  }
+}
