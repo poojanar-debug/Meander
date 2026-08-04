@@ -15,6 +15,7 @@ import time
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
+from datetime import UTC
 from typing import Any
 
 from fastapi import FastAPI, Query, Request, Response
@@ -206,11 +207,34 @@ def route_cache_key(req: RouteRequest) -> str:
             "minutes": req.minutes,
             "mode": req.mode,
             "objectives": list(req.resolved_objectives()),
+            # depart_at drives best_departure, the air-quality hour index and
+            # the shade score, so two requests differing only in departure time
+            # are different answers. Without it they shared one cached payload
+            # and the later one got the earlier one's departure advice for up to
+            # the 6 hour TTL.
+            #
+            # Bucketed to the hour, which is the granularity best_departure and
+            # the air-quality series actually use, and for the same reason the
+            # coordinates above are rounded to 3 dp: an unrounded timestamp
+            # would miss the cache on literally every request. Nothing sends
+            # departAt today, so this is latent — until Phase 5.5 plumbs a real
+            # timestamp through, at which point it stops being latent.
+            "depart_at": _departure_bucket(req),
             "version": __version__,
         },
         sort_keys=True,
     )
     return hashlib.sha256(material.encode()).hexdigest()[:24]
+
+
+def _departure_bucket(req: RouteRequest) -> str | None:
+    """The departure hour, in UTC, or None when the caller did not ask for one."""
+    if req.depart_at is None:
+        return None
+    when = req.depart_at
+    if when.tzinfo is None:
+        when = when.replace(tzinfo=UTC)
+    return when.astimezone(UTC).strftime("%Y-%m-%dT%H")
 
 
 @dataclass
