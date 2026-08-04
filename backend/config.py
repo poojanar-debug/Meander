@@ -28,7 +28,20 @@ FixtureMode = Literal["replay", "record", "live"]
 
 # Endpoints. Kept here so fixtures.py can map a hostname back to a service name
 # and apply that service's live-call budget.
-GRAPHHOPPER_URL = "https://graphhopper.com/api/1/route"
+# Overridable so the app can be pointed at a self-hosted GraphHopper. The
+# hosted free tier cannot run custom models (see BLOCKED.md #0), so the nature
+# and accessible presets only work against a server you run yourself:
+#
+#   MEANDER_GRAPHHOPPER_URL=http://localhost:8989/route
+GRAPHHOPPER_URL = os.environ.get(
+    "MEANDER_GRAPHHOPPER_URL", "https://graphhopper.com/api/1/route"
+)
+
+
+def graphhopper_is_self_hosted() -> bool:
+    """A self-hosted server needs no API key and has no plan restrictions."""
+    host = GRAPHHOPPER_URL.split("//", 1)[-1].split("/", 1)[0].split(":", 1)[0].lower()
+    return host in {"localhost", "127.0.0.1", "0.0.0.0", "::1"} or host.endswith(".local")
 GRAPHHOPPER_GEOCODE_URL = "https://graphhopper.com/api/1/geocode"
 MAPILLARY_URL = "https://graph.mapillary.com/images"
 OVERPASS_URL = "https://overpass-api.de/api/interpreter"
@@ -109,6 +122,20 @@ LIVE_CALL_BUDGET: dict[str, int] = _resolve_live_call_budget()
 # signature (so a fixture is portable between developers) and redacted from the
 # fixture file on disk.
 SECRET_QUERY_PARAMS = frozenset({"key", "access_token", "api_key"})
+
+# Per-edge details requested from GraphHopper and read by accessibility.py.
+# `smoothness` is one of the five hard constraints but the hosted API does not
+# expose it, so it is only requested when the encoded value is known to exist —
+# a self-hosted graph built by scripts/graphhopper.sh includes it.
+DEFAULT_PATH_DETAILS = ("road_class", "surface", "road_environment")
+SELF_HOSTED_PATH_DETAILS = (*DEFAULT_PATH_DETAILS, "smoothness")
+
+
+def path_details() -> list[str]:
+    raw = os.environ.get("MEANDER_PATH_DETAILS")
+    if raw:
+        return [d.strip() for d in raw.split(",") if d.strip()]
+    return list(SELF_HOSTED_PATH_DETAILS if graphhopper_is_self_hosted() else DEFAULT_PATH_DETAILS)
 SECRET_HEADERS = frozenset({"authorization", "x-api-key", "anthropic-api-key"})
 
 # Every request goes through these. Kept low so a wedged upstream degrades the

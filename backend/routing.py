@@ -20,7 +20,7 @@ from typing import Any
 
 import httpx
 
-from .config import GRAPHHOPPER_URL, NOMINATIM_URL, settings
+from .config import GRAPHHOPPER_URL, NOMINATIM_URL, path_details, settings
 from .fixtures import BudgetExhausted, FixtureMissing, fetch, is_synthetic
 from .geometry import LatLon, closes_loop, path_length_m, to_lonlat_pairs
 from .logging_setup import get_logger
@@ -44,8 +44,9 @@ LOOP_SPEED_M_PER_MIN: dict[EffectiveMode, float] = {
 
 PROFILE_FOR_MODE: dict[EffectiveMode, str] = {"foot": "foot", "bike": "bike", "car": "car"}
 
-# Returned per-edge so accessibility.py can evaluate the route it was actually given.
-PATH_DETAILS = ["road_class", "surface", "road_environment"]
+# Returned per-edge so accessibility.py can evaluate the route it was actually
+# given. Resolved at call time because it depends on which server we are talking
+# to — see config.path_details().
 
 
 class RoutingError(RuntimeError):
@@ -212,7 +213,7 @@ def _base_body(profile: str, elevation: bool = True) -> dict[str, Any]:
         "instructions": False,
         "calc_points": True,
         "elevation": elevation,
-        "details": list(PATH_DETAILS),
+        "details": path_details(),
     }
 
 

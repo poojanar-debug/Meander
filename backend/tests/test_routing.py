@@ -302,3 +302,54 @@ async def test_geometry_is_emitted_in_geojson_lon_lat_order() -> None:
     # Colombo is at lon ~79.8, lat ~6.9. If these were swapped, the first value
     # would be the small one.
     assert first[0] > 70 and first[1] < 10
+
+
+# ---------------------------------------------------------------------------
+# self-hosted vs hosted GraphHopper
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "url,self_hosted",
+    [
+        ("http://localhost:8989/route", True),
+        ("http://127.0.0.1:8989/route", True),
+        ("http://gh.local:8989/route", True),
+        ("https://graphhopper.com/api/1/route", False),
+        ("https://graphhopper.com.evil.invalid/route", False),
+    ],
+)
+def test_self_hosted_detection(monkeypatch, url: str, self_hosted: bool) -> None:
+    """Drives whether smoothness is requested, so a wrong answer here silently
+    changes what the accessibility engine can see."""
+    from backend import config
+
+    monkeypatch.setattr(config, "GRAPHHOPPER_URL", url)
+    assert config.graphhopper_is_self_hosted() is self_hosted
+
+
+def test_hosted_graphhopper_is_not_asked_for_smoothness(monkeypatch) -> None:
+    """The hosted API rejects unknown path details, so asking would 400 every
+    request rather than degrading."""
+    from backend import config
+
+    monkeypatch.setattr(config, "GRAPHHOPPER_URL", "https://graphhopper.com/api/1/route")
+    monkeypatch.delenv("MEANDER_PATH_DETAILS", raising=False)
+    assert "smoothness" not in config.path_details()
+
+
+def test_a_self_hosted_server_is_asked_for_smoothness(monkeypatch) -> None:
+    """smoothness is one of the five hard accessibility constraints, and a graph
+    we build ourselves can expose it."""
+    from backend import config
+
+    monkeypatch.setattr(config, "GRAPHHOPPER_URL", "http://localhost:8989/route")
+    monkeypatch.delenv("MEANDER_PATH_DETAILS", raising=False)
+    assert "smoothness" in config.path_details()
+
+
+def test_path_details_can_be_overridden(monkeypatch) -> None:
+    from backend import config
+
+    monkeypatch.setenv("MEANDER_PATH_DETAILS", "surface, road_class")
+    assert config.path_details() == ["surface", "road_class"]
