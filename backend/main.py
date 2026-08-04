@@ -29,6 +29,7 @@ from .cache import get_cache
 from .config import (
     REQUEST_DEADLINE_S,
     STRICT_STARTUP,
+    TRUSTED_PROXY_HOPS,
     path_details,
     self_hosted_resolution,
     settings,
@@ -163,6 +164,12 @@ app.add_middleware(
     allow_credentials=False,
     allow_methods=["GET", "POST", "OPTIONS"],
     allow_headers=["Content-Type", "Accept"],
+    # Without this a cross-origin browser cannot read any of them at all, which
+    # is why ApiError.retryAfter in frontend/src/api/client.js has always been 0
+    # and the backoff logic behind it has never once run. A split deployment —
+    # CloudFront for the site, an ALB for the API — is cross-origin by
+    # construction, so this is the normal case rather than an edge one.
+    expose_headers=["Retry-After", "X-Meander-Cache", "X-Request-Id"],
     max_age=600,
 )
 
@@ -176,11 +183,41 @@ def _client_ip(request: Request) -> str | None:
 
     The value is passed straight into a salted digest and never stored, logged
     or returned.
+
+    **Read from the right, never the left.** X-Forwarded-For is appended to by
+    each proxy, so the rightmost entries are the ones your own infrastructure
+    added and the leftmost are whatever the client sent. Taking
+    ``split(",")[0]`` meant a client could send its own X-Forwarded-For, land
+    first in the list, and get a fresh token bucket on every single request —
+    which is the entire rate limiter defeated by one header.
+
+    With one trusted proxy a spoofed request arrives as ``1.2.3.4, <real
+    client>``: ``parts[-1]`` is the address the proxy observed and ``parts[-2]``
+    is the attacker's invention.
+
+    ``MEANDER_TRUSTED_PROXY_HOPS`` is how many proxies of your own sit in front
+    of this service. It defaults to **0**, which ignores the header completely
+    and uses the socket peer — the only safe default, because trusting a hop
+    that is not there is a bypass while distrusting one that is there is merely
+    a shared bucket. **A deployment behind an ALB must set it to 1**, or every
+    client shares one bucket and the service rate-limits itself as a whole.
     """
+    hops = TRUSTED_PROXY_HOPS
+    peer = request.client.host if request.client else None
+    if hops <= 0:
+        return peer
+
     forwarded = request.headers.get("x-forwarded-for")
-    if forwarded:
-        return forwarded.split(",")[0].strip()
-    return request.client.host if request.client else None
+    if not forwarded:
+        return peer
+    parts = [p.strip() for p in forwarded.split(",") if p.strip()]
+    if not parts:
+        return peer
+    if len(parts) < hops:
+        # Shorter than configured: something is not appending. Fall back to the
+        # socket peer rather than trusting a client-controlled entry.
+        return peer
+    return parts[-hops]
 
 
 # ---------------------------------------------------------------------------

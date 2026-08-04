@@ -224,6 +224,18 @@ HTTP_CONNECT_TIMEOUT_S = _env_float("MEANDER_HTTP_CONNECT_TIMEOUT_S", 5.0)
 # Deliberately under a typical 60 s proxy idle timeout.
 REQUEST_DEADLINE_S = _env_float("MEANDER_REQUEST_DEADLINE_S", 45.0)
 
+# How many proxies of *your own* sit in front of this service.
+#
+# Defaults to 0, which ignores X-Forwarded-For entirely and rate-limits on the
+# socket peer. That is the only safe default: trusting a hop that is not there
+# is a complete bypass (a client sends its own X-Forwarded-For and gets a fresh
+# token bucket every request), whereas distrusting one that is there merely
+# makes everybody share a bucket.
+#
+# **Set this to 1 behind an ALB.** Left at 0 there, every request appears to
+# come from the load balancer and the whole service rate-limits as one client.
+TRUSTED_PROXY_HOPS = _env_int("MEANDER_TRUSTED_PROXY_HOPS", 0)
+
 
 @dataclass(frozen=True)
 class Settings:
@@ -270,11 +282,18 @@ def _resolve_fixture_mode() -> FixtureMode:
 def _resolve_origins() -> tuple[str, ...]:
     raw = os.environ.get("MEANDER_ALLOWED_ORIGINS", "")
     origins = [o.strip() for o in raw.split(",") if o.strip()]
-    # Local dev servers are always permitted; the deployed origin comes from env.
-    defaults = ["http://localhost:5173", "http://127.0.0.1:5173"]
-    for d in defaults:
-        if d not in origins:
-            origins.append(d)
+    # The Vite dev server used to be appended to *every* deployment's allowlist
+    # unconditionally, which quietly means a page served from a developer's
+    # laptop can call production.
+    #
+    # The default is now "only when no origins were configured at all", i.e.
+    # local development, where it is the whole allowlist. Configure
+    # MEANDER_ALLOWED_ORIGINS — which any deployment must — and localhost stops
+    # being allowed unless MEANDER_ALLOW_LOCAL_ORIGINS says otherwise.
+    if _env_flag("MEANDER_ALLOW_LOCAL_ORIGINS", not origins):
+        for d in ("http://localhost:5173", "http://127.0.0.1:5173"):
+            if d not in origins:
+                origins.append(d)
     return tuple(origins)
 
 
@@ -294,7 +313,10 @@ def load_settings() -> Settings:
         osm_dev_token=_clean("OSM_DEV_TOKEN"),
         allowed_origins=_resolve_origins(),
         per_ip_bucket_capacity=_env_int("MEANDER_RATE_CAPACITY", 12),
-        per_ip_refill_per_min=float(_env_int("MEANDER_RATE_REFILL_PER_MIN", 3)),
+        # _env_float, not float(_env_int(...)): the latter parsed "0.5" with
+        # int(), hit ValueError, and silently returned the default of 3 — a
+        # six-fold difference from what the operator asked for, with no error.
+        per_ip_refill_per_min=_env_float("MEANDER_RATE_REFILL_PER_MIN", 3.0),
         global_daily_route_ceiling=_env_int("MEANDER_DAILY_ROUTE_CEILING", 120),
         route_cache_ttl_s=_env_int("MEANDER_ROUTE_CACHE_TTL_S", 6 * 60 * 60),
         log_level=os.environ.get("MEANDER_LOG_LEVEL", "INFO").upper(),
