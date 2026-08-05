@@ -8,10 +8,12 @@ import Header from './components/Header.jsx'
 import MapView from './components/MapView.jsx'
 import RouteList from './components/RouteList.jsx'
 import RouteSheet from './components/RouteSheet.jsx'
+import ShareButton from './components/ShareButton.jsx'
 import StatusBanner from './components/StatusBanner.jsx'
 import TopBar from './components/TopBar.jsx'
 import { announceRoutes, announceSelection, effectiveMode } from './lib/format.js'
 import { useMediaQuery } from './lib/media.js'
+import { decodeState, writeUrl } from './lib/permalink.js'
 import { useTheme } from './lib/theme.js'
 
 const MIN_MINUTES = 20
@@ -153,8 +155,25 @@ function reducer(state, action) {
   }
 }
 
+/**
+ * A shared link is the initial state, not something applied afterwards.
+ *
+ * Seeding the reducer means the one fetch effect fires on the first render with
+ * the right inputs — applying it in an effect instead would route the defaults
+ * first and then route again, which spends two requests and briefly shows the
+ * wrong answer.
+ */
+function initialStateFromUrl() {
+  if (typeof window === 'undefined') return initialState
+  const shared = decodeState()
+  if (!shared) return initialState
+  // nonce 1 rather than 0: the fetch effect ignores 0 (nothing has been asked
+  // for yet), and a link *is* a request.
+  return { ...initialState, ...shared, nonce: 1, debounceMs: 0 }
+}
+
 export default function App() {
-  const [state, dispatch] = useReducer(reducer, initialState)
+  const [state, dispatch] = useReducer(reducer, undefined, initialStateFromUrl)
   const [announcement, setAnnouncement] = useState('')
   // 'hidden' until the first routes arrive, so an empty sheet does not sit over
   // the map before there is anything to put in it.
@@ -232,6 +251,18 @@ export default function App() {
   }, [state.nonce])
 
   useEffect(() => () => abortRef.current?.abort(), [])
+
+  // The address bar follows the controls. replaceState, never pushState — a
+  // slider drag would otherwise put fifty entries behind the back button.
+  useEffect(() => {
+    writeUrl({
+      origin: state.origin,
+      dest: state.dest,
+      minutes: state.minutes,
+      mode: state.mode,
+      objectives: state.objectives,
+    })
+  }, [state.origin, state.dest, state.minutes, state.mode, state.objectives])
 
   // --- handlers ------------------------------------------------------------
 
@@ -368,6 +399,16 @@ export default function App() {
               onSelect={onSelect}
               skeletonCount={loading ? state.objectives.length : 0}
             />
+
+            {showChrome && hasRoutes && (
+              <ShareButton
+                origin={state.origin}
+                dest={state.dest}
+                minutes={state.minutes}
+                mode={state.mode}
+                objectives={state.objectives}
+              />
+            )}
 
             {showChrome && <Footer />}
           </div>
