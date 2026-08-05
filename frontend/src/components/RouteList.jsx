@@ -13,7 +13,15 @@ import RouteRow from './RouteRow.jsx'
  * left panel and the composer forces `snap` to 'full', so this renders every
  * card without needing a desktop-specific branch.
  */
-export default function RouteList({ routes, selected, snap = 'full', onSelect, skeletonCount = 0 }) {
+export default function RouteList({
+  routes,
+  selected,
+  snap = 'full',
+  onSelect,
+  skeletonCount = 0,
+  origin,
+  dest,
+}) {
   if (routes.length === 0 && skeletonCount > 0) {
     return (
       <ul className="route-list" aria-busy="true">
@@ -59,6 +67,8 @@ export default function RouteList({ routes, selected, snap = 'full', onSelect, s
             route={route}
             selected={route.id === selected}
             onSelect={onSelect}
+            origin={origin}
+            dest={dest}
           />
         )
       })}

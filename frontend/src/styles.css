@@ -1546,3 +1546,144 @@ fieldset.chips legend {
   font-size: var(--text-1);
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
 }
+
+/* -------------------------------------------------------------- takeaway */
+
+.takeaway {
+  border-top: 1px solid var(--rule);
+  padding-top: var(--space-3);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+.takeaway__title {
+  margin: 0;
+  font-family: var(--font-body);
+  font-size: var(--text-1);
+  font-weight: 700;
+}
+.takeaway__row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+.takeaway__row .button {
+  font-size: var(--text-1);
+  padding: var(--space-2) var(--space-3);
+  text-decoration: none;
+  display: inline-flex;
+  align-items: center;
+}
+.takeaway__note {
+  margin: 0;
+  font-size: var(--text-1);
+  color: var(--ink-muted);
+}
+.takeaway__disclose {
+  align-self: flex-start;
+  font: inherit;
+  font-size: var(--text-1);
+  font-weight: 600;
+  min-height: var(--target);
+  padding: var(--space-2) 0;
+  background: none;
+  border: 0;
+  color: var(--ink);
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.takeaway__warn {
+  background: var(--warn-ground);
+  border: 1px solid var(--warn-border);
+  border-radius: var(--radius-control);
+  color: var(--warn-ink);
+  padding: var(--space-3);
+  font-size: var(--text-1);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+.takeaway__warn p {
+  margin: 0;
+}
+
+/* ----------------------------------------------------------------- print */
+/*
+ * One page: the key numbers, the coverage sentence, the barriers, the
+ * directions. The map is a WebGL canvas and does not survive printing at all,
+ * so it is dropped rather than left as a grey rectangle — the card has always
+ * been the full text equivalent, which is exactly what makes this possible.
+ *
+ * Everything hidden here is chrome, never content. The confidence sentence and
+ * the barriers print at full size: a sheet of paper carried around a city has
+ * *less* context than the screen, not more.
+ */
+@media print {
+  .topbar,
+  .sheet__handle,
+  .sheet__snaps,
+  .shell__map,
+  .skip-link,
+  .share,
+  .takeaway,
+  .card__more,
+  .banner__progress {
+    display: none !important;
+  }
+
+  .shell {
+    display: block;
+    height: auto;
+    overflow: visible;
+    touch-action: auto;
+  }
+  .sheet,
+  .sheet--peek,
+  .sheet--half,
+  .sheet--full {
+    position: static;
+    height: auto;
+    box-shadow: none;
+    border: 0;
+  }
+  .sheet__scroll {
+    overflow: visible;
+    padding: 0;
+  }
+
+  /* Tier 3 is collapsed on screen; on paper there is no "later" to expand it
+     in, so everything prints. */
+  .card__detail[hidden] {
+    display: flex !important;
+  }
+
+  .card {
+    break-inside: avoid;
+    border: 1px solid #999;
+    box-shadow: none;
+    background: none;
+  }
+  .trust--loud,
+  .blockers {
+    border: 2px solid #000;
+    background: none;
+    color: #000;
+    break-inside: avoid;
+  }
+
+  body {
+    background: #fff;
+    color: #000;
+    font-size: 11pt;
+  }
+  a::after {
+    /* A printed link with no address is a dead end. */
+    content: ' (' attr(href) ')';
+    font-size: 9pt;
+    word-break: break-all;
+  }
+  .footer a::after {
+    content: '';
+  }
+}

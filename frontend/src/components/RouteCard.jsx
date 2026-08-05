@@ -10,6 +10,7 @@ import {
   fmtPct,
   restStopSentence,
 } from '../lib/format.js'
+import TakeItWithYou from './TakeItWithYou.jsx'
 import TrustSignal from './TrustSignal.jsx'
 
 const MODE_NOUN = { foot: 'on foot', bike: 'by bike', car: 'by car' }
@@ -45,7 +46,7 @@ const WHY = {
  * and `<ul>` is invalid HTML and screen readers flatten it into one unreadable
  * label.
  */
-export default function RouteCard({ route, selected, onSelect }) {
+export default function RouteCard({ route, selected, onSelect, origin, dest }) {
   const style = styleFor(route.id)
   const detailsId = useId()
   const [open, setOpen] = useState(false)
@@ -166,6 +167,8 @@ export default function RouteCard({ route, selected, onSelect }) {
             Description still being written…
           </p>
         )}
+
+        <TakeItWithYou route={route} origin={origin} dest={dest} />
       </div>
     </li>
   )

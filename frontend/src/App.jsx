@@ -398,6 +398,8 @@ export default function App() {
               snap={effectiveSnap}
               onSelect={onSelect}
               skeletonCount={loading ? state.objectives.length : 0}
+              origin={state.origin}
+              dest={state.dest}
             />
 
             {showChrome && hasRoutes && (
