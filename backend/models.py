@@ -96,6 +96,15 @@ class RestStop(BaseModel):
     at_m: float
 
 
+class Step(BaseModel):
+    """One turn instruction. Present only when the router supplied any."""
+
+    text: str
+    distance_m: float
+    lat: float
+    lon: float
+
+
 class Blocker(BaseModel):
     type: str
     lat: float
@@ -116,6 +125,10 @@ class Route(BaseModel):
     confidence: float
     rest_stops: list[RestStop] = Field(default_factory=list)
     blockers: list[Blocker] = Field(default_factory=list)
+    # Turn-by-turn directions. Empty when the router gave none — which is
+    # different from a route with no turns, but the UI says "no directions"
+    # either way rather than implying the route is a straight line.
+    steps: list[Step] = Field(default_factory=list)
     narration: str | None = None
 
     # Not in the original spec. Present because a route built from a hand-made

@@ -61,6 +61,7 @@ from .models import (
     RouteRequest,
     RoutesResponse,
     Scores,
+    Step,
     effective_mode,
 )
 from .ratelimit import RateLimiter
@@ -542,6 +543,10 @@ def _scored_route(
         # figure. Synthetic routes report no confidence at all.
         confidence=0.0 if (synthetic or access is None) else access.coverage,
         blockers=blockers,
+        steps=[
+            Step(text=st.text, distance_m=round(st.distance_m), lat=st.lat, lon=st.lon)
+            for st in raw.steps
+        ],
         rest_stops=[
             RestStop(lat=s.lat, lon=s.lon, type=s.type, at_m=s.at_m)
             for s in (rest_stops or [])

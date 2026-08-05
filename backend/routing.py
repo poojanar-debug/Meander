@@ -275,6 +275,22 @@ def accessible_custom_model(with_smoothness: bool | None = None) -> dict[str, An
 
 
 @dataclass
+class Step:
+    """One turn instruction, already reduced to what a person needs.
+
+    GraphHopper's own instruction objects carry sign codes, interval indices and
+    street references. Only the sentence, the distance and where it happens
+    survive here — the rest is routing-engine detail that would have to be
+    re-explained on the way to the screen.
+    """
+
+    text: str
+    distance_m: float
+    lat: float
+    lon: float
+
+
+@dataclass
 class RawRoute:
     """A route as GraphHopper returned it, before scoring or enrichment."""
 
@@ -284,6 +300,7 @@ class RawRoute:
     mode: EffectiveMode
     elevations: list[float] = field(default_factory=list)
     details: dict[str, list[tuple[int, int, Any]]] = field(default_factory=dict)
+    steps: list[Step] = field(default_factory=list)
     synthetic_upstream: bool = False
     preset: str = "fastest"
     # Set when the preset could not fully deliver what it promises — over the
@@ -312,11 +329,48 @@ def _base_body(profile: str, elevation: bool = True) -> dict[str, Any]:
     return {
         "profile": profile,
         "points_encoded": False,
-        "instructions": False,
+        # ⚠ Changing anything in this dict changes the signature every committed
+        # fixture is keyed on, and the offline suite — the whole safety net —
+        # then fails wholesale with no_fixture 503s. Flipping this flag required
+        # re-recording all 68 GraphHopper fixtures in the same commit; see
+        # scripts/migrate_fixtures.py.
+        "instructions": True,
         "calc_points": True,
         "elevation": elevation,
         "details": path_details(),
     }
+
+
+def _parse_instructions(raw: Any, points: list[LatLon]) -> list[Step]:
+    """GraphHopper's instruction list, reduced to steps.
+
+    Every field is treated as optional. Instructions are the newest thing in
+    this response and the least load-bearing — a malformed one must cost the
+    user their directions, never their route.
+    """
+    if not isinstance(raw, list):
+        return []
+    steps: list[Step] = []
+    for item in raw:
+        if not isinstance(item, dict):
+            continue
+        text = str(item.get("text") or "").strip()
+        if not text:
+            continue
+        interval = item.get("interval")
+        index = 0
+        if isinstance(interval, list | tuple) and interval:
+            try:
+                index = max(0, min(len(points) - 1, int(interval[0])))
+            except (TypeError, ValueError):
+                index = 0
+        try:
+            distance = float(item.get("distance") or 0.0)
+        except (TypeError, ValueError):
+            distance = 0.0
+        at = points[index] if points else LatLon(0.0, 0.0)
+        steps.append(Step(text=text, distance_m=distance, lat=at.lat, lon=at.lon))
+    return steps
 
 
 def _parse_details(raw: Any) -> dict[str, list[tuple[int, int, Any]]]:
@@ -361,6 +415,7 @@ def _parse_path(path: dict[str, Any], mode: EffectiveMode, synthetic: bool, pres
         mode=mode,
         elevations=elevations,
         details=_parse_details(path.get("details")),
+        steps=_parse_instructions(path.get("instructions"), points),
         synthetic_upstream=synthetic,
         preset=preset,
     )
@@ -841,6 +896,7 @@ __all__ = [
     "PresetUnavailable",
     "RawRoute",
     "RoutingError",
+    "Step",
     "accessible_custom_model",
     "build_request_body",
     "from_post_point",

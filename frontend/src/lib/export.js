@@ -35,6 +35,9 @@ export function provenanceNote(route) {
   if (route.blockers?.length) {
     parts.push(`${route.blockers.length} recorded barrier(s) on this route.`)
   }
+  if (route.steps?.length) {
+    parts.push(`${route.steps.length} directions included.`)
+  }
   if (route.status !== 'ok') {
     parts.push('This route was rejected by the accessibility constraints and cannot be completed.')
   }

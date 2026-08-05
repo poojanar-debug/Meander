@@ -168,6 +168,28 @@ export default function RouteCard({ route, selected, onSelect, origin, dest }) {
           </p>
         )}
 
+        {route.steps?.length > 0 && (
+          <div className="steps">
+            <h4 className="steps__title">Directions</h4>
+            <ol className="steps__list">
+              {route.steps.map((step, i) => (
+                <li key={`${i}-${step.text}`} className="steps__item">
+                  <span className="steps__text">{step.text}</span>
+                  {step.distance_m > 0 && (
+                    <span className="steps__distance tabular">{fmtDist(step.distance_m)}</span>
+                  )}
+                </li>
+              ))}
+            </ol>
+            {route.synthetic_upstream && (
+              <p className="steps__warn">
+                These directions come from demonstration data. The street names are not real
+                places — do not follow them.
+              </p>
+            )}
+          </div>
+        )}
+
         <TakeItWithYou route={route} origin={origin} dest={dest} />
       </div>
     </li>

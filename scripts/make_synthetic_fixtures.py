@@ -19,6 +19,25 @@ Run:
 
 from __future__ import annotations
 
+import os
+
+# ⚠ Pinned before backend.config is imported, and for the same reason
+# backend/tests/conftest.py pins them.
+#
+# A fixture is keyed on a hash of the request body, and `path_details()` — which
+# is part of that body — depends on which server the app thinks it is talking
+# to. Run this generator with a self-hosted MEANDER_GRAPHHOPPER_URL in .env and
+# every fixture it writes is keyed *with* `smoothness`, while the offline suite
+# asks *without* it, so all 62 miss and the suite fails wholesale on no_fixture.
+#
+# That is not hypothetical: it happened, on the commit that turned instructions
+# on, and it cost a full regeneration cycle to spot. The demo fixtures exist to
+# make the app work with no configuration at all, so they must be generated in
+# exactly that no-configuration shape whatever the developer's .env says.
+os.environ["MEANDER_GRAPHHOPPER_URL"] = "https://graphhopper.com/api/1/route"
+os.environ["MEANDER_GRAPHHOPPER_SELF_HOSTED"] = "0"
+os.environ.pop("MEANDER_PATH_DETAILS", None)
+
 import argparse
 import asyncio
 import hashlib
@@ -276,6 +295,7 @@ def _synth_payload(body: dict[str, Any], preset: str, scenario: Scenario) -> dic
                 "ascend": round(max(elevations) - elevations[0], 1),
                 "descend": round(max(elevations) - elevations[-1], 1),
                 "details": _details(points, preset, rng, known_bad=preset in scenario.known_bad),
+                "instructions": _instructions(points, distance_m, time_ms, rng),
                 "legs": [],
                 "snapped_waypoints": {
                     "type": "LineString",
@@ -286,6 +306,69 @@ def _synth_payload(body: dict[str, Any], preset: str, scenario: Scenario) -> dic
             }
         ],
     }
+
+
+# GraphHopper's own sign codes. Only the ones a synthetic route plausibly uses.
+_SYNTH_TURNS = (
+    (0, "Continue onto {street}"),
+    (2, "Turn right onto {street}"),
+    (-2, "Turn left onto {street}"),
+    (7, "Keep right onto {street}"),
+    (-7, "Keep left onto {street}"),
+)
+
+# Deliberately invented-sounding. A synthetic fixture must never read as though
+# it came from a real survey — the whole provenance system exists to stop a
+# hand-made response being mistaken for a measurement, and a plausible street
+# name is exactly how that mistake gets made.
+_SYNTH_STREETS = (
+    "Demonstration Way", "Example Parade", "Placeholder Lane", "Sample Street",
+    "Specimen Road", "Illustration Walk", "Mock Avenue", "Fixture Path",
+)
+
+
+def _instructions(points, distance_m, time_ms, rng) -> list[dict[str, Any]]:
+    """A plausible instruction list in GraphHopper's real shape.
+
+    Synthetic, like everything else in this file, and the street names say so
+    out loud. The fixture envelope is stamped `synthetic`, every route derived
+    from one is forced to scoring_method "placeholder", and the card prints
+    "Built from demonstration data. Do not follow it." — but a person reading a
+    *direction* is being told where to walk, so the words themselves should not
+    be able to send anyone anywhere real.
+    """
+    if len(points) < 2:
+        return []
+
+    steps: list[dict[str, Any]] = []
+    count = max(2, min(8, len(points) // 6))
+    bounds = [round(i * (len(points) - 1) / count) for i in range(count + 1)]
+
+    for i in range(count):
+        start, end = bounds[i], bounds[i + 1]
+        span = max(1, end - start)
+        sign, template = (0, "Continue onto {street}") if i == 0 else rng.choice(_SYNTH_TURNS)
+        street = rng.choice(_SYNTH_STREETS)
+        leg = distance_m * span / max(1, len(points) - 1)
+        steps.append({
+            "distance": round(leg, 3),
+            "heading": round(rng.uniform(0, 360), 2),
+            "sign": sign,
+            "interval": [start, end],
+            "text": template.format(street=street),
+            "time": round(time_ms * span / max(1, len(points) - 1)),
+            "street_name": street,
+        })
+
+    steps.append({
+        "distance": 0.0,
+        "sign": 4,  # FINISH
+        "interval": [len(points) - 1, len(points) - 1],
+        "text": "Arrive at destination",
+        "time": 0,
+        "street_name": "",
+    })
+    return steps
 
 
 def _unroutable_payload() -> dict[str, Any]:
@@ -388,8 +471,11 @@ async def _report(scenario: Scenario) -> str:
                      ("accessible", route_accessible)):
         try:
             if name == "nature":
-                route = await fn(origin_pt, dest_pt, scenario.minutes, scenario.mode,
-                                 fastest.duration_min if fastest else None)
+                # The whole RawRoute, not its duration. route_nature derives
+                # both the duration cap *and* the greenness floor from it, so a
+                # float here raised AttributeError and the report printed
+                # "nature blocked" for a preset that had generated perfectly.
+                route = await fn(origin_pt, dest_pt, scenario.minutes, scenario.mode, fastest)
             else:
                 route = await fn(origin_pt, dest_pt, scenario.minutes, scenario.mode)
         # This is the generator's own report, not a request path: a preset that
