@@ -176,12 +176,45 @@ async def test_air_quality_comes_back_as_a_score() -> None:
 
 @pytest.mark.asyncio
 async def test_a_cleaner_place_scores_higher_than_a_dirtier_one() -> None:
-    colombo = await fetch_air_quality(COLOMBO)
-    amsterdam = await fetch_air_quality(VONDEL)
+    """Pinned to a named hour, because the fixture is a 24-hour series.
+
+    ⚠ This used to call fetch_air_quality() with no `when`, which falls back to
+    datetime.now(UTC), and _hour_index() indexes the recorded series by the
+    current UTC *hour*. So the assertion depended on the wall clock in a suite
+    whose entire point is that it is hermetic and offline.
+
+    It was written during an hour when it happened to hold, and it held for
+    about a year until midnight UTC on 2026-08-05, when the hour rolled to 01
+    and Colombo's AQI (34) went above Amsterdam's (32). Measured across the
+    recorded day, the ordering holds at 18 of the 24 hours and fails at
+    00-02 and 05-07.
+
+    Midday is both the clearest case and the one the original comment was
+    describing: Colombo 32, Amsterdam 60.
+    """
+    noon = datetime(2026, 8, 4, 12, tzinfo=UTC)
+    colombo = await fetch_air_quality(COLOMBO, noon)
+    amsterdam = await fetch_air_quality(VONDEL, noon)
 
     assert colombo is not None and amsterdam is not None
-    # Recorded 2026-08-04: Colombo AQI 32, Amsterdam 60.
+    assert colombo.aqi == 32
+    assert amsterdam.aqi == 60
     assert colombo.score > amsterdam.score
+
+
+@pytest.mark.asyncio
+async def test_the_air_quality_score_tracks_the_hour_it_is_asked_about() -> None:
+    """The behaviour that made the test above a time bomb, pinned deliberately.
+
+    depart_at genuinely changes this number — which is also why Phase 1.7 had to
+    put it in the route cache key.
+    """
+    early = await fetch_air_quality(VONDEL, datetime(2026, 8, 4, 0, tzinfo=UTC))
+    midday = await fetch_air_quality(VONDEL, datetime(2026, 8, 4, 12, tzinfo=UTC))
+
+    assert early is not None and midday is not None
+    assert early.aqi != midday.aqi
+    assert early.score > midday.score
 
 
 @pytest.mark.asyncio
