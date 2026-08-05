@@ -1,10 +1,17 @@
 import maplibregl from 'maplibre-gl'
 import { useEffect, useRef, useState } from 'react'
 
-import { styleFor } from '../lib/dash.js'
+import { cssVar, routeColor, styleFor } from '../lib/dash.js'
 import { fmtDist } from '../lib/format.js'
 
-const STYLE_URL = 'https://tiles.openfreemap.org/styles/positron'
+// Two basemaps, because a light map under a dark UI is the one part of dark
+// mode that cannot be done with tokens — the style is a URL, not a colour.
+// MapView is keyed on the theme in App.jsx, so a change re-creates the map
+// rather than trying to setStyle() and restore every source and layer.
+const STYLE_URLS = {
+  light: 'https://tiles.openfreemap.org/styles/positron',
+  dark: 'https://tiles.openfreemap.org/styles/dark',
+}
 const INITIAL_CENTER = [79.8521, 6.921]
 const INITIAL_ZOOM = 12.6
 
@@ -44,7 +51,7 @@ function markerElement(className, text, label) {
  * tested with this component hidden. Markers carry real `aria-label`s, but they
  * are a convenience — the list is the accessibility story.
  */
-export default function MapView({ routes, selected, origin, dest, onSelect }) {
+export default function MapView({ routes, selected, origin, dest, onSelect, theme = 'light' }) {
   const containerRef = useRef(null)
   const mapRef = useRef(null)
   const markersRef = useRef([])
@@ -89,7 +96,7 @@ export default function MapView({ routes, selected, origin, dest, onSelect }) {
       try {
         map = new maplibregl.Map({
           container: containerRef.current,
-          style: STYLE_URL,
+          style: STYLE_URLS[theme] ?? STYLE_URLS.light,
           center: INITIAL_CENTER,
           zoom: INITIAL_ZOOM,
           attributionControl: { compact: true },
@@ -204,13 +211,13 @@ export default function MapView({ routes, selected, origin, dest, onSelect }) {
         type: 'line',
         source: `route-${route.id}`,
         layout: { 'line-cap': 'round', 'line-join': 'round' },
-        paint: { 'line-color': '#ffffff', 'line-width': 7 },
+        paint: { 'line-color': cssVar('--map-casing', '#ffffff'), 'line-width': 7 },
       })
     }
     for (const route of drawable) {
       const style = styleFor(route.id)
       const paint = {
-        'line-color': style.color,
+        'line-color': routeColor(route.id),
         'line-width': 3.5,
         'line-opacity': 0.4,
       }

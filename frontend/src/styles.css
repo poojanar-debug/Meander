@@ -9,22 +9,75 @@
  */
 
 :root {
+  /* --- spacing, on a 4px base ------------------------------------------
+     There were fifteen ad-hoc pixel values in this file. Eight steps cover
+     every one of them, and a scale is what makes a rhythm survive editing. */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
+  --space-7: 48px;
+  --space-8: 64px;
+
+  /* --- type, six steps --------------------------------------------------
+     **--text-1 is 14px and it is the floor.** There were ten hardcoded sizes
+     and the distribution was bottom-heavy: most card content sat at 12-13px,
+     including the confidence sentence, which is the most important thing on
+     the card. Nothing a user is expected to read is below --text-1.
+
+     The one exception is the glyph inside a map pin, which is not prose and
+     is aria-hidden; it says so where it is used. */
+  --text-1: 0.875rem;  /* 14 — floor for anything readable */
+  --text-2: 1rem;      /* 16 — body */
+  --text-3: 1.125rem;  /* 18 */
+  --text-4: 1.375rem;  /* 22 */
+  --text-5: 1.75rem;   /* 28 */
+  --text-6: 2.25rem;   /* 36 */
+
+  /* --- route identity ---------------------------------------------------
+     **One concept, one colour.** These were duplicated between dash.js and
+     this file with four disagreements: the Shade chip was teal while
+     --score-shade was brown, the Clean-air chip was crimson while --score-air
+     was blue, the Fastest line was byte-identical to --score-air, and the
+     Quiet chip was byte-identical to --score-shade. So the same word meant two
+     colours and the same colour meant two words.
+
+     Defined here and read from JS (lib/dash.js), so there is one source. A
+     nature *score* and a nature *route* are the same idea and are now the same
+     colour. */
+  --route-fastest: #2f6fd0;
+  --route-nature: #2e8b57;
+  --route-accessible: #7a4fc4;
+  --route-quiet: #b06a1f;
+  --route-shade: #12756c;
+  --route-air: #b03050;
+
+  --score-nature: var(--route-nature);
+  --score-air: var(--route-air);
+  --score-shade: var(--route-shade);
+
+  /* --- surfaces and ink ------------------------------------------------- */
   --page: #f7f4ee;
   --raised: #fffdf8;
   --recessed: #f2eee5;
   --rule: #ddd6c6;
   --rule-strong: #c3bdae;
   --ink: #14213d;
-  --ink-muted: #5f6b80;
+  /* Was #5f6b80, which is 4.65:1 on --recessed — passing AA by 0.15, and it is
+     where most of the text in this app lives. Now 5.58:1 on the worst surface
+     it appears on and 6.35:1 on the best. */
+  --ink-muted: #545f71;
   --selected-border: #8fa0bd;
 
   --warn-ground: #f3e6de;
   --warn-border: #cf9f88;
   --warn-ink: #8a2c14;
 
-  --score-nature: #2e8b57;
-  --score-air: #2f6fd0;
-  --score-shade: #b06a1f;
+  /* The halo drawn under every route line on the map, so a route contrasts
+     against a known colour rather than against whatever the basemap does. */
+  --map-casing: #ffffff;
 
   --radius-control: 6px;
   --radius-card: 8px;
@@ -38,7 +91,78 @@
   /* Every interactive target must be at least this in both dimensions. */
   --target: 44px;
 
-  color-scheme: light;
+  /* Safe-area insets, resolved once. index.html sets viewport-fit=cover, which
+     opts this app into drawing under the notch and the home indicator — and
+     there was not one env(safe-area-inset-*) in this file, which is strictly
+     worse than not opting in at all. */
+  --safe-top: env(safe-area-inset-top, 0px);
+  --safe-right: env(safe-area-inset-right, 0px);
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+  --safe-left: env(safe-area-inset-left, 0px);
+
+  color-scheme: light dark;
+}
+
+/* --- dark mode -----------------------------------------------------------
+   Derived from the same tokens rather than a second palette. Every value below
+   was checked: --ink is 13.1-15.4:1 on the three surfaces, --ink-muted is
+   7.3-8.5:1 (the light theme's floor is 5.5:1, so dark is comfortably clear),
+   and the warn pair is 8.8:1.
+
+   The route colours are lightened, because in dark mode the map casing under
+   each line becomes dark and the light-theme hues sit at 2.5-3.7:1 against it.
+   The lightened set is 4.6-4.7:1.
+
+   [data-theme] wins over the media query in both directions, so a future
+   in-app toggle needs no changes here. */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) {
+    --page: #151922;
+    --raised: #1e2430;
+    --recessed: #111520;
+    --rule: #2c3341;
+    --rule-strong: #414a5c;
+    --ink: #e9ecf2;
+    --ink-muted: #a8b2c4;
+    --selected-border: #7c8ba8;
+
+    --warn-ground: #3a201a;
+    --warn-border: #8a4a34;
+    --warn-ink: #ffb59b;
+
+    --route-fastest: #598cd9;
+    --route-nature: #349e63;
+    --route-accessible: #9d7dd3;
+    --route-quiet: #ca7a24;
+    --route-shade: #189d91;
+    --route-air: #d66a85;
+
+    --map-casing: #1e2430;
+  }
+}
+
+:root[data-theme='dark'] {
+  --page: #151922;
+  --raised: #1e2430;
+  --recessed: #111520;
+  --rule: #2c3341;
+  --rule-strong: #414a5c;
+  --ink: #e9ecf2;
+  --ink-muted: #a8b2c4;
+  --selected-border: #7c8ba8;
+
+  --warn-ground: #3a201a;
+  --warn-border: #8a4a34;
+  --warn-ink: #ffb59b;
+
+  --route-fastest: #598cd9;
+  --route-nature: #349e63;
+  --route-accessible: #9d7dd3;
+  --route-quiet: #ca7a24;
+  --route-shade: #189d91;
+  --route-air: #d66a85;
+
+  --map-casing: #1e2430;
 }
 
 *,
@@ -154,20 +278,20 @@ h3 {
 
 .header__wordmark {
   font-family: var(--font-display);
-  font-size: clamp(1.75rem, 4vw, 2.25rem);
+  font-size: var(--text-6);
   letter-spacing: -0.01em;
 }
 
 .header__tagline {
   color: var(--ink-muted);
-  font-size: 0.9375rem;
+  font-size: var(--text-2);
   margin: 2px 0 0;
   max-width: 46ch;
 }
 
 .header__privacy {
   color: var(--ink-muted);
-  font-size: 0.8125rem;
+  font-size: var(--text-1);
   margin: 0;
   max-width: 34ch;
   text-align: right;
@@ -180,7 +304,7 @@ h3 {
   color: var(--warn-ink);
   border-radius: var(--radius-chip);
   padding: 2px 12px;
-  font-size: 0.8125rem;
+  font-size: var(--text-1);
   font-weight: 600;
   margin-top: 6px;
 }
@@ -207,18 +331,18 @@ h3 {
 
 .field__label {
   font-weight: 600;
-  font-size: 0.875rem;
+  font-size: var(--text-1);
 }
 
 .field__hint {
   color: var(--ink-muted);
-  font-size: 0.8125rem;
+  font-size: var(--text-1);
   margin: 0;
 }
 
 .field__error {
   color: var(--warn-ink);
-  font-size: 0.8125rem;
+  font-size: var(--text-1);
   margin: 0;
   font-weight: 600;
 }
@@ -294,7 +418,7 @@ select {
   display: flex;
   align-items: center;
   cursor: pointer;
-  font-size: 0.9375rem;
+  font-size: var(--text-2);
   border-bottom: 1px solid var(--rule);
 }
 .suggestions__item:last-child {
@@ -309,19 +433,19 @@ select {
 
 .dial__value {
   font-family: var(--font-display);
-  font-size: 2.5rem;
+  font-size: var(--text-6);
   line-height: 1;
   font-variant-numeric: tabular-nums;
 }
 .dial__unit {
   font-family: var(--font-body);
-  font-size: 1rem;
+  font-size: var(--text-2);
   color: var(--ink-muted);
   margin-left: 6px;
 }
 .dial__mode {
   color: var(--ink-muted);
-  font-size: 0.875rem;
+  font-size: var(--text-1);
 }
 
 input[type='range'] {
@@ -336,7 +460,7 @@ input[type='range'] {
   display: flex;
   justify-content: space-between;
   color: var(--ink-muted);
-  font-size: 0.75rem;
+  font-size: var(--text-1);
   font-variant-numeric: tabular-nums;
 }
 
@@ -350,7 +474,7 @@ fieldset.chips {
 }
 fieldset.chips legend {
   font-weight: 600;
-  font-size: 0.875rem;
+  font-size: var(--text-1);
   padding: 0;
   margin-bottom: 8px;
 }
@@ -369,7 +493,7 @@ fieldset.chips legend {
   border-radius: var(--radius-chip);
   background: var(--raised);
   font: inherit;
-  font-size: 0.875rem;
+  font-size: var(--text-1);
   cursor: pointer;
   color: var(--ink);
 }
@@ -477,7 +601,7 @@ fieldset.chips legend {
   background: var(--ink);
   color: var(--raised);
   font-weight: 700;
-  font-size: 0.8125rem;
+  font-size: var(--text-1);
   border: 2px solid var(--raised);
   box-shadow: 0 1px 4px rgb(20 33 61 / 35%);
 }
@@ -487,7 +611,10 @@ fieldset.chips legend {
   background: var(--raised);
   color: var(--ink);
   border-color: var(--ink);
-  font-size: 0.625rem;
+  /* The one place below --text-1. This is a glyph inside an 18px map pin, it is
+     aria-hidden, and the rest stop is also named in the card's text. The 14px
+     floor is for prose a user is expected to read. */
+  font-size: 10px;
 }
 .marker--blocker {
   background: var(--warn-ink);
@@ -529,7 +656,7 @@ fieldset.chips legend {
 }
 .card__head {
   margin: 0;
-  font-size: 1rem;
+  font-size: var(--text-2);
 }
 
 /* The one interactive element in the card. Full-bleed so the whole header row
@@ -553,18 +680,18 @@ fieldset.chips legend {
 }
 .card__label {
   font-family: var(--font-display);
-  font-size: 1.25rem;
+  font-size: var(--text-4);
   font-weight: 500;
 }
 .card__select[aria-pressed='true'] .card__label::after {
   content: ' — showing on the map';
   font-family: var(--font-body);
-  font-size: 0.75rem;
+  font-size: var(--text-1);
   font-weight: 400;
   color: var(--ink-muted);
 }
 .card__pattern {
-  font-size: 0.75rem;
+  font-size: var(--text-1);
   color: var(--ink-muted);
   font-weight: 400;
 }
@@ -577,7 +704,7 @@ fieldset.chips legend {
 }
 .card__duration {
   font-family: var(--font-display);
-  font-size: 1.875rem;
+  font-size: var(--text-5);
   font-variant-numeric: tabular-nums;
   line-height: 1;
 }
@@ -597,7 +724,7 @@ fieldset.chips legend {
   grid-template-columns: 4.5rem 1fr 2.75rem;
   align-items: center;
   gap: 8px;
-  font-size: 0.8125rem;
+  font-size: var(--text-1);
 }
 .scores dt,
 .scores dd {
@@ -626,12 +753,12 @@ fieldset.chips legend {
 }
 
 .card__method {
-  font-size: 0.75rem;
+  font-size: var(--text-1);
   color: var(--ink-muted);
   margin: 0;
 }
 .card__confidence {
-  font-size: 0.8125rem;
+  font-size: var(--text-1);
   margin: 0;
 }
 .card__confidence--caution {
@@ -642,7 +769,7 @@ fieldset.chips legend {
   font-weight: 600;
 }
 .card__narration {
-  font-size: 0.875rem;
+  font-size: var(--text-1);
   margin: 0;
   color: var(--ink);
 }
@@ -651,12 +778,12 @@ fieldset.chips legend {
   font-style: italic;
 }
 .card__rest {
-  font-size: 0.8125rem;
+  font-size: var(--text-1);
   color: var(--ink-muted);
   margin: 0;
 }
 .card__synthetic {
-  font-size: 0.75rem;
+  font-size: var(--text-1);
   font-weight: 600;
   color: var(--warn-ink);
   background: var(--warn-ground);
@@ -673,7 +800,7 @@ fieldset.chips legend {
   border: 1px solid var(--warn-border);
   border-radius: var(--radius-control);
   color: var(--warn-ink);
-  font-size: 0.8125rem;
+  font-size: var(--text-1);
 }
 .blockers__title {
   font-weight: 700;
@@ -688,7 +815,7 @@ fieldset.chips legend {
 }
 
 .card__status {
-  font-size: 0.8125rem;
+  font-size: var(--text-1);
   font-weight: 600;
   color: var(--warn-ink);
   margin: 0;
@@ -701,7 +828,7 @@ fieldset.chips legend {
   padding-top: 16px;
   border-top: 1px solid var(--rule);
   color: var(--ink-muted);
-  font-size: 0.8125rem;
+  font-size: var(--text-1);
   line-height: 2.2;
 }
 /* Links inside a sentence cannot be 44px tall without wrecking the prose, and
@@ -743,7 +870,7 @@ fieldset.chips legend {
     padding: 0 12px 24px;
   }
   .dial__ticks {
-    font-size: 0.6875rem;
+    font-size: var(--text-1);
   }
 }
 

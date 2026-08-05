@@ -3,13 +3,14 @@
   "private": true,
   "version": "0.1.0",
   "type": "module",
-  "description": "Meander — time-budgeted routing for greenery and real accessibility.",
+  "description": "Meander \u2014 time-budgeted routing for greenery and real accessibility.",
   "license": "MIT",
   "scripts": {
     "dev": "vite",
     "dev:mock": "VITE_MOCK_API=1 vite",
-    "build": "vite build",
-    "preview": "vite preview"
+    "build": "npm run check:palette && vite build",
+    "preview": "vite preview",
+    "check:palette": "node scripts/check-palette.mjs"
   },
   "dependencies": {
     "maplibre-gl": "^5.6.1",
