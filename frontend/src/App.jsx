@@ -288,6 +288,8 @@ export default function App() {
   // version would leave the DOM saying "peek" while the layout said otherwise.
   const desktop = useMediaQuery('(min-width: 900px)')
   const effectiveSnap = desktop ? 'full' : sheetSnap
+  // Peek is the three routes and nothing else.
+  const showChrome = effectiveSnap !== 'peek'
 
   // Results arriving is the moment the sheet earns its place. Lifting it to
   // peek — not half, not full — is what puts three routes on screen with no
@@ -340,18 +342,24 @@ export default function App() {
               Routes
             </h2>
 
-            <StatusBanner
-              phase={state.phase}
-              progress={state.progress}
-              error={state.error}
-              routes={state.routes}
-              onRetry={() => dispatch({ type: 'retry' })}
-              onMoreTime={() =>
-                dispatch({ type: 'minutes', value: Math.min(MAX_MINUTES, state.minutes + 30) })
-              }
-            />
+            {/* Peek is exactly three route rows and nothing else — that is the
+                whole point of the snap, and the gate measures it. A banner
+                above them costs one route. The exception is when the banner IS
+                the answer: an error, or nothing routed at all. */}
+            {(showChrome || !hasRoutes || state.phase === 'error') && (
+              <StatusBanner
+                phase={state.phase}
+                progress={state.progress}
+                error={state.error}
+                routes={state.routes}
+                onRetry={() => dispatch({ type: 'retry' })}
+                onMoreTime={() =>
+                  dispatch({ type: 'minutes', value: Math.min(MAX_MINUTES, state.minutes + 30) })
+                }
+              />
+            )}
 
-            <BetterLater when={state.bestDeparture} reason={state.reason} />
+            {showChrome && <BetterLater when={state.bestDeparture} reason={state.reason} />}
 
             <RouteList
               routes={state.routes}
@@ -361,7 +369,7 @@ export default function App() {
               skeletonCount={loading ? state.objectives.length : 0}
             />
 
-            <Footer />
+            {showChrome && <Footer />}
           </div>
         </RouteSheet>
 

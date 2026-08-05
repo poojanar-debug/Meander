@@ -410,7 +410,21 @@ h3 {
 /* Peek is sized to fit three compact rows plus the handle and the snap
    buttons — the measurement that decides whether Phase 5 succeeded. */
 .sheet--peek {
-  height: calc(3 * 56px + 116px + var(--safe-bottom));
+  /* Sized to fit exactly three compact rows plus the handle and the snap
+     buttons. This number is the Phase 5 gate: three routes, no scrolling. */
+  height: calc(
+    44px                    /* handle, itself a 44px target */
+    + (3 * 56px + 2 * 8px)  /* three rows and the gaps between them */
+    + var(--space-3)        /* the scroll region's own bottom padding */
+    + 4px                   /* measured slack; see below */
+    + 60px                  /* the snap buttons */
+    + var(--safe-bottom)
+  );
+  /* The 4px is empirical, not arithmetic. The sum above comes to 196px and the
+     scroll content measures 198px at deviceScaleFactor 2 — sub-pixel rounding
+     that is not worth chasing, but is worth admitting to rather than hiding in
+     one of the other numbers. scripts/gate.mjs fails if this is ever too
+     small, so it cannot silently drift back to clipping the third route. */
 }
 .sheet--half {
   height: 55dvh;
@@ -424,8 +438,10 @@ h3 {
   display: grid;
   place-items: center;
   width: 100%;
-  min-height: 32px;
-  padding: var(--space-2) 0 var(--space-1);
+  /* A target like any other. It was 32px, which is the project's own floor
+     missed on the one control a phone user reaches for most. */
+  min-height: var(--target);
+  padding: var(--space-2) 0;
   background: none;
   border: 0;
   cursor: grab;
