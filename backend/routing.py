@@ -94,6 +94,19 @@ class NoRouteFound(RoutingError):
         super().__init__("no_route", human_message, status_code=422)
 
 
+class OutsideCoverage(RoutingError):
+    """The point is outside the imported graph.
+
+    A first-class outcome, not a routing failure. Separate from NoRouteFound
+    because the two need opposite advice: "try moving the start a little" is
+    right for a point in the middle of a lake and actively misleading for a
+    point in a city this deployment simply did not import.
+    """
+
+    def __init__(self, human_message: str) -> None:
+        super().__init__("outside_coverage", human_message, status_code=422)
+
+
 class PresetUnavailable(RoutingError):
     """This objective cannot be routed on the current GraphHopper plan.
 

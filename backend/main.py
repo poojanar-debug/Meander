@@ -40,6 +40,8 @@ from .config import (
     self_hosted_resolution,
     settings,
 )
+from .coverage import message as coverage_message
+from .coverage import outside_coverage
 from .enrich import (
     AirQuality,
     EnrichContext,
@@ -68,6 +70,7 @@ from .ratelimit import RateLimiter
 from .routing import (
     PRESETS,
     NoRouteFound,
+    OutsideCoverage,
     RawRoute,
     RoutingError,
     geometry_for_wire,
@@ -673,6 +676,18 @@ async def route_events(req: RouteRequest) -> AsyncIterator[dict[str, Any]]:
     origin = req.origin.to_latlon()
     destination = req.destination.to_latlon() if req.destination else None
     objectives = req.resolved_objectives()
+
+    # Asked before routing rather than after failing. GraphHopper's own answer
+    # for a point outside the graph is "Cannot find point", which routing.py
+    # renders as "try moving the start a little" — right for a point in a lake,
+    # actively misleading for a city this deployment did not import.
+    for point in (origin, destination):
+        if point is None:
+            continue
+        extent = await outside_coverage(point.lat, point.lon)
+        if extent is not None:
+            log.info("outside_coverage")
+            raise OutsideCoverage(coverage_message(extent))
 
     routes: list[Route] = []
     routed: list[tuple[str, str, RawRoute]] = []
