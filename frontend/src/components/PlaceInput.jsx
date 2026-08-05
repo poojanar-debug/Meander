@@ -26,6 +26,7 @@ export default function PlaceInput({ label, placeholder, value, onPick, onClear 
 
   const abortRef = useRef(null)
   const skipNextSearch = useRef(false)
+  const rootRef = useRef(null)
 
   useEffect(() => {
     setQuery(value?.name ?? '')
@@ -71,6 +72,26 @@ export default function PlaceInput({ label, placeholder, value, onPick, onClear 
 
   useEffect(() => () => abortRef.current?.abort(), [])
 
+  // Tapping anywhere else closes the list. It used to close only on Escape,
+  // Enter or a selection — so on a phone, where there is no Escape key and the
+  // obvious gesture is "tap somewhere else", the list simply stayed open over
+  // whatever you tapped next.
+  //
+  // pointerdown rather than click, so it lands before the suggestion's own
+  // mousedown handler ever matters, and capture so a stopPropagation elsewhere
+  // cannot strand the list open.
+  useEffect(() => {
+    if (!open) return undefined
+    const onPointerDown = (event) => {
+      if (!rootRef.current?.contains(event.target)) {
+        setOpen(false)
+        setActive(-1)
+      }
+    }
+    document.addEventListener('pointerdown', onPointerDown, true)
+    return () => document.removeEventListener('pointerdown', onPointerDown, true)
+  }, [open])
+
   function choose(place) {
     skipNextSearch.current = true
     setQuery(place.name)
@@ -105,7 +126,7 @@ export default function PlaceInput({ label, placeholder, value, onPick, onClear 
   const describedBy = error ? errorId : undefined
 
   return (
-    <div className="field">
+    <div className="field" ref={rootRef}>
       <label className="field__label" htmlFor={inputId}>
         {label}
       </label>

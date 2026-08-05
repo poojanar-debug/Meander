@@ -146,3 +146,97 @@ export function announceSelection(route) {
   const { text } = confidenceSentence(route.confidence, route.scoring_method)
   return `${route.label} selected. ${fmtDurSpoken(route.duration_min)}, ${fmtDist(route.distance_m)}. ${text}`
 }
+
+/**
+ * Human names for the blocker types.
+ *
+ * The card rendered `{b.type}` straight through, which produced lines like
+ * "surface: Surface recorded as sett, which is not passable." — a raw OSM tag
+ * key, followed by a sentence that already said the same word.
+ *
+ * These five are the complete vocabulary, taken from backend/accessibility.py:
+ * `_span_verdicts` is called with exactly "steps", "surface", "smoothness" and
+ * "barrier", and `incline_findings` emits "incline". Nothing else is invented
+ * here — a name for a type the backend cannot emit would be a promise about
+ * data that does not exist.
+ */
+export const BLOCKER_TYPE_NAMES = {
+  steps: 'Steps',
+  surface: 'Surface',
+  smoothness: 'Surface condition',
+  barrier: 'Barrier',
+  incline: 'Gradient',
+}
+
+export function blockerTypeName(type) {
+  return BLOCKER_TYPE_NAMES[type] ?? 'Obstruction'
+}
+
+/**
+ * How loudly to say how much of a route was checked.
+ *
+ * The governing rule for the whole card: **when the data is good, say so
+ * briefly; when it is bad, say so loudly.** Never delete the statement — vary
+ * its volume with how much it matters. Uniformly loud honesty is honesty
+ * nobody reads.
+ *
+ *   quiet    >= 60%   a chip
+ *   amber    30-60%   a chip, coloured
+ *   loud     < 30%    a full-width block, expanded, not a chip
+ *
+ * `placeholder` scoring and `synthetic_upstream` are loud regardless of
+ * coverage, because their numbers are not measurements at all — a synthetic
+ * route with 90% "coverage" is 90% of nothing.
+ */
+export function trustTier(route) {
+  const coverage = route?.confidence ?? 0
+  const notMeasured =
+    route?.synthetic_upstream === true || route?.scoring_method === 'placeholder'
+
+  if (notMeasured) return 'loud'
+  if (coverage < 0.3) return 'loud'
+  if (coverage < 0.6) return 'amber'
+  return 'quiet'
+}
+
+/** The short form, for the chip. The long form is the backend's own sentence. */
+export function coverageChipText(route) {
+  const pct = Math.round((route?.confidence ?? 0) * 100)
+  return trustTier(route) === 'amber'
+    ? `${pct}% checked — treat the rest as unverified`
+    : `Accessibility data: ${pct}% of route checked`
+}
+
+/**
+ * What the three percentages on a card are percentages *of*.
+ *
+ * They were rendered as bare numbers — "Nature 31%", "Clean air 62%",
+ * "Shade 20%" — which invites the reader to supply their own meaning, and the
+ * meaning they supply is usually "31% of the maximum possible", which is not
+ * what any of these are.
+ */
+export const SCORE_META = {
+  nature: {
+    label: 'Greenery',
+    comparative: 'greener than',
+    explanation:
+      'How much of this route runs alongside parks, water, tree cover and quiet ' +
+      'ways rather than arterial roads. A relative score, not a measured area.',
+  },
+  air: {
+    label: 'Air quality',
+    comparative: 'cleaner air than',
+    explanation:
+      'The regional air-quality index for the area, modulated by how much of ' +
+      'this particular route runs beside heavy traffic. The regional part is a ' +
+      'measurement; the traffic part is inferred from OSM road classes.',
+  },
+  shade: {
+    label: 'Shade',
+    comparative: 'more shaded than',
+    explanation:
+      'How much shade you are likely to get relative to how much you need, from ' +
+      'the sun position at your departure time and the forecast cloud cover. ' +
+      'It does not know where individual trees or buildings are.',
+  },
+}

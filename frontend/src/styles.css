@@ -238,95 +238,315 @@ h3 {
   font-variant-numeric: tabular-nums;
 }
 
-/* ---------------------------------------------------------------- layout */
+/* ----------------------------------------------------------------- shell */
+/*
+ * Mobile is the default and desktop is the media query, not the other way
+ * round. The old file was desktop-first with two layout breakpoints and a
+ * sub-420px adaptation that was two properties, which is how a 390px viewport
+ * ended up with ~1,445px of scroll before the first route.
+ *
+ * The map is the page. Everything else floats over it.
+ */
 
 .app {
   display: flex;
   flex-direction: column;
   min-height: 100%;
-  max-width: 1400px;
-  margin: 0 auto;
-  padding: 0 16px 32px;
 }
 
-.app__main {
-  display: grid;
-  grid-template-columns: minmax(280px, 340px) 1fr;
-  gap: 20px;
-  align-items: start;
+.shell {
+  position: relative;
+  /* dvh, not vh: on iOS Safari `100vh` is the height with the URL bar hidden,
+     so a 100vh sheet sits partly under a bar that is currently on screen. */
+  height: 100dvh;
+  overflow: hidden;
+  /* The map owns pan and pinch; the sheet owns vertical scroll. They never
+     compete for the same touch, which is the structural fix for the map
+     hijacking one-finger page scroll. */
+  touch-action: none;
 }
 
-.app__results {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-  min-width: 0;
+.shell__map {
+  position: absolute;
+  inset: 0;
 }
 
 /* ---------------------------------------------------------------- header */
 
+/* On mobile the wordmark is a visually-hidden landmark: the top bar carries
+   the working controls and a masthead would cost a fifth of the viewport. */
 .header {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+/* ---------------------------------------------------------------- topbar */
+
+.topbar {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 3;
   display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 8px 24px;
-  padding: 20px 0 16px;
-  border-bottom: 1px solid var(--rule);
-  margin-bottom: 20px;
+  gap: var(--space-2);
+  align-items: stretch;
+  /* viewport-fit=cover is set in index.html, so without these the bar sits
+     under the notch. There was not one env(safe-area-inset-*) in this file. */
+  padding: calc(var(--safe-top) + var(--space-2)) calc(var(--safe-right) + var(--space-3))
+    var(--space-2) calc(var(--safe-left) + var(--space-3));
+  pointer-events: none;
+}
+.topbar > * {
+  pointer-events: auto;
 }
 
-.header__wordmark {
-  font-family: var(--font-display);
-  font-size: var(--text-6);
-  letter-spacing: -0.01em;
+.topbar__origin,
+.topbar__time {
+  font: inherit;
+  color: var(--ink);
+  background: var(--raised);
+  border: 1px solid var(--rule-strong);
+  border-radius: var(--radius-control);
+  min-height: var(--target);
+  padding: var(--space-2) var(--space-3);
+  cursor: pointer;
+  box-shadow: 0 2px 10px rgb(0 0 0 / 12%);
+  text-align: left;
+  transition: transform 80ms ease, background 120ms ease;
+}
+.topbar__origin:active,
+.topbar__time:active {
+  transform: scale(0.97);
+  background: var(--recessed);
 }
 
-.header__tagline {
-  color: var(--ink-muted);
-  font-size: var(--text-2);
-  margin: 2px 0 0;
-  max-width: 46ch;
+.topbar__origin {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
 }
-
-.header__privacy {
-  color: var(--ink-muted);
+.topbar__origin-label {
   font-size: var(--text-1);
-  margin: 0;
-  max-width: 34ch;
-  text-align: right;
+  color: var(--ink-muted);
+  line-height: 1.1;
+}
+.topbar__origin-name {
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
-.header__mock {
-  display: inline-block;
-  background: var(--warn-ground);
-  border: 1px solid var(--warn-border);
-  color: var(--warn-ink);
+.topbar__time {
+  flex: none;
+  display: flex;
+  align-items: center;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.topbar__stale {
+  position: absolute;
+  top: calc(var(--safe-top) + 100%);
+  left: 50%;
+  transform: translateX(-50%);
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  background: var(--ink);
+  color: var(--page);
   border-radius: var(--radius-chip);
-  padding: 2px 12px;
+  padding: var(--space-1) var(--space-3);
   font-size: var(--text-1);
   font-weight: 600;
-  margin-top: 6px;
+  white-space: nowrap;
+}
+.topbar__stale-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: currentColor;
+  animation: pulse 1.2s ease-in-out infinite;
+}
+@keyframes pulse {
+  50% {
+    opacity: 0.25;
+  }
+}
+
+/* ----------------------------------------------------------------- sheet */
+
+.sheet {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 4;
+  display: flex;
+  flex-direction: column;
+  background: var(--page);
+  border-top: 1px solid var(--rule-strong);
+  border-radius: var(--radius-card) var(--radius-card) 0 0;
+  box-shadow: 0 -4px 24px rgb(0 0 0 / 14%);
+  transition: height 220ms cubic-bezier(0.2, 0, 0.2, 1);
+  /* The sheet owns vertical scroll. */
+  touch-action: pan-y;
+}
+
+.sheet--hidden {
+  height: 0;
+  border: 0;
+  overflow: hidden;
+}
+/* Peek is sized to fit three compact rows plus the handle and the snap
+   buttons — the measurement that decides whether Phase 5 succeeded. */
+.sheet--peek {
+  height: calc(3 * 56px + 116px + var(--safe-bottom));
+}
+.sheet--half {
+  height: 55dvh;
+}
+.sheet--full {
+  height: calc(100dvh - 72px - var(--safe-top));
+}
+
+.sheet__handle {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 100%;
+  min-height: 32px;
+  padding: var(--space-2) 0 var(--space-1);
+  background: none;
+  border: 0;
+  cursor: grab;
+  touch-action: none;
+}
+.sheet__handle:active {
+  cursor: grabbing;
+}
+.sheet__grip {
+  display: block;
+  width: 40px;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--rule-strong);
+}
+
+.sheet__scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+  padding: 0 calc(var(--safe-left) + var(--space-3)) var(--space-3)
+    calc(var(--safe-right) + var(--space-3));
+}
+
+.sheet__snaps {
+  flex: none;
+  display: flex;
+  gap: var(--space-2);
+  padding: var(--space-2) calc(var(--safe-left) + var(--space-3))
+    calc(var(--safe-bottom) + var(--space-2)) calc(var(--safe-right) + var(--space-3));
+  border-top: 1px solid var(--rule);
+  background: var(--page);
+}
+.sheet__snap {
+  flex: 1;
+  font: inherit;
+  font-size: var(--text-1);
+  min-height: var(--target);
+  border: 1px solid var(--rule-strong);
+  border-radius: var(--radius-control);
+  background: var(--raised);
+  color: var(--ink);
+  cursor: pointer;
+  transition: background 120ms ease, transform 80ms ease;
+}
+.sheet__snap:active {
+  transform: scale(0.97);
+}
+.sheet__snap[aria-pressed='true'] {
+  background: var(--ink);
+  color: var(--page);
+  border-color: var(--ink);
+  font-weight: 600;
+}
+
+/* --------------------------------------------------------- controls sheet */
+
+.scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 10;
+  background: rgb(0 0 0 / 45%);
+  display: flex;
+  align-items: flex-end;
+  animation: fade 140ms ease;
+}
+@keyframes fade {
+  from {
+    opacity: 0;
+  }
+}
+
+.controls-sheet {
+  width: 100%;
+  max-height: 88dvh;
+  display: flex;
+  flex-direction: column;
+  background: var(--page);
+  border-radius: var(--radius-card) var(--radius-card) 0 0;
+  animation: rise 200ms cubic-bezier(0.2, 0, 0.2, 1);
+}
+@keyframes rise {
+  from {
+    transform: translateY(12%);
+  }
+}
+
+.controls-sheet__bar {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-3) calc(var(--safe-right) + var(--space-4)) var(--space-3)
+    calc(var(--safe-left) + var(--space-4));
+  border-bottom: 1px solid var(--rule);
+}
+.controls-sheet__title {
+  font-size: var(--text-4);
+}
+.controls-sheet__scroll {
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: var(--space-4) calc(var(--safe-right) + var(--space-4))
+    calc(var(--safe-bottom) + var(--space-5)) calc(var(--safe-left) + var(--space-4));
 }
 
 /* -------------------------------------------------------------- controls */
 
 .controls {
-  background: var(--raised);
-  border: 1px solid var(--rule);
-  border-radius: var(--radius-card);
-  padding: 18px;
   display: flex;
   flex-direction: column;
-  gap: 20px;
-  position: sticky;
-  top: 16px;
+  gap: var(--space-5);
 }
 
 .field {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: var(--space-2);
 }
 
 .field__label {
@@ -340,6 +560,16 @@ h3 {
   margin: 0;
 }
 
+.field__notice {
+  color: var(--ink);
+  background: var(--recessed);
+  border-left: 3px solid var(--ink);
+  border-radius: var(--radius-control);
+  font-size: var(--text-1);
+  margin: 0;
+  padding: var(--space-2) var(--space-3);
+}
+
 .field__error {
   color: var(--warn-ink);
   font-size: var(--text-1);
@@ -349,20 +579,16 @@ h3 {
 
 input[type='text'],
 input[type='search'],
+input[type='number'],
 select {
   font: inherit;
   color: var(--ink);
   background: var(--raised);
   border: 1px solid var(--rule-strong);
   border-radius: var(--radius-control);
-  padding: 10px 12px;
+  padding: var(--space-3);
   min-height: var(--target);
   width: 100%;
-}
-
-select {
-  /* A native select is keyboard- and screen-reader-correct for free. */
-  min-height: var(--target);
 }
 
 .button {
@@ -374,46 +600,56 @@ select {
   border-radius: var(--radius-control);
   min-height: var(--target);
   min-width: var(--target);
-  padding: 10px 16px;
+  padding: var(--space-3) var(--space-4);
   cursor: pointer;
+  transition: background 120ms ease, transform 80ms ease;
 }
 .button:hover {
   background: var(--recessed);
 }
-.button--primary {
-  background: var(--ink);
-  color: var(--raised);
-  border-color: var(--ink);
-}
-.button--primary:hover {
-  background: #0d1729;
+/* Hover does nothing on a touch screen, so every control also acknowledges the
+   press itself. Every tap used to be an unacknowledged snap. */
+.button:active {
+  transform: scale(0.97);
+  background: var(--recessed);
 }
 
 .place-row {
   display: flex;
-  gap: 8px;
+  gap: var(--space-2);
   align-items: flex-start;
 }
 .place-row > :first-child {
   flex: 1;
   min-width: 0;
+  /* The suggestion list is absolutely positioned against this. */
+  position: relative;
 }
 
 /* place suggestions */
 
 .suggestions {
+  /* An overlay, not a block in normal flow. In flow, a 260px list pushed the
+     entire page down as you typed — with the keyboard up, on a phone. */
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  z-index: 20;
   list-style: none;
-  margin: 4px 0 0;
+  margin: var(--space-1) 0 0;
   padding: 0;
   border: 1px solid var(--rule-strong);
   border-radius: var(--radius-control);
   background: var(--raised);
-  max-height: 260px;
+  max-height: min(50dvh, 320px);
   overflow-y: auto;
+  overscroll-behavior: contain;
+  box-shadow: 0 8px 24px rgb(0 0 0 / 18%);
 }
 
 .suggestions__item {
-  padding: 12px;
+  padding: var(--space-3);
   min-height: var(--target);
   display: flex;
   align-items: center;
@@ -431,6 +667,9 @@ select {
 
 /* time dial */
 
+.dial__readout {
+  margin: 0;
+}
 .dial__value {
   font-family: var(--font-display);
   font-size: var(--text-6);
@@ -441,11 +680,12 @@ select {
   font-family: var(--font-body);
   font-size: var(--text-2);
   color: var(--ink-muted);
-  margin-left: 6px;
+  margin-left: var(--space-2);
 }
 .dial__mode {
   color: var(--ink-muted);
   font-size: var(--text-1);
+  margin: 0;
 }
 
 input[type='range'] {
@@ -456,11 +696,39 @@ input[type='range'] {
   cursor: pointer;
 }
 
+/* Ticks are positioned at their actual value on the track, not spread evenly.
+   Evenly spaced, "2 hr" sat at the midpoint when 120 min is at 29%. */
 .dial__ticks {
-  display: flex;
-  justify-content: space-between;
+  position: relative;
+  height: 1.2em;
   color: var(--ink-muted);
   font-size: var(--text-1);
+  font-variant-numeric: tabular-nums;
+}
+.dial__tick {
+  position: absolute;
+  transform: translateX(-50%);
+  white-space: nowrap;
+}
+.dial__tick:first-child {
+  transform: none;
+}
+.dial__tick:last-child {
+  transform: translateX(-100%);
+}
+
+.dial__presets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  align-items: center;
+  margin-top: var(--space-3);
+}
+.dial__exact {
+  flex: none;
+  width: 6.5rem;
+}
+.dial__exact-input {
   font-variant-numeric: tabular-nums;
 }
 
@@ -471,24 +739,27 @@ fieldset.chips {
   padding: 0;
   margin: 0;
   min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
 }
 fieldset.chips legend {
   font-weight: 600;
   font-size: var(--text-1);
   padding: 0;
-  margin-bottom: 8px;
+  margin-bottom: var(--space-2);
 }
 .chips__row {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
+  gap: var(--space-2);
 }
 .chip {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--space-2);
   min-height: var(--target);
-  padding: 8px 16px;
+  padding: var(--space-2) var(--space-4);
   border: 1px solid var(--rule-strong);
   border-radius: var(--radius-chip);
   background: var(--raised);
@@ -496,12 +767,21 @@ fieldset.chips legend {
   font-size: var(--text-1);
   cursor: pointer;
   color: var(--ink);
+  transition: background 120ms ease, transform 80ms ease;
+}
+.chip:active {
+  transform: scale(0.96);
 }
 .chip[aria-pressed='true'] {
   background: var(--ink);
-  color: var(--raised);
+  color: var(--page);
   border-color: var(--ink);
   font-weight: 600;
+}
+.chip:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+  background: var(--recessed);
 }
 .chip__swatch {
   width: 20px;
@@ -510,7 +790,15 @@ fieldset.chips legend {
   flex: none;
 }
 .chip[aria-pressed='true'] .chip__swatch {
-  box-shadow: 0 0 0 1px var(--raised);
+  box-shadow: 0 0 0 1px var(--page);
+}
+.chip__soon {
+  font-size: var(--text-1);
+  color: var(--ink-muted);
+  font-style: italic;
+}
+.chip--preset {
+  padding: var(--space-2) var(--space-3);
 }
 
 /* ---------------------------------------------------------------- banner */
@@ -520,11 +808,12 @@ fieldset.chips legend {
   border-left-width: 4px;
   border-radius: var(--radius-control);
   background: var(--raised);
-  padding: 12px 16px;
+  padding: var(--space-3) var(--space-4);
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 8px 16px;
+  gap: var(--space-2) var(--space-4);
+  margin-bottom: var(--space-3);
 }
 .banner--warn {
   background: var(--warn-ground);
@@ -549,23 +838,43 @@ fieldset.chips legend {
   transition: width 250ms ease;
 }
 
+/* ------------------------------------------------------------ better later */
+
+.better-later {
+  background: var(--recessed);
+  border: 1px solid var(--rule);
+  border-radius: var(--radius-control);
+  padding: var(--space-3);
+  margin: 0 0 var(--space-3);
+}
+.better-later__head {
+  margin: 0;
+  font-size: var(--text-2);
+}
+.better-later__why {
+  margin: var(--space-1) 0 0;
+  font-size: var(--text-1);
+  color: var(--ink-muted);
+}
+.better-later--bare {
+  font-size: var(--text-1);
+  color: var(--ink-muted);
+  background: none;
+  border: 0;
+  padding: 0;
+}
+
 /* ------------------------------------------------------------------- map */
 
 .map {
-  position: relative;
-  height: clamp(320px, 52vh, 620px);
-  border: 1px solid var(--rule);
-  border-radius: var(--radius-card);
-  overflow: hidden;
+  position: absolute;
+  inset: 0;
   background: var(--recessed);
 }
 /* MapLibre adds .maplibregl-map to whatever element it is handed, and that
    class sets `position: relative` — which overrides the `position: absolute`
    here, so `inset: 0` stops sizing the element and it collapses to zero height.
-   The explicit 100% holds under either position value. Symptom when this is
-   wrong: the canvas keeps its initial height inside a taller container and
-   leaves a band of empty grey, but only above the 860px breakpoint, because
-   below it the container is 300px and coincidentally matches. */
+   The explicit 100% holds under either position value. */
 .map__canvas {
   position: absolute;
   inset: 0;
@@ -577,19 +886,39 @@ fieldset.chips legend {
   inset: 0;
   display: grid;
   place-items: center;
-  padding: 24px;
+  padding: var(--space-5);
   text-align: center;
   color: var(--ink-muted);
+  background: var(--page);
 }
 
-/* MapLibre ships 29px controls. The project's floor is 44px, so they are
-   enlarged rather than left as the one place the rule does not hold. */
-.map .maplibregl-ctrl-group button {
+/* MapLibre ships 29px controls. The project's floor is 44px.
+   `.maplibregl-ctrl-group button` misses the compact attribution toggle, which
+   is not in a ctrl-group — so the one control that escaped the rule was the
+   one nobody thought to check. Both are covered now. */
+.map .maplibregl-ctrl-group button,
+.map .maplibregl-ctrl-attrib-button {
   width: var(--target);
   height: var(--target);
 }
 .map .maplibregl-ctrl-group button .maplibregl-ctrl-icon {
   transform: scale(1.15);
+}
+/* Two 44px zoom buttons ate a third of the old 300px map. On a full-bleed map
+   they are still worth having on a pointer device, but on a touch screen
+   pinch-zoom is better and the space is not free. */
+@media (pointer: coarse) {
+  .map .maplibregl-ctrl-top-right {
+    display: none;
+  }
+}
+/* Keep the controls clear of the top bar and the sheet. */
+.map .maplibregl-ctrl-top-right {
+  margin-top: calc(var(--safe-top) + 64px);
+}
+.map .maplibregl-ctrl-bottom-right,
+.map .maplibregl-ctrl-bottom-left {
+  margin-bottom: var(--space-2);
 }
 
 .marker {
@@ -599,55 +928,155 @@ fieldset.chips legend {
   height: 28px;
   border-radius: 50%;
   background: var(--ink);
-  color: var(--raised);
+  color: var(--page);
   font-weight: 700;
   font-size: var(--text-1);
-  border: 2px solid var(--raised);
-  box-shadow: 0 1px 4px rgb(20 33 61 / 35%);
+  border: 2px solid var(--page);
+  box-shadow: 0 1px 4px rgb(0 0 0 / 35%);
 }
 .marker--rest {
   width: 18px;
   height: 18px;
-  background: var(--raised);
+  background: var(--page);
   color: var(--ink);
   border-color: var(--ink);
-  /* The one place below --text-1. This is a glyph inside an 18px map pin, it is
-     aria-hidden, and the rest stop is also named in the card's text. The 14px
-     floor is for prose a user is expected to read. */
+  /* The one place below --text-1. A glyph inside an 18px map pin, aria-hidden,
+     and the rest stop is named in the card's text. The floor is for prose. */
   font-size: 10px;
 }
 .marker--blocker {
   background: var(--warn-ink);
-  color: #fff;
+  color: var(--warn-ground);
 }
 
-/* ---------------------------------------------------------------- cards */
+/* ------------------------------------------------------------ route rows */
 
 .route-list {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
-  gap: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
   list-style: none;
   margin: 0;
   padding: 0;
 }
 
+.row__button {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  width: 100%;
+  min-height: 56px;
+  padding: var(--space-2) var(--space-3);
+  background: var(--raised);
+  border: 1px solid var(--rule);
+  border-radius: var(--radius-control);
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 120ms ease, background 120ms ease, transform 80ms ease;
+}
+.row__button:active {
+  transform: scale(0.99);
+}
+.row__button[aria-pressed='true'] {
+  border-color: var(--selected-border);
+  border-left-width: 4px;
+  background: var(--recessed);
+}
+.row__swatch {
+  width: 6px;
+  height: 28px;
+  border-radius: 3px;
+  flex: none;
+}
+.row__label {
+  flex: 1;
+  min-width: 0;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.row__duration {
+  font-weight: 600;
+  font-size: var(--text-3);
+}
+.row__trust {
+  font-size: var(--text-1);
+  color: var(--ink-muted);
+  flex: none;
+}
+.row__trust--amber {
+  color: var(--warn-ink);
+}
+.row__trust--loud {
+  color: var(--warn-ink);
+  font-weight: 700;
+}
+.row__blocked {
+  font-size: var(--text-1);
+  font-weight: 700;
+  color: var(--warn-ink);
+}
+
+/* skeletons — inside the reduced-motion kill switch at the end of this file */
+.row--skeleton {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  min-height: 56px;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--rule);
+  border-radius: var(--radius-control);
+  background: var(--raised);
+}
+.skeleton {
+  display: block;
+  background: linear-gradient(
+    90deg,
+    var(--recessed) 25%,
+    var(--rule) 37%,
+    var(--recessed) 63%
+  );
+  background-size: 400% 100%;
+  animation: shimmer 1.4s ease infinite;
+  border-radius: 3px;
+}
+.skeleton--swatch {
+  width: 6px;
+  height: 28px;
+}
+.skeleton--label {
+  flex: 1;
+  height: 1em;
+}
+.skeleton--figure {
+  width: 4rem;
+  height: 1em;
+}
+@keyframes shimmer {
+  to {
+    background-position: -400% 0;
+  }
+}
+
+/* ----------------------------------------------------------------- cards */
+
 .card {
   position: relative;
-  background: var(--recessed);
+  background: var(--raised);
   border: 1px solid var(--rule);
   border-radius: var(--radius-card);
-  padding: 16px 16px 14px;
+  padding: var(--space-4) var(--space-4) var(--space-3);
   display: flex;
   flex-direction: column;
-  gap: 10px;
-  cursor: pointer;
+  gap: var(--space-2);
   overflow: hidden;
 }
 .card--selected {
-  background: var(--raised);
   border-color: var(--selected-border);
-  box-shadow: 0 2px 10px rgb(20 33 61 / 10%);
+  box-shadow: 0 2px 10px rgb(0 0 0 / 10%);
 }
 .card__bar {
   position: absolute;
@@ -659,17 +1088,13 @@ fieldset.chips legend {
   font-size: var(--text-2);
 }
 
-/* The one interactive element in the card. Full-bleed so the whole header row
-   is a target, and comfortably over 44px tall. */
 .card__select {
   display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  flex-wrap: wrap;
-  gap: 4px 12px;
+  align-items: center;
+  gap: var(--space-3);
   width: 100%;
   min-height: var(--target);
-  padding: 4px 0;
+  padding: var(--space-1) 0;
   margin: 0;
   background: none;
   border: 0;
@@ -677,6 +1102,19 @@ fieldset.chips legend {
   color: inherit;
   text-align: left;
   cursor: pointer;
+  transition: transform 80ms ease;
+}
+.card__select:active {
+  transform: scale(0.99);
+}
+.card__select--inert {
+  cursor: default;
+}
+.card__swatch {
+  width: 8px;
+  height: 28px;
+  border-radius: 4px;
+  flex: none;
 }
 .card__label {
   font-family: var(--font-display);
@@ -684,21 +1122,16 @@ fieldset.chips legend {
   font-weight: 500;
 }
 .card__select[aria-pressed='true'] .card__label::after {
-  content: ' — showing on the map';
+  content: ' — on the map';
   font-family: var(--font-body);
   font-size: var(--text-1);
   font-weight: 400;
   color: var(--ink-muted);
 }
-.card__pattern {
-  font-size: var(--text-1);
-  color: var(--ink-muted);
-  font-weight: 400;
-}
 .card__figures {
   display: flex;
   align-items: baseline;
-  gap: 14px;
+  gap: var(--space-3);
   flex-wrap: wrap;
   margin: 0;
 }
@@ -711,19 +1144,100 @@ fieldset.chips legend {
 .card__distance {
   color: var(--ink-muted);
   font-variant-numeric: tabular-nums;
+  font-size: var(--text-1);
+}
+.card__why {
+  margin: 0;
+  font-size: var(--text-1);
+  color: var(--ink-muted);
+}
+
+/* --- tier 2: trust ------------------------------------------------------- */
+
+.trust {
+  margin: 0;
+  font-size: var(--text-1);
+}
+.trust--chip {
+  display: inline-block;
+  border-radius: var(--radius-chip);
+  padding: var(--space-1) var(--space-3);
+  background: var(--recessed);
+  color: var(--ink-muted);
+  align-self: flex-start;
+}
+.trust--amber {
+  background: var(--warn-ground);
+  color: var(--warn-ink);
+  border: 1px solid var(--warn-border);
+  font-weight: 600;
+}
+/* Below 30% this is not a chip. Full width, full size, expanded — the case a
+   user most needs to read is the one that must not be skimmable. */
+.trust--loud {
+  display: block;
+  background: var(--warn-ground);
+  border: 2px solid var(--warn-border);
+  border-radius: var(--radius-control);
+  color: var(--warn-ink);
+  padding: var(--space-3);
+  font-size: var(--text-2);
+}
+.trust__headline {
+  margin: 0 0 var(--space-2);
+  font-weight: 700;
+}
+.trust__body {
+  margin: 0;
+}
+.trust__body + .trust__body {
+  margin-top: var(--space-2);
+}
+.trust--note {
+  color: var(--ink);
+  border-left: 3px solid var(--rule-strong);
+  padding-left: var(--space-3);
+}
+
+/* --- tier 3: detail ------------------------------------------------------ */
+
+.card__more {
+  align-self: flex-start;
+  font: inherit;
+  font-size: var(--text-1);
+  font-weight: 600;
+  min-height: var(--target);
+  padding: var(--space-2) 0;
+  background: none;
+  border: 0;
+  color: var(--ink);
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.card__detail {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  border-top: 1px solid var(--rule);
+  padding-top: var(--space-3);
+}
+.card__detail[hidden] {
+  display: none;
 }
 
 .scores {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: var(--space-3);
   margin: 0;
 }
 .scores__row {
   display: grid;
-  grid-template-columns: 4.5rem 1fr 2.75rem;
+  grid-template-columns: 6rem 1fr 2.75rem;
   align-items: center;
-  gap: 8px;
+  gap: var(--space-1) var(--space-2);
   font-size: var(--text-1);
 }
 .scores dt,
@@ -751,22 +1265,18 @@ fieldset.chips legend {
   color: var(--ink-muted);
   font-style: italic;
 }
+/* What the number is a percentage *of*. */
+.scores__explain {
+  grid-column: 1 / -1;
+  color: var(--ink-muted);
+  font-size: var(--text-1);
+}
 
-.card__method {
+.card__method,
+.card__rest {
   font-size: var(--text-1);
   color: var(--ink-muted);
   margin: 0;
-}
-.card__confidence {
-  font-size: var(--text-1);
-  margin: 0;
-}
-.card__confidence--caution {
-  color: var(--warn-ink);
-}
-.card__confidence--warning {
-  color: var(--warn-ink);
-  font-weight: 600;
 }
 .card__narration {
   font-size: var(--text-1);
@@ -777,100 +1287,214 @@ fieldset.chips legend {
   color: var(--ink-muted);
   font-style: italic;
 }
-.card__rest {
-  font-size: var(--text-1);
-  color: var(--ink-muted);
-  margin: 0;
-}
-.card__synthetic {
-  font-size: var(--text-1);
-  font-weight: 600;
-  color: var(--warn-ink);
+
+/* --- blocked ------------------------------------------------------------- */
+
+.card--blocked {
   background: var(--warn-ground);
-  border: 1px solid var(--warn-border);
-  border-radius: var(--radius-control);
-  padding: 6px 10px;
+  border-color: var(--warn-border);
+}
+.card__blocked-mark {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  flex: none;
+  border-radius: 50%;
+  background: var(--warn-ink);
+  color: var(--warn-ground);
+  font-weight: 700;
+}
+.card--blocked .card__label {
+  color: var(--warn-ink);
+  font-size: var(--text-3);
+}
+.card__blocked-why {
   margin: 0;
+  font-size: var(--text-2);
+  color: var(--warn-ink);
+  font-weight: 600;
+}
+.card__blocked-hint {
+  margin: 0;
+  font-size: var(--text-1);
+  color: var(--warn-ink);
 }
 
 .blockers {
   margin: 0;
-  padding: 10px 12px;
+  padding: var(--space-3);
   background: var(--warn-ground);
   border: 1px solid var(--warn-border);
   border-radius: var(--radius-control);
   color: var(--warn-ink);
   font-size: var(--text-1);
 }
+.blockers--prominent {
+  background: var(--page);
+  border-width: 2px;
+  font-size: var(--text-2);
+}
 .blockers__title {
   font-weight: 700;
-  margin: 0 0 6px;
+  margin: 0 0 var(--space-2);
 }
 .blockers__list {
   margin: 0;
-  padding-left: 18px;
+  padding-left: var(--space-5);
 }
 .blockers__list li + li {
-  margin-top: 4px;
-}
-
-.card__status {
-  font-size: var(--text-1);
-  font-weight: 600;
-  color: var(--warn-ink);
-  margin: 0;
+  margin-top: var(--space-2);
 }
 
 /* ---------------------------------------------------------------- footer */
 
 .footer {
-  margin-top: 28px;
-  padding-top: 16px;
+  margin-top: var(--space-5);
+  padding-top: var(--space-4);
   border-top: 1px solid var(--rule);
   color: var(--ink-muted);
   font-size: var(--text-1);
-  line-height: 2.2;
+  line-height: 1.9;
 }
 /* Links inside a sentence cannot be 44px tall without wrecking the prose, and
-   WCAG 2.2 exempts inline targets for exactly that reason. They are still made
-   as large as the line box allows. */
+   WCAG 2.2 exempts inline targets for exactly that reason. */
 .footer a {
   color: inherit;
   display: inline-block;
-  padding: 5px 2px;
+  padding: var(--space-1) 2px;
   text-underline-offset: 3px;
 }
 
-/* ----------------------------------------------------------- responsive */
+/* ------------------------------------------------------------- desktop */
+/*
+ * Same components, same DOM, re-composed. The sheet becomes a fixed left panel
+ * and its snap machinery goes inert; App forces snap='full' so every route
+ * renders as a card.
+ */
 
-@media (max-width: 860px) {
-  .app__main {
-    grid-template-columns: 1fr;
+@media (min-width: 900px) {
+  .shell {
+    display: grid;
+    grid-template-columns: 380px 1fr;
   }
-  .controls {
-    position: static;
-  }
-  .map {
-    height: 300px;
-  }
-  .route-list {
-    grid-template-columns: 1fr;
-  }
+
   .header {
-    flex-direction: column;
-    align-items: flex-start;
+    position: static;
+    width: auto;
+    height: auto;
+    margin: 0;
+    clip-path: none;
+    overflow: visible;
+    white-space: normal;
+    grid-column: 1 / -1;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: var(--space-2) var(--space-5);
+    padding: var(--space-4) var(--space-5);
+    border-bottom: 1px solid var(--rule);
+    background: var(--page);
+  }
+  .header__wordmark {
+    font-family: var(--font-display);
+    font-size: var(--text-6);
+    letter-spacing: -0.01em;
+  }
+  .header__tagline {
+    color: var(--ink-muted);
+    font-size: var(--text-2);
+    margin: 2px 0 0;
+    max-width: 46ch;
   }
   .header__privacy {
-    text-align: left;
+    color: var(--ink-muted);
+    font-size: var(--text-1);
+    margin: 0;
+    max-width: 34ch;
+    text-align: right;
+  }
+  .header__mock {
+    display: inline-block;
+    background: var(--warn-ground);
+    border: 1px solid var(--warn-border);
+    color: var(--warn-ink);
+    border-radius: var(--radius-chip);
+    padding: 2px var(--space-3);
+    font-size: var(--text-1);
+    font-weight: 600;
+    margin-top: var(--space-2);
+  }
+
+  .shell {
+    grid-template-rows: auto 1fr;
+    height: 100dvh;
+  }
+  .shell__map {
+    position: relative;
+    grid-column: 2;
+    grid-row: 2;
+    inset: auto;
+  }
+
+  .topbar {
+    position: static;
+    grid-column: 1;
+    grid-row: 2;
+    align-self: start;
+    padding: var(--space-4) var(--space-4) var(--space-2);
+    z-index: 5;
+    background: var(--page);
+  }
+
+  /* The panel. Every snap height is overridden — the sheet is not a sheet. */
+  .sheet,
+  .sheet--peek,
+  .sheet--half,
+  .sheet--full,
+  .sheet--hidden {
+    position: static;
+    grid-column: 1;
+    grid-row: 2;
+    height: auto;
+    min-height: 0;
+    margin-top: 76px;
+    border: 0;
+    border-right: 1px solid var(--rule);
+    border-radius: 0;
+    box-shadow: none;
+    transition: none;
+    overflow: hidden;
+  }
+  .sheet__handle,
+  .sheet__snaps {
+    display: none;
+  }
+  .sheet__scroll {
+    padding: 0 var(--space-4) var(--space-4);
+  }
+
+  .scrim {
+    align-items: center;
+    justify-content: center;
+    padding: var(--space-5);
+  }
+  .controls-sheet {
+    max-width: 30rem;
+    border-radius: var(--radius-card);
+    max-height: 82dvh;
   }
 }
 
-@media (max-width: 420px) {
-  .app {
-    padding: 0 12px 24px;
-  }
-  .dial__ticks {
+/* Nothing may scroll sideways, at any width. */
+@media (max-width: 360px) {
+  .sheet__snap {
     font-size: var(--text-1);
+    padding: 0 var(--space-1);
+  }
+  .topbar {
+    gap: var(--space-1);
   }
 }
 

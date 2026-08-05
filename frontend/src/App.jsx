@@ -1,12 +1,18 @@
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react'
 
 import { buildRouteRequest, fetchRoutes } from './api/client.js'
+import BetterLater from './components/BetterLater.jsx'
 import Controls from './components/Controls.jsx'
+import ControlsSheet from './components/ControlsSheet.jsx'
 import Header from './components/Header.jsx'
 import MapView from './components/MapView.jsx'
 import RouteList from './components/RouteList.jsx'
+import RouteSheet from './components/RouteSheet.jsx'
 import StatusBanner from './components/StatusBanner.jsx'
+import TopBar from './components/TopBar.jsx'
 import { announceRoutes, announceSelection, effectiveMode } from './lib/format.js'
+import { useMediaQuery } from './lib/media.js'
+import { useTheme } from './lib/theme.js'
 
 const MIN_MINUTES = 20
 const MAX_MINUTES = 360
@@ -35,6 +41,8 @@ const initialState = {
   bestDeparture: null,
   error: null,
   geoDenied: false,
+  // The objective that a fourth selection pushed out, so the UI can say which.
+  droppedObjective: null,
   // Bumped by anything that should trigger a refetch; the effect keys on it.
   nonce: 0,
   debounceMs: 0,
@@ -64,7 +72,15 @@ function reducer(state, action) {
       const next = present
         ? state.objectives.filter((o) => o !== action.value)
         : [...state.objectives, action.value].slice(-3)
-      return withRefetch(state, { objectives: next }, DEBOUNCE.objectives)
+      // Which one fell off, so the UI can say so. Silently dropping the oldest
+      // is a state change with no feedback anywhere the user is looking —
+      // especially on a phone, where the dropped chip is usually off screen.
+      const dropped = state.objectives.find((o) => !next.includes(o) && o !== action.value)
+      return withRefetch(
+        state,
+        { objectives: next, droppedObjective: dropped ?? null },
+        DEBOUNCE.objectives,
+      )
     }
 
     case 'origin':
@@ -140,6 +156,11 @@ function reducer(state, action) {
 export default function App() {
   const [state, dispatch] = useReducer(reducer, initialState)
   const [announcement, setAnnouncement] = useState('')
+  // 'hidden' until the first routes arrive, so an empty sheet does not sit over
+  // the map before there is anything to put in it.
+  const [sheetSnap, setSheetSnap] = useState('hidden')
+  const [sheet, setSheet] = useState(null) // null | 'search' | 'settings'
+  const theme = useTheme()
   const abortRef = useRef(null)
   const announceTimer = useRef(null)
 
@@ -259,6 +280,21 @@ export default function App() {
   )
 
   const hasRoutes = state.routes.length > 0
+  const loading = state.phase === 'loading'
+
+  // Above this the sheet becomes a fixed left panel and the snap machinery goes
+  // inert, so every card renders in full. Matched here as well as in CSS
+  // because RouteList needs the answer to decide row-vs-card, and a CSS-only
+  // version would leave the DOM saying "peek" while the layout said otherwise.
+  const desktop = useMediaQuery('(min-width: 900px)')
+  const effectiveSnap = desktop ? 'full' : sheetSnap
+
+  // Results arriving is the moment the sheet earns its place. Lifting it to
+  // peek — not half, not full — is what puts three routes on screen with no
+  // scrolling, which is the whole point of this layout.
+  useEffect(() => {
+    if (hasRoutes && sheetSnap === 'hidden') setSheetSnap('peek')
+  }, [hasRoutes, sheetSnap])
 
   return (
     <div className="app">
@@ -273,72 +309,115 @@ export default function App() {
 
       <Header />
 
-      <main className="app__main">
-        <Controls
-          minutes={state.minutes}
-          mode={state.mode}
-          effectiveMode={mode}
-          objectives={state.objectives}
+      <main className="shell">
+        {/* The map is the background layer and it is always mounted, at its
+            final size. It used to appear only once the first route arrived,
+            which shoved everything below it down the page mid-read. */}
+        <div className="shell__map">
+          <MapView
+            key={theme}
+            theme={theme}
+            routes={state.routes}
+            selected={state.selected}
+            origin={state.origin}
+            dest={state.dest}
+            onSelect={onSelect}
+          />
+        </div>
+
+        <TopBar
           origin={state.origin}
-          dest={state.dest}
-          locating={state.phase === 'locating'}
-          geoDenied={state.geoDenied}
-          onMinutes={(value) => dispatch({ type: 'minutes', value })}
-          onMode={(value) => dispatch({ type: 'mode', value })}
-          onToggleObjective={onToggleObjective}
-          onOrigin={(value) => dispatch({ type: 'origin', value })}
-          onDest={(value) => dispatch({ type: 'dest', value })}
-          onLocate={onLocate}
+          minutes={state.minutes}
+          mode={mode}
+          stale={loading && hasRoutes}
+          onOpenSearch={() => setSheet('search')}
+          onOpenSettings={() => setSheet('settings')}
         />
 
-        <div className="app__results" id="results">
-          <StatusBanner
-            phase={state.phase}
-            progress={state.progress}
-            error={state.error}
-            routes={state.routes}
-            onRetry={() => dispatch({ type: 'retry' })}
-            onMoreTime={() =>
-              dispatch({ type: 'minutes', value: Math.min(MAX_MINUTES, state.minutes + 30) })
-            }
-          />
+        <RouteSheet snap={effectiveSnap} onSnap={setSheetSnap} labelledBy="routes-heading">
+          <div id="results">
+            <h2 id="routes-heading" className="visually-hidden">
+              Routes
+            </h2>
 
-          {state.reason && <p className="field__hint">{state.reason}</p>}
+            <StatusBanner
+              phase={state.phase}
+              progress={state.progress}
+              error={state.error}
+              routes={state.routes}
+              onRetry={() => dispatch({ type: 'retry' })}
+              onMoreTime={() =>
+                dispatch({ type: 'minutes', value: Math.min(MAX_MINUTES, state.minutes + 30) })
+              }
+            />
 
-          {hasRoutes && (
-            <MapView
+            <BetterLater when={state.bestDeparture} reason={state.reason} />
+
+            <RouteList
               routes={state.routes}
               selected={state.selected}
-              origin={state.origin}
-              dest={state.dest}
+              snap={effectiveSnap}
               onSelect={onSelect}
+              skeletonCount={loading ? state.objectives.length : 0}
             />
-          )}
 
-          <RouteList routes={state.routes} selected={state.selected} onSelect={onSelect} />
+            <Footer />
+          </div>
+        </RouteSheet>
 
-          {state.cache && (
-            <p className="field__hint">
-              {state.cache.segments_scored.toLocaleString()} map segments scored,{' '}
-              {Math.round((state.cache.hit_rate ?? 0) * 100)}% served from cache.
-            </p>
-          )}
-        </div>
+        <ControlsSheet
+          open={sheet === 'search'}
+          title="Where are you starting?"
+          onClose={() => setSheet(null)}
+        >
+          <Controls
+            section="places"
+            origin={state.origin}
+            dest={state.dest}
+            locating={state.phase === 'locating'}
+            geoDenied={state.geoDenied}
+            onOrigin={(value) => dispatch({ type: 'origin', value })}
+            onDest={(value) => dispatch({ type: 'dest', value })}
+            onLocate={onLocate}
+          />
+        </ControlsSheet>
+
+        <ControlsSheet
+          open={sheet === 'settings'}
+          title="How long, and how"
+          onClose={() => setSheet(null)}
+        >
+          <Controls
+            section="options"
+            minutes={state.minutes}
+            mode={state.mode}
+            effectiveMode={mode}
+            objectives={state.objectives}
+            droppedObjective={state.droppedObjective}
+            onMinutes={(value) => dispatch({ type: 'minutes', value })}
+            onMode={(value) => dispatch({ type: 'mode', value })}
+            onToggleObjective={onToggleObjective}
+          />
+        </ControlsSheet>
       </main>
-
-      <footer className="footer">
-        <p>
-          Map data © <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>{' '}
-          contributors · tiles by <a href="https://openfreemap.org/">OpenFreeMap</a> · imagery
-          from <a href="https://www.mapillary.com/">Mapillary</a> (CC BY-SA) · weather and air
-          quality from <a href="https://open-meteo.com/">Open-Meteo</a>.
-        </p>
-        <p>
-          Accessibility answers are only as good as OpenStreetMap tagging where you are. Every
-          route says how much of it was actually verified. Where it says the data is unverified,
-          it means it.
-        </p>
-      </footer>
     </div>
+  )
+}
+
+function Footer() {
+  return (
+    <footer className="footer">
+      <p>
+        Map data © <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>{' '}
+        contributors · tiles by <a href="https://openfreemap.org/">OpenFreeMap</a> · imagery
+        from <a href="https://www.mapillary.com/">Mapillary</a> (CC BY-SA) · weather and air
+        quality from <a href="https://open-meteo.com/">Open-Meteo</a>.
+      </p>
+      <p>
+        Accessibility answers are only as good as OpenStreetMap tagging where you are. Every
+        route says how much of it was actually verified. Where it says the data is unverified,
+        it means it.
+      </p>
+    </footer>
   )
 }

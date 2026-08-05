@@ -100,6 +100,15 @@ export default function MapView({ routes, selected, origin, dest, onSelect, them
           center: INITIAL_CENTER,
           zoom: INITIAL_ZOOM,
           attributionControl: { compact: true },
+          // Wheel-scroll over a full-bleed map used to zoom the map instead of
+          // scrolling the page — on desktop, where the map is the whole right
+          // half, that is the page scrolling away under the pointer.
+          // cooperativeGestures requires ctrl/cmd + wheel to zoom and two
+          // fingers to pan, and shows its own hint when a plain gesture is
+          // attempted. On mobile the full-bleed architecture already separates
+          // the two — map owns pan and pinch, sheet owns scroll — so this is
+          // belt and braces there.
+          cooperativeGestures: true,
         })
       } catch (err) {
         // WebGL unavailable, or the style host is blocked. The route list still
