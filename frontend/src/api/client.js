@@ -70,6 +70,25 @@ async function toApiError(res) {
   })
 }
 
+/**
+ * Mark up a response the service worker replayed from its cache.
+ *
+ * `servedFromCache` and `cachedAt` are **camelCase on purpose**. Every field the
+ * server sends is snake_case, so the casing is the signal that these two did not
+ * come off the wire — nothing downstream should go looking for them in
+ * `docs/API.md`, and nobody should confuse them with the response's own `cache`
+ * object, which reports a *server-side* hit and describes an answer that is
+ * entirely current.
+ *
+ * A cached response with no timestamp yields `cachedAt: null`, and lib/offline.js
+ * treats that as the loudest tier rather than the quietest. An entry that cannot
+ * say how old it is is the one least worth trusting.
+ */
+function cacheStampFrom(res) {
+  if (res.headers.get('X-Meander-Cached') !== '1') return null
+  return { servedFromCache: true, cachedAt: res.headers.get('X-Meander-Cached-At') || null }
+}
+
 async function realFetchRoutes(req, { signal, onProgress, onRoute }) {
   let res
   try {
@@ -86,11 +105,19 @@ async function realFetchRoutes(req, { signal, onProgress, onRoute }) {
 
   if (!res.ok) throw await toApiError(res)
 
+  const stamp = cacheStampFrom(res)
+  // Applied here, once, at the boundary — rather than in the components. A
+  // route object that has travelled any distance through the app without the
+  // stamp is a route that can be rendered as current by any one of them.
+  const mark = (route) => (stamp ? { ...route, ...stamp } : route)
+  const markPayload = (payload) =>
+    stamp && payload ? { ...payload, ...stamp, routes: payload.routes?.map(mark) } : payload
+
   const contentType = res.headers.get('content-type') ?? ''
   if (!contentType.includes('text/event-stream') || !res.body) {
     const json = await res.json()
-    json.routes.forEach(onRoute)
-    return json
+    json.routes.forEach((route) => onRoute(mark(route)))
+    return markPayload(json)
   }
 
   const reader = res.body.getReader()
@@ -115,8 +142,8 @@ async function realFetchRoutes(req, { signal, onProgress, onRoute }) {
         continue
       }
       if (evt.type === 'progress') onProgress(evt)
-      else if (evt.type === 'route') onRoute(evt.route)
-      else if (evt.type === 'done') final = evt.payload
+      else if (evt.type === 'route') onRoute(mark(evt.route))
+      else if (evt.type === 'done') final = markPayload(evt.payload)
       else if (evt.type === 'error') {
         throw new ApiError(evt.message ?? 'The server stopped part-way through.', {
           kind: evt.kind ?? 'stream',

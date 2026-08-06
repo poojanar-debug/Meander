@@ -1,4 +1,5 @@
 import { fmtDur } from '../lib/format.js'
+import { cacheChipText, cacheTier, formatCacheAge } from '../lib/offline.js'
 
 /**
  * The compact bar that overlays the map.
@@ -10,7 +11,16 @@ import { fmtDur } from '../lib/format.js'
  * On desktop the CSS moves this to the top of the left panel rather than
  * overlaying the map — same markup, different composition.
  */
-export default function TopBar({ origin, minutes, mode, stale, onOpenSearch, onOpenSettings }) {
+export default function TopBar({
+  origin,
+  minutes,
+  mode,
+  stale,
+  cached,
+  cacheAgeMs,
+  onOpenSearch,
+  onOpenSettings,
+}) {
   return (
     <div className="topbar">
       <button type="button" className="topbar__origin" onClick={onOpenSearch}>
@@ -28,16 +38,31 @@ export default function TopBar({ origin, minutes, mode, stale, onOpenSearch, onO
         </span>
       </button>
 
-      {/* An in-place freshness signal. Refetching deliberately keeps the
-          previous routes on screen and interactive, which is right — but the
-          only sign of it used to be a banner far above the fold, so a stale
-          answer and a fresh one looked identical. */}
-      {stale && (
-        <span className="topbar__stale" role="status">
-          <span className="topbar__stale-dot" aria-hidden="true" />
-          Updating…
-        </span>
-      )}
+      {/* In-place freshness signals, stacked under the bar. Refetching
+          deliberately keeps the previous routes on screen and interactive,
+          which is right — but the only sign of it used to be a banner far
+          above the fold, so a stale answer and a fresh one looked identical.
+
+          The cached pill is the one surface the sheet cannot hide. Peek shows
+          three route rows and nothing else, so at that snap this is where the
+          age lives — and a saved copy must be labelled at every snap, not only
+          the ones with room for a paragraph. */}
+      <div className="topbar__flags">
+        {cached && (
+          <span className={`topbar__cached topbar__cached--${cacheTier(cacheAgeMs)}`}>
+            <span className="visually-hidden">
+              These routes are a saved copy from {formatCacheAge(cacheAgeMs)}.{' '}
+            </span>
+            <span aria-hidden="true">{cacheChipText(cacheAgeMs)}</span>
+          </span>
+        )}
+        {stale && (
+          <span className="topbar__stale" role="status">
+            <span className="topbar__stale-dot" aria-hidden="true" />
+            Updating…
+          </span>
+        )}
+      </div>
     </div>
   )
 }

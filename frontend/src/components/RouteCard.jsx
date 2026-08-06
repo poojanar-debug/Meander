@@ -48,7 +48,7 @@ const WHY = {
  * and `<ul>` is invalid HTML and screen readers flatten it into one unreadable
  * label.
  */
-export default function RouteCard({ route, selected, onSelect, origin, dest }) {
+export default function RouteCard({ route, selected, onSelect, origin, dest, cacheAgeMs }) {
   const style = styleFor(route.id)
   const detailsId = useId()
   const [open, setOpen] = useState(false)
@@ -98,7 +98,7 @@ export default function RouteCard({ route, selected, onSelect, origin, dest }) {
       {WHY[route.id] && <p className="card__why">{WHY[route.id]}</p>}
 
       {/* ---- tier 2: the trust signal ---- */}
-      <TrustSignal route={route} />
+      <TrustSignal route={route} cacheAgeMs={cacheAgeMs} />
 
       {/* ---- tier 3: everything else, one expander ---- */}
       <button

@@ -21,6 +21,7 @@ export default function RouteList({
   skeletonCount = 0,
   origin,
   dest,
+  cacheAgeMs,
 }) {
   if (routes.length === 0 && skeletonCount > 0) {
     return (
@@ -55,6 +56,7 @@ export default function RouteList({
               route={route}
               selected={route.id === selected}
               onSelect={onSelect}
+              cacheAgeMs={cacheAgeMs}
             />
           )
         }
@@ -69,6 +71,7 @@ export default function RouteList({
             onSelect={onSelect}
             origin={origin}
             dest={dest}
+            cacheAgeMs={cacheAgeMs}
           />
         )
       })}

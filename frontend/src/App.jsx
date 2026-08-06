@@ -6,6 +6,7 @@ import Controls from './components/Controls.jsx'
 import ControlsSheet from './components/ControlsSheet.jsx'
 import Header from './components/Header.jsx'
 import MapView from './components/MapView.jsx'
+import OfflineBar from './components/OfflineBar.jsx'
 import RouteList from './components/RouteList.jsx'
 import RouteSheet from './components/RouteSheet.jsx'
 import ShareButton from './components/ShareButton.jsx'
@@ -13,6 +14,8 @@ import StatusBanner from './components/StatusBanner.jsx'
 import TopBar from './components/TopBar.jsx'
 import { announceRoutes, announceSelection, effectiveMode } from './lib/format.js'
 import { useMediaQuery } from './lib/media.js'
+import { cacheAgeMs, formatCacheAge } from './lib/offline.js'
+import { useCacheAge, useOnline } from './lib/offlineStore.js'
 import { decodeState, writeUrl } from './lib/permalink.js'
 import { useTheme } from './lib/theme.js'
 
@@ -156,6 +159,24 @@ function reducer(state, action) {
 }
 
 /**
+ * Did this answer come off the disk rather than the wire?
+ *
+ * Read from the routes rather than held in the reducer, so it cannot drift out
+ * of step with what is actually rendered. Every route in one response carries
+ * the same stamp, and a refetch replaces routes by id — so the moment a live
+ * route lands the stamp is gone with no separate state to remember to clear.
+ *
+ * `cachedAt: null` means "cached, but the age is unknown", which is a different
+ * answer from "not cached" and is treated as the *least* trustworthy case by
+ * lib/offline.js. The distinction is why this returns an object or null rather
+ * than a timestamp.
+ */
+function cacheStamp(routes) {
+  const hit = routes.find((route) => route.servedFromCache)
+  return hit ? { cachedAt: hit.cachedAt ?? null } : null
+}
+
+/**
  * A shared link is the initial state, not something applied afterwards.
  *
  * Seeding the reducer means the one fetch effect fires on the first render with
@@ -180,8 +201,12 @@ export default function App() {
   const [sheetSnap, setSheetSnap] = useState('hidden')
   const [sheet, setSheet] = useState(null) // null | 'search' | 'settings'
   const theme = useTheme()
+  const online = useOnline()
   const abortRef = useRef(null)
   const announceTimer = useRef(null)
+
+  const cached = useMemo(() => cacheStamp(state.routes), [state.routes])
+  const ageMs = useCacheAge(cached?.cachedAt)
 
   const mode = useMemo(
     () => effectiveMode(state.mode, state.minutes),
@@ -236,7 +261,15 @@ export default function App() {
           reason: payload?.reason,
           bestDeparture: payload?.best_departure,
         })
-        announce(announceRoutes(payload?.routes ?? arrived))
+        // A saved copy is announced before the routes are, not after. Someone
+        // listening rather than looking gets the caveat first, in the same
+        // order a sighted reader meets it, instead of hearing three durations
+        // and only then being told they are old.
+        const stamp = cacheStamp(payload?.routes ?? arrived)
+        const preamble = stamp
+          ? `Showing a saved copy from ${formatCacheAge(cacheAgeMs(stamp.cachedAt))}. `
+          : ''
+        announce(preamble + announceRoutes(payload?.routes ?? arrived))
       } catch (err) {
         if (err?.name === 'AbortError') return
         dispatch({ type: 'error', value: err })
@@ -363,11 +396,18 @@ export default function App() {
           minutes={state.minutes}
           mode={mode}
           stale={loading && hasRoutes}
+          cached={Boolean(cached)}
+          cacheAgeMs={ageMs}
           onOpenSearch={() => setSheet('search')}
           onOpenSettings={() => setSheet('settings')}
         />
 
-        <RouteSheet snap={effectiveSnap} onSnap={setSheetSnap} labelledBy="routes-heading">
+        <RouteSheet
+          snap={effectiveSnap}
+          onSnap={setSheetSnap}
+          labelledBy="routes-heading"
+          tallRows={Boolean(cached)}
+        >
           <div id="results">
             <h2 id="routes-heading" className="visually-hidden">
               Routes
@@ -390,6 +430,13 @@ export default function App() {
               />
             )}
 
+            {/* The long form of the saved-copy notice: what in this answer has
+                stopped being true, which a chip has no room for. Gated with the
+                rest of the chrome, because peek is three route rows and nothing
+                else — the short form travels to peek instead, on the rows
+                themselves and on the pill under the top bar. */}
+            {showChrome && cached && <OfflineBar ageMs={ageMs} online={online} />}
+
             {showChrome && <BetterLater when={state.bestDeparture} reason={state.reason} />}
 
             <RouteList
@@ -400,6 +447,7 @@ export default function App() {
               skeletonCount={loading ? state.objectives.length : 0}
               origin={state.origin}
               dest={state.dest}
+              cacheAgeMs={ageMs}
             />
 
             {showChrome && hasRoutes && (

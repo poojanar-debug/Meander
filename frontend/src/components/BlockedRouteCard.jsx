@@ -1,4 +1,5 @@
 import { routeColor } from '../lib/dash.js'
+import { cachedNotice } from '../lib/offline.js'
 import ElevationProfile from './ElevationProfile.jsx'
 import ReportBarrier from './ReportBarrier.jsx'
 import { Blockers } from './RouteCard.jsx'
@@ -21,8 +22,13 @@ import { Blockers } from './RouteCard.jsx'
  * could not be routed at all (no geometry), and one that was routed and then
  * rejected by the hard constraints (geometry, and blockers to show).
  */
-export default function BlockedRouteCard({ route, selected, onSelect }) {
+export default function BlockedRouteCard({ route, selected, onSelect, cacheAgeMs }) {
   const hasShape = route.geometry?.length > 1
+  // This card has no TrustSignal — the barriers are the trust signal — so the
+  // saved-copy notice is rendered here directly. A blocked route needs it as
+  // much as a usable one: "can't complete this route" from a copy saved two
+  // days ago may simply no longer be true.
+  const cached = route.servedFromCache ? cachedNotice(cacheAgeMs) : null
 
   return (
     <li className={`card card--blocked${selected ? ' card--selected' : ''}`}>
@@ -59,6 +65,13 @@ export default function BlockedRouteCard({ route, selected, onSelect }) {
           </span>
         )}
       </h3>
+
+      {cached && (
+        <div className={`trust trust--cached trust--cached-${cached.tier}`}>
+          <p className="trust__headline">{cached.headline}</p>
+          {cached.detail && <p className="trust__body">{cached.detail}</p>}
+        </div>
+      )}
 
       <p className="card__blocked-why">
         {route.status_note ?? 'No route of this kind exists from here.'}

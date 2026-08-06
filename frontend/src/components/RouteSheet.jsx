@@ -41,7 +41,7 @@ const LABEL = {
 /** Past this, a drag counts as a deliberate move rather than a tap wobble. */
 const DRAG_THRESHOLD_PX = 40
 
-export default function RouteSheet({ snap, onSnap, labelledBy, children }) {
+export default function RouteSheet({ snap, onSnap, labelledBy, tallRows, children }) {
   const sheetRef = useRef(null)
   const dragStart = useRef(null)
 
@@ -86,7 +86,11 @@ export default function RouteSheet({ snap, onSnap, labelledBy, children }) {
   return (
     <section
       ref={sheetRef}
-      className={`sheet sheet--${snap}`}
+      /* A row carrying a saved-copy chip is two lines rather than one, so peek
+         has to be told: its height is an exact calculation over three rows, and
+         it would otherwise clip the third one — the single measurement Phase 5
+         is graded on. */
+      className={`sheet sheet--${snap}${tallRows ? ' sheet--tall-rows' : ''}`}
       data-snap={snap}
       aria-labelledby={labelledBy}
       onKeyDown={onKeyDown}

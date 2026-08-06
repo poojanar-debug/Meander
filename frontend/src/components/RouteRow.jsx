@@ -1,5 +1,6 @@
 import { routeColor, styleFor } from '../lib/dash.js'
 import { fmtDur, trustTier } from '../lib/format.js'
+import { cacheChipText, cacheTier, formatCacheAge } from '../lib/offline.js'
 
 const TRUST_WORD = {
   quiet: 'well checked',
@@ -18,7 +19,7 @@ const TRUST_WORD = {
  * invites comparison between routes, which is not the question; "barely
  * checked" is the answer to the question actually being asked.
  */
-export default function RouteRow({ route, selected, onSelect }) {
+export default function RouteRow({ route, selected, onSelect, cacheAgeMs }) {
   const blocked = route.status !== 'ok'
   const tier = trustTier(route)
   const style = styleFor(route.id)
@@ -36,7 +37,25 @@ export default function RouteRow({ route, selected, onSelect }) {
           aria-hidden="true"
           style={{ background: routeColor(route.id) }}
         />
-        <span className="row__label">{route.label}</span>
+        <span className="row__name">
+          <span className="row__label">{route.label}</span>
+          {/* A saved route says so on the row itself, not only in the bar above
+              the list. At peek this row is the entire route — there is nothing
+              else to tap through to — so the qualifier has to travel with it.
+              It takes a second line, and the sheet's peek height grows to
+              match; three routes still fit without scrolling, which the PWA
+              gate measures. */}
+          {/* Tiered like everything else that qualifies a route: present in
+              every case, coloured only once the age is worth colouring. A copy
+              from thirty seconds ago in warning orange trains the eye to skip
+              the same mark when it is two days old. */}
+          {route.servedFromCache && (
+            <span className={`row__cached row__cached--${cacheTier(cacheAgeMs)}`}>
+              <span className="visually-hidden">Saved copy from {formatCacheAge(cacheAgeMs)}. </span>
+              <span aria-hidden="true">{cacheChipText(cacheAgeMs)}</span>
+            </span>
+          )}
+        </span>
         <span className="visually-hidden">, {style.pattern} line. </span>
 
         {blocked ? (
