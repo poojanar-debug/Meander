@@ -34,6 +34,15 @@ os.environ["MEANDER_GRAPHHOPPER_URL"] = "https://graphhopper.com/api/1/route"
 # points at the cause. PROGRESS.md logs this as self-hosting defect #6.
 os.environ["MEANDER_GRAPHHOPPER_SELF_HOSTED"] = "0"
 os.environ.pop("MEANDER_PATH_DETAILS", None)
+# Cleared for the same reason, and found the same way. Several tests assert what
+# happens when a credential is *absent* — "fetching imagery without a token
+# fails loudly" is the guard against reporting "this place has no imagery" when
+# the truth is "we never looked". The moment a real MAPILLARY_TOKEN went into
+# .env those tests inverted, and they are precisely the tests protecting the
+# honesty rule. A credential in the environment must never change what the suite
+# asserts; a test that wants one sets it explicitly.
+for _credential in ("MAPILLARY_TOKEN", "ANTHROPIC_API_KEY"):
+    os.environ[_credential] = ""
 os.environ.setdefault("MEANDER_LOG_LEVEL", "WARNING")
 # open_clip otherwise contacts the Hugging Face hub to revalidate the CLIP
 # weights, which the socket guard below correctly refuses. Offline mode makes it
