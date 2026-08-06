@@ -42,6 +42,14 @@ region: all three presets answer, their geometries differ from each other, and `
 back as a path detail — which is the fifth hard accessibility constraint, and the one the hosted
 API cannot supply at all.
 
+**It installs, and it opens without a network.** `frontend/scripts/pwa-gate.mjs` proves it the
+only way worth proving: it builds, serves, drives the app to real routes, and then *stops the
+server* — no emulated offline flag, because the requests that matter are made by the service
+worker and an emulated-offline run can pass while a real one fails. 25 checks, covering that the
+shell still opens, that a saved route comes back labelled with its age on every surface, that
+three routes still fit the collapsed panel with the labels on, that axe stays clean, and that
+nothing is written to disk until the user says so.
+
 ### What is measured
 
 One uncached `POST /api/routes` — a 45-minute foot round trip near Hyde Park, all three
@@ -253,13 +261,34 @@ Full contract, including the streaming shape and the blocked-route cases: [docs/
 
 ## Privacy
 
-Stateless by design. No location history, no cookies, no third-party analytics, no browser
-storage. Coordinates, IP addresses and user agents are never logged or persisted — there is a
-filter in `backend/logging_setup.py` that redacts them as a backstop.
+Stateless by design. No location history, no cookies, no third-party analytics. Coordinates, IP
+addresses and user agents are never logged or persisted — there is a filter in
+`backend/logging_setup.py` that redacts them as a backstop.
 
 Usage is counted as aggregates only (`route_requests_total`, `routes_blocked_total`,
 `cache_hits_total`, `segments_scored_total`) plus a daily unique-session count derived from an
 in-memory digest keyed by a salt generated at process start and never written anywhere.
+
+### What the browser keeps, and what it takes to make it keep anything
+
+Three things, and only the first happens without being asked for:
+
+| what | when | why it is allowed |
+|---|---|---|
+| the app itself — HTML, JS, CSS, icons | always, in a service worker cache | it is the program. Identical bytes for every visitor, says nothing about anybody, and it is what makes the app open on a train |
+| units and clock format | after you pick one | two words, `metric`/`imperial` and `12`/`24`. The detected default is recomputed each load and never written, so expressing no preference leaves no trace |
+| your most recent result | **only after you turn it on**, off by default | it is a line through the streets around wherever you are, which is the most revealing thing here. One route at a time, never a history, and turning it off deletes it rather than merely stopping |
+
+Map tiles are **never** cached. A tile cache is a record of where you have been, and they come
+from a third party. The cost is that an offline route has no map behind it — which the app says,
+and which it can afford, because the list carries every duration, score, blocker and rest stop.
+
+A route served from that cache is always labelled as saved, with its age, on the row, on the card
+and on a pill under the top bar that no panel position can hide. Past fifteen minutes it also
+names what has stopped being true: air quality, rest stops and the best time to leave are
+measurements of a moment, while the shape of the route is not.
+`frontend/scripts/check-offline.mjs` holds that contract — there is no age, including an age it
+cannot work out, for which the label is allowed to be absent or quiet.
 
 ---
 

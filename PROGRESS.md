@@ -1055,3 +1055,153 @@ exercised for real.
 
 **Live API calls:** GraphHopper self-hosted ~120 (unmetered), Overpass ~12,
 Open-Meteo ~25, Geofabrik 4 extracts.
+
+---
+
+## Launch phase 6.5 · The PWA, and three bugs only a real offline load finds
+
+The brief asks for a manifest, icons, a service worker, and the app shell plus
+the last result cached. The hard requirement is the one the project turns on:
+**an offline-served route must be visibly labelled as cached, with its age.**
+
+### The thing the brief does not settle, and how it was settled
+
+The house rule is that browser storage is opt-in and labelled. The brief says
+cache the last result. Those pull in opposite directions, because a *result* is
+a polyline through the streets around wherever the user is standing — the most
+location-revealing object this app touches.
+
+They are only in tension if the cache is treated as one thing. It is two:
+
+- **the shell** — HTML, JS, CSS, icons. Cached unconditionally. It is the
+  program. Identical bytes for every visitor, reveals nothing, and it is the
+  entire reason the app opens on a train.
+- **the result** — cached **only after an explicit opt-in, off by default**, one
+  route at a time and never a history, with the revocation actually deleting
+  rather than merely ceasing to add.
+
+**Map tiles are cached under neither.** A tile cache is a record of where you
+have been, and they are third-party. The cost is that an offline route has no
+map behind it — affordable precisely because Phase D verified the map is not
+load-bearing: with `MapView` display:none, the list still carries every
+duration, score, blocker and rest stop.
+
+### Where the label lives, and why in four places
+
+`TrustSignal`'s rule is that volume scales with severity but presence never
+does. The same shape applies to age, so `lib/offline.js` is the single place
+that decides the wording, tiered at 15 minutes and 6 hours — thresholds set by
+the *enrichment*, which is what actually rots. A route's shape and its
+accessibility findings hold for weeks; air quality, rest stops and the best
+departure time are measurements of a moment.
+
+| surface | form | why it has to be there |
+|---|---|---|
+| pill under the top bar | `saved 14m ago` | the one no panel snap can hide |
+| compact row | `saved 14m ago` | at peek the row *is* the whole route |
+| card | headline + what has gone stale | the long form, where there is room |
+| results block | headline + cause | says *why* there is a saved copy |
+
+**An unknown age is the loudest tier, not the quietest.** A missing timestamp,
+an unparseable one, and one in the future because the device clock moved all
+produce "Saved copy. Meander cannot tell how old it is." A cache entry that
+cannot say how old it is is the one least worth trusting, and rounding that to
+"0 minutes ago" would be a specific false claim rather than a missing one.
+
+**"You are offline" and "the server is unreachable" are different sentences.**
+The second is commoner and sending that user to restart a router that was never
+the problem is a small lie with a real cost.
+
+### Two bugs that were not about caching
+
+**A departure time can expire, and `BetterLater` had no notion of it.**
+`best_departure` is an absolute instant computed when the request was made, so a
+tab left open past it — or a route replayed hours later — kept advising *"better
+if you leave at 19:15"* at ten in the evening. It is withdrawn now, not
+recomputed: choosing a new time needs the air-quality and cloud-cover series for
+the hours ahead, which is exactly what an expired or cached response no longer
+has. The clock ticks (`useNow`) rather than being read once, because the
+ordinary way to hit this is a phone left on a table, where nothing re-renders.
+
+**The README claimed "no browser storage."** That stopped being true at 6.7,
+when the units preference landed, and nobody updated the sentence. Corrected to
+a table of what is kept, when, and what it took to be allowed to keep it.
+
+### Three bugs the browser found, and one the build did
+
+Every one of these produced output that looked fine.
+
+1. **`Vary: Origin` versus Vite's `crossorigin`.** Vite writes `crossorigin` on
+   exactly two tags — the module script and the stylesheet — so those requests
+   carry an `Origin` header while the worker's precache fetches do not. Cache
+   API matching honours `Vary`, so the stored entries were rejected for the
+   app's own JavaScript and CSS while the manifest and icons matched perfectly.
+   The document came back from cache, the tab title was right, `#root` was in
+   the DOM, and the page was blank. `ignoreVary: true` is correct rather than
+   merely convenient: every shell URL is one immutable content-hashed
+   representation, so there is no second variant to serve by mistake.
+
+2. **Caching the stream deadlocked the request.** `await` on
+   `response.clone().text()` before returning meant waiting for an SSE stream to
+   *end* before the page saw its first byte — and against the tee's backpressure
+   it never resolved at all. `event.waitUntil` instead, which is what the hook
+   is for. The symptom was an empty cache, pointing nowhere near streaming.
+
+3. **`fetch(request)` consumes the request body.** The cache key is a SHA of
+   that body, and hashing it *after* the fetch throws `Request body is already
+   used`. Inside `waitUntil` that rejection goes nowhere: the page got its
+   routes, nothing was logged, and the only evidence was a results cache that
+   existed and was empty. The key is computed before the fetch now, and the old
+   entry is dropped only once the new one is ready to write — deleting first is
+   the obvious order and leaves the device with neither on any failure.
+
+4. **A non-global `String.replace` substituted a comment.** The build plugin
+   fills `__VERSION__` and `__PRECACHE__` into `sw.js`; the first occurrence of
+   each was the sentence in the file's own header explaining what they were. The
+   worker shipped with a literal `__PRECACHE__` in it. `replaceAll`, plus an
+   assertion that no placeholder survives, plus one that `/index.html` is in the
+   list — the plugin also needed `enforce: 'post'`, because Vite emits the
+   document after the default hook order and the first precache list was
+   everything except the page.
+
+### Verified
+
+- **`scripts/pwa-gate.mjs`, 25/25.** It does not emulate being offline, it
+  **stops the server** — `Network.emulateNetworkConditions` applies to the
+  page's network stack, and the requests that matter here are the worker's, so
+  an emulated run can pass while a real one fails.
+- Separate from `gate.mjs` on purpose, which stays at **14/14**. That number is
+  quoted elsewhere and adding checks to it would move something people read.
+- **The permalink contract turns out to be what makes offline work at all.**
+  Geocoding is never cached — a search box's contents are the user's words — so
+  an offline reload cannot look a place up. It does not need to: the controls
+  are already in the URL, and `check:permalink` guarantees the decoded state
+  rebuilds a byte-identical request body, which is exactly the key the worker
+  stored the result under. Two features written for unrelated reasons, and one
+  is load-bearing for the other.
+- `check:offline`, 13 checks in the build, covering the invariant directly:
+  there is no age — including one it cannot work out — for which the label is
+  absent, empty, or quieter than the situation deserves.
+- A two-line row costs 20 px each, so peek grows 60 px rather than dropping a
+  route or truncating "Accessible" to make room. Measured, not derived.
+- 567 tests, 2 skipped. ruff clean. axe clean in the offline state too.
+
+### What I did not do
+
+- **No `vite-plugin-pwa`.** It is a good plugin, but it brings Workbox to
+  generate a worker whose behaviour around POST caching and a permission gate is
+  the interesting part of this phase, not boilerplate to delegate.
+- **No rasteriser dependency for four flat-colour icons.** `scripts/make-icons.mjs`
+  draws them with `node:zlib` and a distance field. The maskable variant is a
+  *different drawing* — smaller against a full-bleed plate — rather than the
+  standard one relabelled, which is the usual mistake and clips the corners off
+  the mark. The first attempt put a dot at the end of the route to read as a
+  destination; at icon sizes it touched the stroke and the whole thing read as a
+  snake with a head.
+- **Not tested on a real phone.** Installability is asserted from the manifest,
+  the icons and a registered worker in headless Chrome. Whether the install
+  prompt appears, and what the icon looks like on a home screen, is still
+  BLOCKED.md-adjacent and is the same open request as Phase 5's.
+
+**Live API calls:** GraphHopper self-hosted ~30 (unmetered), Nominatim 0
+(recorded), Overpass ~6, Open-Meteo ~12.
