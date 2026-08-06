@@ -2,12 +2,17 @@ import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'r
 
 import { buildRouteRequest, fetchRoutes } from './api/client.js'
 import Controls from './components/Controls.jsx'
-import Header from './components/Header.jsx'
+import About from './components/About.jsx'
 import MapView from './components/MapView.jsx'
 import RouteList from './components/RouteList.jsx'
+import Ribbon from './components/Ribbon.jsx'
 import StatusBanner from './components/StatusBanner.jsx'
+import Topbar from './components/Topbar.jsx'
 import { announceRoutes, announceSelection, effectiveMode } from './lib/format.js'
 import { applyTheme, initialTheme, readStoredTheme, storeTheme, systemTheme } from './lib/theme.js'
+
+const prefersReducedMotion = () =>
+  window.matchMedia?.('(prefers-reduced-motion: reduce)').matches === true
 
 const MIN_MINUTES = 20
 const MAX_MINUTES = 360
@@ -157,6 +162,7 @@ export default function App() {
   const [announcement, setAnnouncement] = useState('')
   const abortRef = useRef(null)
   const announceTimer = useRef(null)
+  const aboutRef = useRef(null)
 
   const mode = useMemo(
     () => effectiveMode(state.mode, state.minutes),
@@ -302,6 +308,17 @@ export default function App() {
 
   const hasRoutes = state.routes.length > 0
 
+  // The About disclosure lives at the foot of a panel that scrolls, so the
+  // topbar button has to open it *and* bring it into view. Opening alone would
+  // look like nothing happened.
+  const onAbout = useCallback(() => {
+    const details = aboutRef.current
+    if (!details) return
+    details.open = true
+    details.scrollIntoView({ behavior: prefersReducedMotion() ? 'auto' : 'smooth', block: 'end' })
+    details.querySelector('summary')?.focus()
+  }, [])
+
   return (
     <div className="app">
       <a className="skip-link" href="#results">
@@ -313,41 +330,58 @@ export default function App() {
         {announcement}
       </p>
 
-      <Header theme={state.theme} onTheme={onTheme} />
+      <Topbar theme={state.theme} onTheme={onTheme} onAbout={onAbout} />
 
-      <main className="app__main">
-        <Controls
-          minutes={state.minutes}
-          mode={state.mode}
-          effectiveMode={mode}
-          objectives={state.objectives}
-          theme={state.theme}
-          origin={state.origin}
-          dest={state.dest}
-          locating={state.phase === 'locating'}
-          geoDenied={state.geoDenied}
-          onMinutes={(value) => dispatch({ type: 'minutes', value })}
-          onMode={(value) => dispatch({ type: 'mode', value })}
-          onToggleObjective={onToggleObjective}
-          onOrigin={(value) => dispatch({ type: 'origin', value })}
-          onDest={(value) => dispatch({ type: 'dest', value })}
-          onLocate={onLocate}
-        />
+      <Ribbon routes={state.routes} />
 
-        <div className="app__results" id="results">
-          <StatusBanner
-            phase={state.phase}
-            progress={state.progress}
-            error={state.error}
-            routes={state.routes}
-            onRetry={() => dispatch({ type: 'retry' })}
-            onMoreTime={() =>
-              dispatch({ type: 'minutes', value: Math.min(MAX_MINUTES, state.minutes + 30) })
-            }
+      <div className="layout">
+        <main className="panel">
+          <Controls
+            minutes={state.minutes}
+            mode={state.mode}
+            effectiveMode={mode}
+            objectives={state.objectives}
+            theme={state.theme}
+            origin={state.origin}
+            dest={state.dest}
+            locating={state.phase === 'locating'}
+            geoDenied={state.geoDenied}
+            onMinutes={(value) => dispatch({ type: 'minutes', value })}
+            onMode={(value) => dispatch({ type: 'mode', value })}
+            onToggleObjective={onToggleObjective}
+            onOrigin={(value) => dispatch({ type: 'origin', value })}
+            onDest={(value) => dispatch({ type: 'dest', value })}
+            onLocate={onLocate}
           />
 
-          {state.reason && <p className="field__hint">{state.reason}</p>}
+          <div id="results">
+            <StatusBanner
+              phase={state.phase}
+              progress={state.progress}
+              error={state.error}
+              routes={state.routes}
+              onRetry={() => dispatch({ type: 'retry' })}
+              onMoreTime={() =>
+                dispatch({ type: 'minutes', value: Math.min(MAX_MINUTES, state.minutes + 30) })
+              }
+            />
 
+            {state.reason && <p className="field__hint">{state.reason}</p>}
+
+            <RouteList
+              routes={state.routes}
+              selected={state.selected}
+              theme={state.theme}
+              onSelect={onSelect}
+            />
+          </div>
+
+          <div className="panel__spacer" aria-hidden="true" />
+
+          <About ref={aboutRef} cache={state.cache} />
+        </main>
+
+        <div className="stage">
           {hasRoutes && (
             <MapView
               routes={state.routes}
@@ -357,36 +391,8 @@ export default function App() {
               onSelect={onSelect}
             />
           )}
-
-          <RouteList
-            routes={state.routes}
-            selected={state.selected}
-            theme={state.theme}
-            onSelect={onSelect}
-          />
-
-          {state.cache && (
-            <p className="field__hint">
-              {state.cache.segments_scored.toLocaleString()} map segments scored,{' '}
-              {Math.round((state.cache.hit_rate ?? 0) * 100)}% served from cache.
-            </p>
-          )}
         </div>
-      </main>
-
-      <footer className="footer">
-        <p>
-          Map data © <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>{' '}
-          contributors · tiles by <a href="https://openfreemap.org/">OpenFreeMap</a> · imagery
-          from <a href="https://www.mapillary.com/">Mapillary</a> (CC BY-SA) · weather and air
-          quality from <a href="https://open-meteo.com/">Open-Meteo</a>.
-        </p>
-        <p>
-          Accessibility answers are only as good as OpenStreetMap tagging where you are. Every
-          route says how much of it was actually verified. Where it says the data is unverified,
-          it means it.
-        </p>
-      </footer>
+      </div>
     </div>
   )
 }

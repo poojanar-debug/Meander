@@ -212,80 +212,188 @@ h3 {
 
 /* ---------------------------------------------------------------- layout */
 
+/* The app owns the viewport: the panel scrolls, the map does not. dvh rather
+ * than vh so a mobile browser's collapsing address bar does not leave a strip
+ * of blank page below the map. */
 .app {
   display: flex;
   flex-direction: column;
-  min-height: 100%;
-  max-width: 1400px;
-  margin: 0 auto;
-  padding: 0 var(--s4) var(--s7);
+  height: 100vh;
+  height: 100dvh;
 }
 
-.app__main {
+/* minmax(0, 1fr) on the stage is REQUIRED and is not a stylistic choice. A
+ * plain `1fr` resolves its minimum to min-content, and the map's SVG reports a
+ * min-content width wider than the column it is in — which pushes the grid
+ * about 12px past the viewport and gives the whole page a horizontal scrollbar
+ * on mobile. `minmax(0, ...)` lets the column shrink below its content. The
+ * same reasoning is why .panel and .stage both set min-width: 0. */
+.layout {
   display: grid;
-  grid-template-columns: minmax(280px, 340px) 1fr;
-  gap: var(--s5);
-  align-items: start;
+  grid-template-columns: minmax(360px, 420px) minmax(0, 1fr);
+  flex: 1 1 auto;
+  min-height: 0;
 }
 
-.app__results {
+.panel {
   display: flex;
   flex-direction: column;
   gap: var(--s4);
+  overflow-y: auto;
   min-width: 0;
+  min-height: 0;
+  padding: var(--s4);
+  background: var(--paper);
+  border-inline-end: 1px solid var(--rule);
+}
+
+.stage {
+  position: relative;
+  min-width: 0;
+  min-height: 0;
+  background: var(--sunken);
+}
+
+/* Pins the About disclosure to the bottom of the panel however short the
+ * content above it is (§4.9). */
+.panel__spacer {
+  flex: 1 1 auto;
+  min-height: var(--s4);
+}
+
+.results-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--s3);
+  margin: 0;
+}
+.results-head__title {
+  font-family: var(--font-display);
+  font-size: var(--t-h2);
+  margin: 0;
 }
 
 /* ---------------------------------------------------------------- topbar */
 
 .topbar {
   display: flex;
-  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
-  gap: var(--s2) var(--s6);
-  padding: var(--s5) 0 var(--s4);
+  gap: var(--s4);
+  height: 56px;
+  flex: none;
+  padding-inline: var(--s4);
+  background: var(--raised);
   border-bottom: 1px solid var(--rule);
-  margin-bottom: var(--s5);
+  position: sticky;
+  top: 0;
+  z-index: 40;
+}
+
+.topbar__brand {
+  display: flex;
+  align-items: baseline;
+  gap: var(--s3);
+  min-width: 0;
 }
 
 .topbar__wordmark {
   font-family: var(--font-display);
-  font-size: clamp(1.75rem, 4vw, 2.25rem);
+  font-size: 1.375rem;
   letter-spacing: -0.01em;
   color: var(--brand);
 }
 
 .topbar__tagline {
   color: var(--ink-2);
-  font-size: var(--t-body);
-  margin: 2px 0 0;
-  max-width: 46ch;
-}
-
-.topbar__privacy {
-  color: var(--ink-2);
-  font-size: var(--t-small);
-  margin: 0;
-  max-width: 34ch;
-  text-align: end;
+  font-size: var(--t-micro);
+  white-space: nowrap;
 }
 
 .topbar__actions {
   display: flex;
   align-items: center;
   gap: var(--s2);
+  flex: none;
 }
 
-.topbar__mock {
-  display: inline-block;
-  background: var(--warn-ground);
-  border: 1px solid var(--warn-rule);
-  color: var(--warn-ink);
+.icon-button {
+  display: grid;
+  place-items: center;
+  width: var(--target);
+  height: var(--target);
+  padding: 0;
+  border: 1px solid var(--rule-strong);
   border-radius: var(--r-pill);
-  padding: 2px var(--s3);
+  background: var(--raised);
+  color: var(--ink);
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+}
+.icon-button:hover {
+  border-color: var(--accent);
+  background: var(--sunken);
+}
+
+/* ---------------------------------------------------------------- ribbon */
+
+.ribbon {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  flex: none;
+  padding: var(--s2) var(--s4);
+  background: var(--warn-ground);
+  color: var(--warn-ink);
+  border-bottom: 1px solid var(--warn-rule);
   font-size: var(--t-small);
   font-weight: 600;
-  margin-top: 6px;
+}
+.ribbon__icon {
+  font-size: 1rem;
+  line-height: 1;
+}
+
+/* ----------------------------------------------------------------- about */
+
+.about {
+  flex: none;
+  border: 1px solid var(--rule);
+  border-radius: var(--r-md);
+  background: var(--raised);
+}
+.about__summary {
+  display: flex;
+  align-items: center;
+  min-height: var(--target);
+  padding: var(--s2) var(--s4);
+  font-size: var(--t-small);
+  font-weight: 600;
+  cursor: pointer;
+  border-radius: var(--r-md);
+}
+.about__body {
+  padding: 0 var(--s4) var(--s4);
+  color: var(--ink-2);
+  font-size: var(--t-small);
+  line-height: 1.6;
+}
+.about__body p {
+  margin: 0 0 var(--s3);
+}
+.about__body p:last-child {
+  margin-bottom: 0;
+}
+/* Links inside a sentence cannot be 44px tall without wrecking the prose, and
+   WCAG 2.2 exempts inline targets for exactly that reason. They are still made
+   as large as the line box allows. */
+.about__body a {
+  color: inherit;
+  display: inline-block;
+  padding: 5px 2px;
+  text-underline-offset: 3px;
 }
 
 /* Theme toggle. The label is the theme you will *get*, not the one you are in
@@ -555,11 +663,12 @@ fieldset.chips legend {
 
 /* ------------------------------------------------------------------- map */
 
+/* The map fills the stage rather than sizing itself. On desktop the stage is a
+   grid column with a bounded height; on mobile it is a fixed band above the
+   panel. Either way the map is told its size rather than deciding it. */
 .map {
-  position: relative;
-  height: clamp(320px, 52vh, 620px);
-  border: 1px solid var(--rule);
-  border-radius: var(--r-md);
+  position: absolute;
+  inset: 0;
   overflow: hidden;
   background: var(--sunken);
 }
@@ -828,53 +937,48 @@ fieldset.chips legend {
   margin: 0;
 }
 
-/* ---------------------------------------------------------------- footer */
-
-.footer {
-  margin-top: 28px;
-  padding-top: var(--s4);
-  border-top: 1px solid var(--rule);
-  color: var(--ink-2);
-  font-size: var(--t-small);
-  line-height: 2.2;
-}
-/* Links inside a sentence cannot be 44px tall without wrecking the prose, and
-   WCAG 2.2 exempts inline targets for exactly that reason. They are still made
-   as large as the line box allows. */
-.footer a {
-  color: inherit;
-  display: inline-block;
-  padding: 5px 2px;
-  text-underline-offset: 3px;
-}
-
 /* ----------------------------------------------------------- responsive */
 
-@media (max-width: 860px) {
-  .app__main {
+/* Below 900px the map moves ABOVE the panel and the page scrolls as one
+   document rather than the panel scrolling inside a fixed frame.
+   Why the map goes on top: the trip bar and the first route row have to be
+   reachable by thumb. A 36vh map above them keeps the answer visible while
+   leaving the controls in the lower two-thirds of the screen (§3). */
+@media (max-width: 899px) {
+  .app {
+    height: auto;
+    min-height: 100vh;
+    min-height: 100dvh;
+  }
+  .layout {
     grid-template-columns: 1fr;
+  }
+  .stage {
+    order: -1;
+    height: max(230px, 36vh);
+  }
+  .panel {
+    overflow-y: visible;
+    border-inline-end: 0;
   }
   .controls {
     position: static;
   }
-  .map {
-    height: 300px;
-  }
   .route-list {
     grid-template-columns: 1fr;
   }
-  .topbar {
-    flex-direction: column;
-    align-items: flex-start;
+  /* The rail is the legend at this width. */
+  .topbar__tagline {
+    display: none;
   }
-  .topbar__privacy {
-    text-align: start;
+  .ribbon {
+    font-size: var(--t-micro);
   }
 }
 
 @media (max-width: 420px) {
-  .app {
-    padding: 0 var(--s3) var(--s6);
+  .panel {
+    padding: var(--s3);
   }
   .dial__ticks {
     font-size: 0.6875rem;
