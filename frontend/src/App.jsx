@@ -7,6 +7,7 @@ import MapView from './components/MapView.jsx'
 import RouteList from './components/RouteList.jsx'
 import StatusBanner from './components/StatusBanner.jsx'
 import { announceRoutes, announceSelection, effectiveMode } from './lib/format.js'
+import { applyTheme, initialTheme, readStoredTheme, storeTheme, systemTheme } from './lib/theme.js'
 
 const MIN_MINUTES = 20
 const MAX_MINUTES = 360
@@ -35,9 +36,18 @@ const initialState = {
   bestDeparture: null,
   error: null,
   geoDenied: false,
+  // A display preference, not an input to the route request. It deliberately
+  // does not live in `withRefetch`.
+  theme: 'light',
   // Bumped by anything that should trigger a refetch; the effect keys on it.
   nonce: 0,
   debounceMs: 0,
+}
+
+/** Resolved at mount rather than at module load, so the read is not a side
+ *  effect of importing this file. */
+function init(state) {
+  return { ...state, theme: initialTheme() }
 }
 
 function withRefetch(state, patch, debounceMs) {
@@ -132,13 +142,18 @@ function reducer(state, action) {
     case 'select':
       return { ...state, selected: action.value }
 
+    // Not routed through withRefetch: changing the theme must never re-request
+    // routes. It is a paint change and nothing else.
+    case 'theme':
+      return { ...state, theme: action.value }
+
     default:
       return state
   }
 }
 
 export default function App() {
-  const [state, dispatch] = useReducer(reducer, initialState)
+  const [state, dispatch] = useReducer(reducer, initialState, init)
   const [announcement, setAnnouncement] = useState('')
   const abortRef = useRef(null)
   const announceTimer = useRef(null)
@@ -212,6 +227,33 @@ export default function App() {
 
   useEffect(() => () => abortRef.current?.abort(), [])
 
+  // --- theme ---------------------------------------------------------------
+
+  // index.html already painted the right theme before React existed; this keeps
+  // the DOM in step once the user starts toggling.
+  useEffect(() => {
+    applyTheme(state.theme)
+  }, [state.theme])
+
+  // Follow the system only while the user has expressed no view of their own.
+  // Someone who has explicitly chosen light should stay in light when their
+  // laptop flips to dark at sunset.
+  useEffect(() => {
+    if (readStoredTheme()) return undefined
+    const query = window.matchMedia?.('(prefers-color-scheme: dark)')
+    if (!query) return undefined
+    const onChange = () => {
+      if (!readStoredTheme()) dispatch({ type: 'theme', value: systemTheme() })
+    }
+    query.addEventListener('change', onChange)
+    return () => query.removeEventListener('change', onChange)
+  }, [])
+
+  const onTheme = useCallback((value) => {
+    storeTheme(value)
+    dispatch({ type: 'theme', value })
+  }, [])
+
   // --- handlers ------------------------------------------------------------
 
   const onLocate = useCallback(() => {
@@ -271,7 +313,7 @@ export default function App() {
         {announcement}
       </p>
 
-      <Header />
+      <Header theme={state.theme} onTheme={onTheme} />
 
       <main className="app__main">
         <Controls
@@ -279,6 +321,7 @@ export default function App() {
           mode={state.mode}
           effectiveMode={mode}
           objectives={state.objectives}
+          theme={state.theme}
           origin={state.origin}
           dest={state.dest}
           locating={state.phase === 'locating'}
@@ -315,7 +358,12 @@ export default function App() {
             />
           )}
 
-          <RouteList routes={state.routes} selected={state.selected} onSelect={onSelect} />
+          <RouteList
+            routes={state.routes}
+            selected={state.selected}
+            theme={state.theme}
+            onSelect={onSelect}
+          />
 
           {state.cache && (
             <p className="field__hint">

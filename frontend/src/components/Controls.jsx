@@ -14,6 +14,7 @@ export default function Controls({
   mode,
   effectiveMode,
   objectives,
+  theme,
   origin,
   dest,
   locating,
@@ -97,7 +98,7 @@ export default function Controls({
                 <span
                   className="chip__swatch"
                   aria-hidden="true"
-                  style={{ background: swatchBackground(objective.id) }}
+                  style={{ background: swatchBackground(objective.id, theme) }}
                 />
                 {objective.label}
                 <span className="visually-hidden">

@@ -1,4 +1,4 @@
-import { styleFor } from '../lib/dash.js'
+import { routeColor, styleFor } from '../lib/dash.js'
 import {
   SCORING_METHOD_LABEL,
   confidenceSentence,
@@ -28,7 +28,7 @@ const MODE_NOUN = { foot: 'on foot', bike: 'by bike', car: 'by car' }
  * unreadable label. Clicking anywhere on the card still works for pointer
  * users; the button is what makes it operable from the keyboard.
  */
-export default function RouteCard({ route, selected, onSelect }) {
+export default function RouteCard({ route, selected, theme, onSelect }) {
   const style = styleFor(route.id)
   const blocked = route.status !== 'ok'
   const hasShape = route.geometry?.length > 1
@@ -41,7 +41,7 @@ export default function RouteCard({ route, selected, onSelect }) {
 
   return (
     <li className={`card${selected ? ' card--selected' : ''}`} onClick={select}>
-      <span className="card__bar" aria-hidden="true" style={{ background: style.color }} />
+      <span className="card__bar" aria-hidden="true" style={{ background: routeColor(route.id, theme) }} />
 
       <h3 className="card__head">
         <button
