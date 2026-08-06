@@ -5,9 +5,11 @@ Four CloudFormation stacks that put Meander on AWS.
 > ## Nothing here has been applied.
 >
 > Every template **validates** — `aws cloudformation validate-template` is a
-> read-only call and all four pass it. None has ever been deployed. The AWS
-> credentials on the machine this was written on are account root, and creating
-> billable resources was explicitly out of scope.
+> read-only call and all four pass it, and `cfn-lint` passes clean on all four
+> as well (it catches more: unresolved `!Ref` targets, unknown resource
+> properties, bad intrinsic arguments — and it runs in CI). None has ever been
+> deployed. The AWS credentials on the machine this was written on are account
+> root, and creating billable resources was explicitly out of scope.
 >
 > **A template that parses is not a template that works.** CloudFormation
 > validation checks syntax and function references. It does not check that a
@@ -163,7 +165,7 @@ should print.
 
 | # | claim | how to verify | expected |
 |---|---|---|---|
-| 1 | all four templates are well-formed | `for t in infra/*.yaml; do aws cloudformation validate-template --template-body file://$t >/dev/null && echo "$t ok"; done` | four `ok` lines — **this one has been run and passes** |
+| 1 | all four templates are well-formed | `cfn-lint infra/*.yaml` | no output, exit 0 — **this one has been run and passes**, and runs in CI |
 | 2 | the stacks create cleanly | the four `deploy` commands above | `CREATE_COMPLETE` each |
 | 3 | the router has no public ingress | `aws ec2 describe-security-groups --filters Name=group-name,Values=meander-router --query 'SecurityGroups[0].IpPermissions'` | one rule, port 8989, `UserIdGroupPairs` naming the API SG, `IpRanges` empty |
 | 4 | the router is unreachable from outside | `aws ecs describe-tasks … --query 'tasks[0].attachments'` then `curl http://<private-ip>:8989/health` from outside the VPC | connection times out |
