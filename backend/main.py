@@ -1214,8 +1214,66 @@ async def report_barrier(report: BarrierReport, request: Request) -> Any:
 
 
 # ---------------------------------------------------------------------------
-# health
+# health and metrics
 # ---------------------------------------------------------------------------
+
+
+@app.get("/metrics")
+async def prometheus_metrics() -> Response:
+    """Aggregate counters in Prometheus text exposition format.
+
+    **Every series here is a whole-instance total with no labels, and that is
+    the privacy design rather than an omission.** A `path`, `region` or
+    `status` label would turn this into a low-cardinality description of who
+    asked for what and when, and a coordinate label would be unthinkable. What
+    it exports is exactly what `/api/health` already reports to anyone —
+    `metrics.py` never holds a request attribute in the first place, so there
+    is nothing here that could be labelled even by mistake.
+
+    `unique_sessions_today` comes from a digest keyed by a salt generated at
+    process start and never written down, so it cannot be joined to yesterday's
+    figure or to anything outside this process.
+
+    Unauthenticated, like `/healthz`, because it reveals no more than
+    `/api/health` does. Scrape it from inside the VPC; the load balancer in
+    infra/20-services.yaml has no rule that reaches it from outside.
+    """
+    snapshot = metrics.snapshot()
+
+    # Written by hand rather than with prometheus_client: that is 200 KB and a
+    # registry abstraction to serialise eleven integers, and it would be the
+    # first entry in requirements-deploy.txt that exists purely for
+    # observability.
+    described = {
+        "route_requests_total": ("counter", "Route requests accepted."),
+        "routes_blocked_total": ("counter", "Routes rejected by the accessibility engine."),
+        "cache_hits_total": ("counter", "Whole-route cache hits."),
+        "cache_misses_total": ("counter", "Whole-route cache misses."),
+        "segments_scored_total": ("counter", "Segments served from pre-warmed CLIP scores."),
+        "rate_limited_total": ("counter", "Requests refused by the rate limiter."),
+        "upstream_failures_total": ("counter", "Upstream calls that failed."),
+        "narration_failures_total": ("counter", "Narration attempts that failed."),
+        "enrichment_failures_total": ("counter", "Enrichment stages that failed."),
+        "unique_sessions_today": ("gauge", "Distinct sessions today, from an unpersisted digest."),
+        "uptime_s": ("gauge", "Seconds since this process started."),
+    }
+
+    lines: list[str] = []
+    for name, value in snapshot.items():
+        kind, description = described.get(name, ("gauge", ""))
+        metric = f"meander_{name}"
+        if description:
+            lines.append(f"# HELP {metric} {description}")
+        lines.append(f"# TYPE {metric} {kind}")
+        lines.append(f"{metric} {value}")
+    lines.append("")
+
+    return Response(
+        content="\n".join(lines),
+        # `version=0.0.4` is part of the contract, not decoration: a scraper
+        # given bare text/plain treats the body as an unparseable exposition.
+        media_type="text/plain; version=0.0.4; charset=utf-8",
+    )
 
 
 @app.get("/healthz")
