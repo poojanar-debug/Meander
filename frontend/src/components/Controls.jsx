@@ -1,4 +1,5 @@
 import { IMPLEMENTED, OBJECTIVES, swatchBackground } from '../lib/dash.js'
+import OfflineControl from './OfflineControl.jsx'
 import PlaceInput from './PlaceInput.jsx'
 import TimeDial from './TimeDial.jsx'
 import UnitsControl from './UnitsControl.jsx'
@@ -144,6 +145,8 @@ export default function Controls({
           </fieldset>
 
           <UnitsControl />
+
+          <OfflineControl />
         </>
       )}
     </form>
