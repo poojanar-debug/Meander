@@ -180,11 +180,14 @@ Two more things were established while doing it, neither of which is a row here:
 
 - **`/readyz` returns 503 with the router stopped and 200 with it running.**
   Observed both ways, which had never been done before.
-- **`scripts/verify_selfhosted.py` fails at Princes Street, Edinburgh** — not a
-  routing defect. Its location list claims `great-britain`, and the `demo`
-  region set imports **Greater London** only. The script and the region set
-  disagree about what "great-britain" means; the script is the one that is
-  wrong.
+- **`scripts/verify_selfhosted.py` used to fail at Princes Street, Edinburgh**
+  — not a routing defect. Its location list claims `great-britain`, and the
+  `demo` region set imports **Greater London** only. Fixed: the script now asks
+  the running router what it covers, via the same `backend/coverage.py` the API
+  uses, and skips what is outside instead of failing it. Under `demo` it reports
+  3 checked and 1 skipped and exits 0; under `countries` Edinburgh will be
+  checked with no change to the file. A run in which *every* location is skipped
+  exits 1 — a verification that verified nothing is not a pass.
 
 Run the command; the expectation says what it should print.
 

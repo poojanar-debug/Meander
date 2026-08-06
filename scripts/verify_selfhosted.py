@@ -6,7 +6,9 @@
 Self-hosting exists for one reason: the hosted free tier cannot execute a
 `custom_model`, so the nature and accessible presets come back blocked. This
 checks the three things that have to be true for that to have been worth doing,
-in every imported region:
+in every region the running graph actually contains — locations outside it are
+skipped and named, because which region set was built is an operator's choice
+rather than a defect:
 
 1. all three presets route at all
 2. their geometries are genuinely **different** — a custom model that is
@@ -38,13 +40,43 @@ class Spot:
     mode: str
 
 
-# One per imported region, chosen to be somewhere a person would actually walk.
+# Somewhere a person would actually walk, in each region either region set can
+# import.
+#
+# ⚠ `region` is the Geofabrik extract these coordinates fall in, which is **not**
+# the same as what is built. The `demo` set imports bounding boxes around the
+# five demo locations — for Britain that is Greater London and nothing else —
+# while `countries` imports Great Britain entire. Edinburgh is in exactly that
+# gap: it routes under `countries` and does not exist under `demo`.
+#
+# This used to be a straight list, with Edinburgh labelled `great-britain` and
+# checked unconditionally, so running it against a `demo` graph reported a
+# failure that was really a question nobody had asked the graph. Which set is
+# built is now read from the router rather than assumed — see `covers()`.
 SPOTS = (
     Spot("Colombo Fort", "sri-lanka", LatLon(6.933727, 79.850080), 30, "foot"),
     Spot("Vondelpark, Amsterdam", "netherlands", LatLon(52.357197, 4.864119), 35, "foot"),
     Spot("Hyde Park, London", "great-britain", LatLon(51.507489, -0.162207), 35, "foot"),
     Spot("Princes Street, Edinburgh", "great-britain", LatLon(55.952326, -3.195041), 40, "foot"),
 )
+
+
+async def covers(spot: Spot) -> bool:
+    """Whether the graph that is actually running claims this point.
+
+    Asks the router's own /info bbox, via the same coverage module the API uses,
+    so this cannot drift from what a user would be told. A spot outside it is
+    skipped rather than failed: "you did not import Scotland" is a fact about
+    the region set, not a defect in the router.
+
+    The bbox is a union and therefore an over-estimate — a point inside it is
+    not promised to route. That asymmetry is the right way round here. Skipping
+    is driven by a *certain* negative, and anything that survives the check and
+    then fails is a real failure worth reporting.
+    """
+    from backend.coverage import outside_coverage
+
+    return await outside_coverage(spot.point.lat, spot.point.lon) is None
 
 
 def _shape(route) -> tuple:
@@ -109,7 +141,15 @@ async def main_async() -> int:
         return 2
 
     failures: list[str] = []
+    checked = 0
+    skipped: list[str] = []
     for spot in SPOTS:
+        if not await covers(spot):
+            skipped.append(spot.name)
+            print(f"\n{spot.name}  ({spot.region}, {spot.minutes} min {spot.mode})")
+            print("  skipped: outside the graph this server has built")
+            continue
+        checked += 1
         failures.extend(await check(spot))
 
     from backend.fixtures import aclose_client
@@ -117,12 +157,34 @@ async def main_async() -> int:
     await aclose_client()
 
     print()
+    if skipped:
+        # Semicolons, not commas: the names contain commas ("Hyde Park, London"),
+        # so a comma-joined list of four reads as seven.
+        print(f"Skipped {len(skipped)}, outside the built graph: {'; '.join(skipped)}")
+
+    # A run that verified nothing must not report success. With every spot
+    # skipped the loop above would otherwise fall through to "All 0 locations",
+    # which is the shape of green that hides an empty graph.
+    #
+    # Checked before the reassuring note below, because "not a failure" is true
+    # of *some* spots being skipped and false of all of them.
+    if not checked:
+        print(
+            "FAILED — every location was skipped, so nothing was verified. "
+            "Is the router serving the graph you think it is?",
+            file=sys.stderr,
+        )
+        return 1
+
+    if skipped:
+        print("  Not a failure. Build --region-set countries to include them.")
+
     if failures:
         print(f"FAILED — {len(failures)} problem(s):")
         for f in failures:
             print(f"  - {f}")
         return 1
-    print(f"All {len(SPOTS)} locations: three distinct routes, smoothness present.")
+    print(f"All {checked} checked locations: three distinct routes, smoothness present.")
     return 0
 
 
