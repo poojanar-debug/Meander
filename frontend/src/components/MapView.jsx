@@ -127,7 +127,7 @@ function applyMapPalette(map) {
  * that only runs while the page is visible, and the `jump`-instead-of-`fly`
  * guard for a hidden tab. None of them should be tidied away.
  */
-export default function MapView({ routes, selected, origin, dest, theme, onSelect }) {
+export default function MapView({ routes, selected, origin, dest, theme, highlight, onSelect }) {
   const containerRef = useRef(null)
   const mapRef = useRef(null)
   const markersRef = useRef([])
@@ -306,8 +306,10 @@ export default function MapView({ routes, selected, origin, dest, theme, onSelec
       if (map.getLayer(`case-${id}`)) map.removeLayer(`case-${id}`)
       if (map.getSource(`route-${id}`)) map.removeSource(`route-${id}`)
     }
-    if (map.getLayer('rest-stops')) map.removeLayer('rest-stops')
-    if (map.getSource('rest-stops')) map.removeSource('rest-stops')
+    for (const id of ['highlight', 'rest-stops']) {
+      if (map.getLayer(id)) map.removeLayer(id)
+      if (map.getSource(id)) map.removeSource(id)
+    }
 
     const drawable = routes.filter((r) => r.geometry?.length > 1)
     layerIdsRef.current = drawable.map((r) => r.id)
@@ -360,6 +362,20 @@ export default function MapView({ routes, selected, origin, dest, theme, onSelec
         map.getCanvas().style.cursor = ''
       })
     }
+
+    // The stretch of line belonging to the step under the cursor (§6.4). Added
+    // before the rest stops so their circles stay on top of it.
+    map.addSource('highlight', {
+      type: 'geojson',
+      data: { type: 'Feature', geometry: { type: 'LineString', coordinates: [] } },
+    })
+    map.addLayer({
+      id: 'highlight',
+      type: 'line',
+      source: 'highlight',
+      layout: { 'line-cap': 'round', 'line-join': 'round' },
+      paint: { 'line-color': token('--accent'), 'line-width': 11, 'line-opacity': 0.55 },
+    })
 
     // Rest stops for the selected route only (§4.10). A circle layer rather
     // than DOM markers: there can be a dozen of them, and they need to sit
@@ -415,6 +431,28 @@ export default function MapView({ routes, selected, origin, dest, theme, onSelec
       })
     }
   }, [selected, routes, ready, theme])
+
+  // --- step highlight ------------------------------------------------------
+
+  useEffect(() => {
+    const map = mapRef.current
+    if (!map || !ready) return
+    const source = map.getSource('highlight')
+    if (!source) return
+
+    const route = routes.find((r) => r.id === selected)
+    const span =
+      highlight && route?.geometry?.length > 1
+        ? route.geometry.slice(highlight[0], highlight[1] + 1)
+        : []
+    source.setData({
+      type: 'Feature',
+      geometry: { type: 'LineString', coordinates: span.length > 1 ? span : [] },
+    })
+    if (map.getLayer('highlight')) {
+      map.setPaintProperty('highlight', 'line-color', token('--accent'))
+    }
+  }, [highlight, selected, routes, ready, theme])
 
   // --- viewport ------------------------------------------------------------
 

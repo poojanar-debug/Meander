@@ -8,6 +8,7 @@ import DepartureStrip from './components/DepartureStrip.jsx'
 import MapView from './components/MapView.jsx'
 import RouteDetail from './components/RouteDetail.jsx'
 import RouteRail from './components/RouteRail.jsx'
+import StepList from './components/StepList.jsx'
 import Ribbon from './components/Ribbon.jsx'
 import StatusBanner from './components/StatusBanner.jsx'
 import Topbar from './components/Topbar.jsx'
@@ -171,6 +172,10 @@ function reducer(state, action) {
 export default function App() {
   const [state, dispatch] = useReducer(reducer, initialState, init)
   const [announcement, setAnnouncement] = useState('')
+  // Which stretch of the selected route the map should emphasise, from the step
+  // under the cursor. Local state, not reducer state: it changes on every
+  // mousemove across a list and has no business triggering the fetch effect.
+  const [highlight, setHighlight] = useState(null)
   const abortRef = useRef(null)
   const announceTimer = useRef(null)
   const aboutRef = useRef(null)
@@ -424,7 +429,11 @@ export default function App() {
               onSelect={onSelect}
             />
 
-            <RouteDetail route={selectedRoute} theme={state.theme}>
+            <RouteDetail
+              route={selectedRoute}
+              theme={state.theme}
+              stepList={<StepList route={selectedRoute} onHighlight={setHighlight} />}
+            >
               <DaylightGuard
                 route={selectedRoute}
                 origin={state.origin}
@@ -448,6 +457,7 @@ export default function App() {
               origin={state.origin}
               dest={state.dest}
               theme={state.theme}
+              highlight={highlight}
               onSelect={onSelect}
             />
           )}

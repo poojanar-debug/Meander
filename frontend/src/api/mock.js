@@ -69,6 +69,46 @@ function pointAt(geometry, fraction) {
   return { lat, lon }
 }
 
+/**
+ * A plausible turn list spanning the whole geometry.
+ *
+ * The real backend passes GraphHopper's instruction array straight through;
+ * this mirrors its shape so the step list, the map highlight and the in-step
+ * barrier placement can all be exercised with no backend at all. The intervals
+ * tile the point array end to end with no gaps and no overlaps, which is the
+ * property the frontend relies on to map a step back onto a stretch of line.
+ */
+function steps(geometry, distanceM, durationMin, streets) {
+  const n = geometry.length
+  if (n < 2) return []
+  const count = Math.max(2, Math.min(streets.length, Math.floor(n / 5)))
+  const out = []
+  for (let i = 0; i < count; i += 1) {
+    const start = Math.floor((i * (n - 1)) / count)
+    const end = Math.floor(((i + 1) * (n - 1)) / count)
+    const share = (end - start) / (n - 1)
+    const turn = i === 0 ? 'Continue' : ['Turn left', 'Turn right', 'Keep left', 'Bear right'][i % 4]
+    const street = streets[i % streets.length]
+    out.push({
+      text: `${turn} onto ${street}`,
+      distance_m: Math.round(distanceM * share),
+      duration_min: Number((durationMin * share).toFixed(2)),
+      street_name: street,
+      sign: i === 0 ? 0 : 2,
+      interval: [start, end],
+    })
+  }
+  out.push({
+    text: 'Arrive at your destination',
+    distance_m: 0,
+    duration_min: 0,
+    street_name: null,
+    sign: 4,
+    interval: [n - 1, n - 1],
+  })
+  return out
+}
+
 function buildRoutes(req) {
   const origin = req.origin ?? COLOMBO
   const isLoop = !req.destination
@@ -98,6 +138,12 @@ function buildRoutes(req) {
     scoring_method: 'clip',
     confidence: 0.88,
     rest_stops: [{ ...pointAt(fastestGeom, 0.12), type: 'bench', at_m: 180 }],
+    steps: steps(fastestGeom, 1450 * scale, 18 * scale, [
+      'Galle Road',
+      'Chatham Street',
+      'York Street',
+      'Main Street',
+    ]),
     blockers: [],
     narration: null,
     synthetic_upstream: false,
@@ -121,6 +167,12 @@ function buildRoutes(req) {
       { ...pointAt(natureGeom, 0.46), type: 'drinking water', at_m: 910 },
       { ...pointAt(natureGeom, 0.78), type: 'bench', at_m: 1580 },
     ],
+    steps: steps(natureGeom, 2080 * scale, 26 * scale, [
+      'Green Path',
+      'Lake Walk',
+      'Park Lane',
+      'Cinnamon Gardens',
+    ]),
     blockers: [],
     narration: null,
     synthetic_upstream: false,
@@ -148,6 +200,14 @@ function buildRoutes(req) {
     scoring_method: 'geometry_only',
     confidence: 0.41,
     rest_stops: [{ ...pointAt(accessibleGeom, 0.3), type: 'bench', at_m: 520 }],
+    // Both blockers below fall inside one of these steps, which is what
+    // exercises the in-step barrier placement — the point of the feature.
+    steps: steps(accessibleGeom, 1720 * scale, 22 * scale, [
+      'Canal Walk',
+      'Green Path',
+      'Station Road',
+      'Beach Drive',
+    ]),
     blockers: [
       {
         type: 'steps',

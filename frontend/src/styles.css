@@ -1554,3 +1554,54 @@ fieldset.chips legend {
 .note .link-button {
   margin-top: var(--s1);
 }
+
+/* ----------------------------------------------------------------- steps */
+
+.steps {
+  border: 1px solid var(--rule);
+  border-radius: var(--r-sm);
+  background: var(--sunken);
+}
+.steps__summary {
+  display: flex;
+  align-items: center;
+  min-height: var(--target);
+  padding: var(--s2) var(--s3);
+  font-size: var(--t-small);
+  font-weight: 600;
+  cursor: pointer;
+  border-radius: var(--r-sm);
+}
+.steps__list {
+  margin: 0;
+  padding: 0 var(--s3) var(--s3) var(--s6);
+  display: flex;
+  flex-direction: column;
+  gap: var(--s2);
+}
+.step {
+  padding: var(--s2);
+  border-radius: var(--r-sm);
+}
+/* Hovering or focusing a step highlights that stretch on the map. A state
+   change rather than motion, so reduced-motion does not suppress it. */
+.step:hover,
+.step:focus-visible {
+  background: var(--brand-tint);
+}
+.step__text {
+  margin: 0;
+  font-size: var(--t-small);
+}
+.step__meta {
+  margin: 2px 0 0;
+  font-size: var(--t-micro);
+  color: var(--ink-2);
+}
+/* The barrier sits inside the step a walker would meet it on. That placement
+   is the point of the feature: a barrier in a separate list is something you
+   read about, and a barrier in step seven is something you meet. */
+.step__barrier {
+  margin-top: 6px;
+  font-size: var(--t-micro);
+}

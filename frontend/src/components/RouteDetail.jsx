@@ -55,7 +55,7 @@ function Barriers({ blockers }) {
  * The blocked notice is placed **above** Along the way rather than at the end,
  * because it changes whether any of the rest matters.
  */
-export default function RouteDetail({ route, theme, children }) {
+export default function RouteDetail({ route, theme, stepList, children }) {
   if (!route) return null
 
   const style = styleFor(route.id)
@@ -120,6 +120,11 @@ export default function RouteDetail({ route, theme, children }) {
             ))}
           </ul>
         )}
+      </section>
+
+      <section className="detail__section">
+        <h4 className="detail__h">Directions</h4>
+        {stepList}
       </section>
 
       <section className="detail__section">
