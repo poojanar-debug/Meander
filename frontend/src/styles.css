@@ -6,39 +6,135 @@
  *      visitor's IP to a third party and this app promises it does not.
  *   2. Colour is never the only signal. Every route carries a dash pattern and
  *      a full text description as well as a hue.
+ *
+ * Every colour is declared once, here and in the [data-theme="dark"] block
+ * below. No hard-coded hex may appear anywhere else in this file — that is a
+ * checkable property, and `grep '#' styles.css` outside these two blocks is how
+ * it gets checked. Implements DESIGN-HANDOFF §2.
  */
 
 :root {
-  --page: #f7f4ee;
-  --raised: #fffdf8;
-  --recessed: #f2eee5;
-  --rule: #ddd6c6;
-  --rule-strong: #c3bdae;
-  --ink: #14213d;
-  --ink-muted: #5f6b80;
-  --selected-border: #8fa0bd;
+  /* -- surface and ink (§2.1) -------------------------------------------- */
+  --paper: #f6f3ec;
+  --raised: #fffefa;
+  --sunken: #ede9df;
+  --rule: #dcd5c6;
+  --rule-strong: #c4bca8;
+  --ink: #16241c;
+  --ink-2: #55645a;
 
-  --warn-ground: #f3e6de;
-  --warn-border: #cf9f88;
+  /* -- brand and accent --------------------------------------------------- */
+  --brand: #1c4633;
+  --brand-hover: #122e21;
+  --brand-on: #f6f3ec;
+  --brand-tint: #e4ede5;
+  --accent: #2f7d53;
+  --ok-ink: #1c5e3c;
+
+  /* -- warning ------------------------------------------------------------ */
   --warn-ink: #8a2c14;
+  --warn-ground: #f7e9e1;
+  --warn-rule: #d3a184;
 
-  --score-nature: #2e8b57;
-  --score-air: #2f6fd0;
-  --score-shade: #b06a1f;
+  /* -- route identity (§2.3) ---------------------------------------------
+   * Graphics only — map lines, the 4px card edge, swatches, the legend. Never
+   * as text on paper: --route-fastest clears the 3:1 graphical-object
+   * threshold but not the 4.5:1 text threshold. Mirrored in lib/dash.js,
+   * which is what the map reads. */
+  --route-fastest: #c2703d;
+  --route-nature: #2f7d53;
+  --route-accessible: #5b6ecf;
+  --route-quiet: #8a5cb4;
+  --route-shade: #1e7a78;
+  --route-air: #b0455f;
 
-  --radius-control: 6px;
-  --radius-card: 8px;
-  --radius-chip: 999px;
+  /* -- map palette (§2.4) -------------------------------------------------- */
+  --map-land: #e9e5d8;
+  --map-park: #cfe0c9;
+  --map-water: #c6dae4;
+  --map-road: #fbfaf6;
 
+  /* -- elevation (§2.6) ---------------------------------------------------- */
+  --shadow-1: 0 1px 2px rgb(22 36 28 / 6%), 0 2px 8px rgb(22 36 28 / 6%);
+  --shadow-2: 0 2px 4px rgb(22 36 28 / 8%), 0 8px 24px rgb(22 36 28 / 10%);
+
+  color-scheme: light;
+}
+
+/* Dark (§2.2). No transition between the two: cross-fading two full palettes
+ * looks broken rather than smooth (§10). */
+[data-theme='dark'] {
+  --paper: #0c1611;
+  --raised: #132019;
+  --sunken: #080f0b;
+  --rule: #26362c;
+  --rule-strong: #3a4e42;
+  --ink: #e8efe8;
+  --ink-2: #9baea1;
+
+  --brand: #7fc79b;
+  --brand-hover: #9ad6b0;
+  --brand-on: #0a1710;
+  --brand-tint: #17281e;
+  --accent: #8fd3a9;
+  --ok-ink: #8fd3a9;
+
+  --warn-ink: #f5b49b;
+  --warn-ground: #2a1811;
+  --warn-rule: #6b3a24;
+
+  --route-fastest: #e8a46f;
+  --route-nature: #6fc38e;
+  --route-accessible: #95a4f0;
+  --route-quiet: #c2a0e8;
+  --route-shade: #63c4be;
+  --route-air: #ee8aa0;
+
+  --map-land: #16221b;
+  --map-park: #1d3527;
+  --map-water: #152a33;
+  --map-road: #24332b;
+
+  --shadow-1: 0 1px 2px rgb(0 0 0 / 40%);
+  --shadow-2: 0 8px 28px rgb(0 0 0 / 50%);
+
+  color-scheme: dark;
+}
+
+/* Type, space and shape carry no colour, so they are declared once and are the
+ * same under both themes. */
+:root {
   --font-display: 'Newsreader', 'Iowan Old Style', 'Palatino Linotype', Palatino, Georgia,
     'Times New Roman', serif;
   --font-body: 'IBM Plex Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto,
     'Helvetica Neue', system-ui, sans-serif;
 
+  --t-display: 2rem;
+  --t-h2: 1.375rem;
+  --t-h3: 1.0625rem;
+  --t-metric: 1.75rem;
+  --t-body: 0.9375rem;
+  --t-small: 0.8125rem;
+  --t-micro: 0.75rem;
+
+  /* 4px base. The handoff writes this as "--s1 … --s10" and then enumerates
+   * eight values; eight is what the rest of the document references. */
+  --s1: 4px;
+  --s2: 8px;
+  --s3: 12px;
+  --s4: 16px;
+  --s5: 20px;
+  --s6: 24px;
+  --s7: 32px;
+  --s8: 40px;
+
+  --r-sm: 8px;
+  --r-md: 12px;
+  --r-lg: 16px;
+  --r-pill: 999px;
+
   /* Every interactive target must be at least this in both dimensions. */
   --target: 44px;
-
-  color-scheme: light;
 }
 
 *,
@@ -55,7 +151,7 @@ body,
 
 body {
   margin: 0;
-  background: var(--page);
+  background: var(--paper);
   color: var(--ink);
   font-family: var(--font-body);
   font-size: 16px;
@@ -74,9 +170,9 @@ h3 {
 
 /* One global focus style. Never `outline: none` without a replacement. */
 *:focus-visible {
-  outline: 3px solid var(--ink);
+  outline: 3px solid var(--accent);
   outline-offset: 2px;
-  border-radius: 2px;
+  border-radius: 4px;
 }
 
 .visually-hidden {
@@ -94,20 +190,20 @@ h3 {
 
 .skip-link {
   position: absolute;
-  left: 8px;
+  inset-inline-start: var(--s2);
   top: -60px;
   z-index: 100;
   background: var(--raised);
   color: var(--ink);
-  border: 2px solid var(--ink);
-  border-radius: var(--radius-control);
-  padding: 12px 16px;
+  border: 2px solid var(--accent);
+  border-radius: var(--r-sm);
+  padding: var(--s3) var(--s4);
   font-weight: 600;
   text-decoration: none;
   transition: top 120ms ease;
 }
 .skip-link:focus {
-  top: 8px;
+  top: var(--s2);
 }
 
 .tabular {
@@ -122,67 +218,101 @@ h3 {
   min-height: 100%;
   max-width: 1400px;
   margin: 0 auto;
-  padding: 0 16px 32px;
+  padding: 0 var(--s4) var(--s7);
 }
 
 .app__main {
   display: grid;
   grid-template-columns: minmax(280px, 340px) 1fr;
-  gap: 20px;
+  gap: var(--s5);
   align-items: start;
 }
 
 .app__results {
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: var(--s4);
   min-width: 0;
 }
 
-/* ---------------------------------------------------------------- header */
+/* ---------------------------------------------------------------- topbar */
 
-.header {
+.topbar {
   display: flex;
   flex-wrap: wrap;
-  align-items: baseline;
+  align-items: center;
   justify-content: space-between;
-  gap: 8px 24px;
-  padding: 20px 0 16px;
+  gap: var(--s2) var(--s6);
+  padding: var(--s5) 0 var(--s4);
   border-bottom: 1px solid var(--rule);
-  margin-bottom: 20px;
+  margin-bottom: var(--s5);
 }
 
-.header__wordmark {
+.topbar__wordmark {
   font-family: var(--font-display);
   font-size: clamp(1.75rem, 4vw, 2.25rem);
   letter-spacing: -0.01em;
+  color: var(--brand);
 }
 
-.header__tagline {
-  color: var(--ink-muted);
-  font-size: 0.9375rem;
+.topbar__tagline {
+  color: var(--ink-2);
+  font-size: var(--t-body);
   margin: 2px 0 0;
   max-width: 46ch;
 }
 
-.header__privacy {
-  color: var(--ink-muted);
-  font-size: 0.8125rem;
+.topbar__privacy {
+  color: var(--ink-2);
+  font-size: var(--t-small);
   margin: 0;
   max-width: 34ch;
-  text-align: right;
+  text-align: end;
 }
 
-.header__mock {
+.topbar__actions {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+}
+
+.topbar__mock {
   display: inline-block;
   background: var(--warn-ground);
-  border: 1px solid var(--warn-border);
+  border: 1px solid var(--warn-rule);
   color: var(--warn-ink);
-  border-radius: var(--radius-chip);
-  padding: 2px 12px;
-  font-size: 0.8125rem;
+  border-radius: var(--r-pill);
+  padding: 2px var(--s3);
+  font-size: var(--t-small);
   font-weight: 600;
   margin-top: 6px;
+}
+
+/* Theme toggle. The label is the theme you will *get*, not the one you are in
+ * — "Dark" while the page is light. Naming the current state would make the
+ * button read as a status display rather than as a control. */
+.theme-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s2);
+  min-height: 36px;
+  padding: var(--s2) var(--s4);
+  border: 1px solid var(--rule-strong);
+  border-radius: var(--r-pill);
+  background: var(--raised);
+  color: var(--ink);
+  font: inherit;
+  font-size: var(--t-small);
+  font-weight: 600;
+  cursor: pointer;
+}
+.theme-toggle:hover {
+  border-color: var(--accent);
+  background: var(--sunken);
+}
+.theme-toggle__glyph {
+  font-size: 1rem;
+  line-height: 1;
 }
 
 /* -------------------------------------------------------------- controls */
@@ -190,13 +320,13 @@ h3 {
 .controls {
   background: var(--raised);
   border: 1px solid var(--rule);
-  border-radius: var(--radius-card);
+  border-radius: var(--r-md);
   padding: 18px;
   display: flex;
   flex-direction: column;
-  gap: 20px;
+  gap: var(--s5);
   position: sticky;
-  top: 16px;
+  top: var(--s4);
 }
 
 .field {
@@ -211,14 +341,14 @@ h3 {
 }
 
 .field__hint {
-  color: var(--ink-muted);
-  font-size: 0.8125rem;
+  color: var(--ink-2);
+  font-size: var(--t-small);
   margin: 0;
 }
 
 .field__error {
   color: var(--warn-ink);
-  font-size: 0.8125rem;
+  font-size: var(--t-small);
   margin: 0;
   font-weight: 600;
 }
@@ -230,8 +360,8 @@ select {
   color: var(--ink);
   background: var(--raised);
   border: 1px solid var(--rule-strong);
-  border-radius: var(--radius-control);
-  padding: 10px 12px;
+  border-radius: var(--r-sm);
+  padding: 10px var(--s3);
   min-height: var(--target);
   width: 100%;
 }
@@ -247,27 +377,28 @@ select {
   color: var(--ink);
   background: var(--raised);
   border: 1px solid var(--rule-strong);
-  border-radius: var(--radius-control);
+  border-radius: var(--r-sm);
   min-height: var(--target);
   min-width: var(--target);
-  padding: 10px 16px;
+  padding: 10px var(--s4);
   cursor: pointer;
 }
 .button:hover {
-  background: var(--recessed);
+  background: var(--sunken);
 }
 .button--primary {
-  background: var(--ink);
-  color: var(--raised);
-  border-color: var(--ink);
+  background: var(--brand);
+  color: var(--brand-on);
+  border-color: var(--brand);
 }
 .button--primary:hover {
-  background: #0d1729;
+  background: var(--brand-hover);
+  border-color: var(--brand-hover);
 }
 
 .place-row {
   display: flex;
-  gap: 8px;
+  gap: var(--s2);
   align-items: flex-start;
 }
 .place-row > :first-child {
@@ -279,30 +410,30 @@ select {
 
 .suggestions {
   list-style: none;
-  margin: 4px 0 0;
+  margin: var(--s1) 0 0;
   padding: 0;
   border: 1px solid var(--rule-strong);
-  border-radius: var(--radius-control);
+  border-radius: var(--r-sm);
   background: var(--raised);
   max-height: 260px;
   overflow-y: auto;
 }
 
 .suggestions__item {
-  padding: 12px;
+  padding: var(--s3);
   min-height: var(--target);
   display: flex;
   align-items: center;
   cursor: pointer;
-  font-size: 0.9375rem;
+  font-size: var(--t-body);
   border-bottom: 1px solid var(--rule);
 }
 .suggestions__item:last-child {
   border-bottom: 0;
 }
 .suggestions__item[aria-selected='true'] {
-  background: var(--recessed);
-  box-shadow: inset 3px 0 0 var(--ink);
+  background: var(--brand-tint);
+  box-shadow: inset 3px 0 0 var(--accent);
 }
 
 /* time dial */
@@ -316,11 +447,11 @@ select {
 .dial__unit {
   font-family: var(--font-body);
   font-size: 1rem;
-  color: var(--ink-muted);
-  margin-left: 6px;
+  color: var(--ink-2);
+  margin-inline-start: 6px;
 }
 .dial__mode {
-  color: var(--ink-muted);
+  color: var(--ink-2);
   font-size: 0.875rem;
 }
 
@@ -328,15 +459,15 @@ input[type='range'] {
   width: 100%;
   height: var(--target);
   margin: 0;
-  accent-color: var(--ink);
+  accent-color: var(--accent);
   cursor: pointer;
 }
 
 .dial__ticks {
   display: flex;
   justify-content: space-between;
-  color: var(--ink-muted);
-  font-size: 0.75rem;
+  color: var(--ink-2);
+  font-size: var(--t-micro);
   font-variant-numeric: tabular-nums;
 }
 
@@ -352,21 +483,21 @@ fieldset.chips legend {
   font-weight: 600;
   font-size: 0.875rem;
   padding: 0;
-  margin-bottom: 8px;
+  margin-bottom: var(--s2);
 }
 .chips__row {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
+  gap: var(--s2);
 }
 .chip {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--s2);
   min-height: var(--target);
-  padding: 8px 16px;
+  padding: var(--s2) var(--s4);
   border: 1px solid var(--rule-strong);
-  border-radius: var(--radius-chip);
+  border-radius: var(--r-pill);
   background: var(--raised);
   font: inherit;
   font-size: 0.875rem;
@@ -374,9 +505,9 @@ fieldset.chips legend {
   color: var(--ink);
 }
 .chip[aria-pressed='true'] {
-  background: var(--ink);
-  color: var(--raised);
-  border-color: var(--ink);
+  background: var(--brand-tint);
+  border-color: var(--accent);
+  box-shadow: inset 0 0 0 1px var(--accent);
   font-weight: 600;
 }
 .chip__swatch {
@@ -385,26 +516,23 @@ fieldset.chips legend {
   border-radius: 2px;
   flex: none;
 }
-.chip[aria-pressed='true'] .chip__swatch {
-  box-shadow: 0 0 0 1px var(--raised);
-}
 
 /* ---------------------------------------------------------------- banner */
 
 .banner {
   border: 1px solid var(--rule-strong);
-  border-left-width: 4px;
-  border-radius: var(--radius-control);
+  border-inline-start-width: 4px;
+  border-radius: var(--r-sm);
   background: var(--raised);
-  padding: 12px 16px;
+  padding: var(--s3) var(--s4);
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 8px 16px;
+  gap: var(--s2) var(--s4);
 }
 .banner--warn {
   background: var(--warn-ground);
-  border-color: var(--warn-border);
+  border-color: var(--warn-rule);
   color: var(--warn-ink);
 }
 .banner__text {
@@ -416,12 +544,12 @@ fieldset.chips legend {
   width: 100%;
   height: 6px;
   border-radius: 3px;
-  background: var(--recessed);
+  background: var(--sunken);
   overflow: hidden;
 }
 .banner__bar {
   height: 100%;
-  background: var(--ink);
+  background: var(--accent);
   transition: width 250ms ease;
 }
 
@@ -431,9 +559,9 @@ fieldset.chips legend {
   position: relative;
   height: clamp(320px, 52vh, 620px);
   border: 1px solid var(--rule);
-  border-radius: var(--radius-card);
+  border-radius: var(--r-md);
   overflow: hidden;
-  background: var(--recessed);
+  background: var(--sunken);
 }
 /* MapLibre adds .maplibregl-map to whatever element it is handed, and that
    class sets `position: relative` — which overrides the `position: absolute`
@@ -453,9 +581,9 @@ fieldset.chips legend {
   inset: 0;
   display: grid;
   place-items: center;
-  padding: 24px;
+  padding: var(--s6);
   text-align: center;
-  color: var(--ink-muted);
+  color: var(--ink-2);
 }
 
 /* MapLibre ships 29px controls. The project's floor is 44px, so they are
@@ -474,24 +602,24 @@ fieldset.chips legend {
   width: 28px;
   height: 28px;
   border-radius: 50%;
-  background: var(--ink);
-  color: var(--raised);
+  background: var(--brand);
+  color: var(--brand-on);
   font-weight: 700;
-  font-size: 0.8125rem;
+  font-size: var(--t-small);
   border: 2px solid var(--raised);
-  box-shadow: 0 1px 4px rgb(20 33 61 / 35%);
+  box-shadow: var(--shadow-1);
 }
 .marker--rest {
   width: 18px;
   height: 18px;
   background: var(--raised);
   color: var(--ink);
-  border-color: var(--ink);
+  border-color: var(--accent);
   font-size: 0.625rem;
 }
 .marker--blocker {
   background: var(--warn-ink);
-  color: #fff;
+  color: var(--raised);
 }
 
 /* ---------------------------------------------------------------- cards */
@@ -499,7 +627,7 @@ fieldset.chips legend {
 .route-list {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
-  gap: 12px;
+  gap: var(--s3);
   list-style: none;
   margin: 0;
   padding: 0;
@@ -507,20 +635,23 @@ fieldset.chips legend {
 
 .card {
   position: relative;
-  background: var(--recessed);
+  background: var(--raised);
   border: 1px solid var(--rule);
-  border-radius: var(--radius-card);
-  padding: 16px 16px 14px;
+  border-radius: var(--r-md);
+  padding: var(--s4) var(--s4) 14px;
   display: flex;
   flex-direction: column;
   gap: 10px;
   cursor: pointer;
   overflow: hidden;
 }
+.card:hover {
+  border-color: var(--rule-strong);
+  box-shadow: var(--shadow-1);
+}
 .card--selected {
-  background: var(--raised);
-  border-color: var(--selected-border);
-  box-shadow: 0 2px 10px rgb(20 33 61 / 10%);
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent), var(--shadow-1);
 }
 .card__bar {
   position: absolute;
@@ -539,16 +670,16 @@ fieldset.chips legend {
   align-items: baseline;
   justify-content: space-between;
   flex-wrap: wrap;
-  gap: 4px 12px;
+  gap: var(--s1) var(--s3);
   width: 100%;
   min-height: var(--target);
-  padding: 4px 0;
+  padding: var(--s1) 0;
   margin: 0;
   background: none;
   border: 0;
   font: inherit;
   color: inherit;
-  text-align: left;
+  text-align: start;
   cursor: pointer;
 }
 .card__label {
@@ -559,13 +690,13 @@ fieldset.chips legend {
 .card__select[aria-pressed='true'] .card__label::after {
   content: ' — showing on the map';
   font-family: var(--font-body);
-  font-size: 0.75rem;
+  font-size: var(--t-micro);
   font-weight: 400;
-  color: var(--ink-muted);
+  color: var(--ink-2);
 }
 .card__pattern {
-  font-size: 0.75rem;
-  color: var(--ink-muted);
+  font-size: var(--t-micro);
+  color: var(--ink-2);
   font-weight: 400;
 }
 .card__figures {
@@ -582,7 +713,7 @@ fieldset.chips legend {
   line-height: 1;
 }
 .card__distance {
-  color: var(--ink-muted);
+  color: var(--ink-2);
   font-variant-numeric: tabular-nums;
 }
 
@@ -596,8 +727,8 @@ fieldset.chips legend {
   display: grid;
   grid-template-columns: 4.5rem 1fr 2.75rem;
   align-items: center;
-  gap: 8px;
-  font-size: 0.8125rem;
+  gap: var(--s2);
+  font-size: var(--t-small);
 }
 .scores dt,
 .scores dd {
@@ -606,32 +737,33 @@ fieldset.chips legend {
 .scores__track {
   height: 6px;
   border-radius: 3px;
-  background: var(--rule);
+  background: var(--sunken);
   overflow: hidden;
 }
 .scores__fill {
   display: block;
   height: 100%;
   border-radius: 3px;
+  background: var(--accent);
 }
 .scores__value {
-  text-align: right;
+  text-align: end;
   font-variant-numeric: tabular-nums;
 }
 /* Spans the bar and the number: "not measured" is a sentence, not a value. */
 .scores__unmeasured {
   grid-column: 2 / -1;
-  color: var(--ink-muted);
+  color: var(--ink-2);
   font-style: italic;
 }
 
 .card__method {
-  font-size: 0.75rem;
-  color: var(--ink-muted);
+  font-size: var(--t-micro);
+  color: var(--ink-2);
   margin: 0;
 }
 .card__confidence {
-  font-size: 0.8125rem;
+  font-size: var(--t-small);
   margin: 0;
 }
 .card__confidence--caution {
@@ -642,38 +774,40 @@ fieldset.chips legend {
   font-weight: 600;
 }
 .card__narration {
-  font-size: 0.875rem;
+  font-family: var(--font-display);
+  font-size: var(--t-h3);
+  line-height: 1.55;
   margin: 0;
   color: var(--ink);
 }
 .card__narration--pending {
-  color: var(--ink-muted);
+  color: var(--ink-2);
   font-style: italic;
 }
 .card__rest {
-  font-size: 0.8125rem;
-  color: var(--ink-muted);
+  font-size: var(--t-small);
+  color: var(--ink-2);
   margin: 0;
 }
 .card__synthetic {
-  font-size: 0.75rem;
+  font-size: var(--t-micro);
   font-weight: 600;
   color: var(--warn-ink);
   background: var(--warn-ground);
-  border: 1px solid var(--warn-border);
-  border-radius: var(--radius-control);
+  border: 1px solid var(--warn-rule);
+  border-radius: var(--r-sm);
   padding: 6px 10px;
   margin: 0;
 }
 
 .blockers {
   margin: 0;
-  padding: 10px 12px;
+  padding: 10px var(--s3);
   background: var(--warn-ground);
-  border: 1px solid var(--warn-border);
-  border-radius: var(--radius-control);
+  border: 1px solid var(--warn-rule);
+  border-radius: var(--r-sm);
   color: var(--warn-ink);
-  font-size: 0.8125rem;
+  font-size: var(--t-small);
 }
 .blockers__title {
   font-weight: 700;
@@ -681,14 +815,14 @@ fieldset.chips legend {
 }
 .blockers__list {
   margin: 0;
-  padding-left: 18px;
+  padding-inline-start: 18px;
 }
 .blockers__list li + li {
-  margin-top: 4px;
+  margin-top: var(--s1);
 }
 
 .card__status {
-  font-size: 0.8125rem;
+  font-size: var(--t-small);
   font-weight: 600;
   color: var(--warn-ink);
   margin: 0;
@@ -698,10 +832,10 @@ fieldset.chips legend {
 
 .footer {
   margin-top: 28px;
-  padding-top: 16px;
+  padding-top: var(--s4);
   border-top: 1px solid var(--rule);
-  color: var(--ink-muted);
-  font-size: 0.8125rem;
+  color: var(--ink-2);
+  font-size: var(--t-small);
   line-height: 2.2;
 }
 /* Links inside a sentence cannot be 44px tall without wrecking the prose, and
@@ -729,18 +863,18 @@ fieldset.chips legend {
   .route-list {
     grid-template-columns: 1fr;
   }
-  .header {
+  .topbar {
     flex-direction: column;
     align-items: flex-start;
   }
-  .header__privacy {
-    text-align: left;
+  .topbar__privacy {
+    text-align: start;
   }
 }
 
 @media (max-width: 420px) {
   .app {
-    padding: 0 12px 24px;
+    padding: 0 var(--s3) var(--s6);
   }
   .dial__ticks {
     font-size: 0.6875rem;
