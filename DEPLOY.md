@@ -109,16 +109,53 @@ aws secretsmanager put-secret-value --secret-id meander/api --region $REGION \
   --secret-string '{"MAPILLARY_TOKEN":"…","ANTHROPIC_API_KEY":"…"}'
 ```
 
-## Step 2 · There is no CORS step, and that is deliberate
+## Step 2 · CORS — one line, and it is not optional any more
+
+This section used to say there was no CORS step. That was true of the website
+and only of the website.
 
 The previous deployment's most error-prone moment was closing the CORS/CSP loop
 between two hosts, where the site stayed broken until *both* edits were made
 and the failure mode was a browser console message with an empty server log.
-
 One CloudFront distribution serves the app from S3 and `/api/*` from the load
-balancer, so the browser only ever talks to one origin. `MEANDER_ALLOWED_ORIGINS`
-is empty in the task definition because there is no cross-origin request to
-allow, and the CSP names exactly `'self'` plus the tile host.
+balancer, so **the browser** only ever talks to one origin, and the CSP names
+exactly `'self'` plus the tile host.
+
+**The iOS app is not the browser.** It serves its own assets from
+`capacitor://localhost` and calls `https://<distribution>/api/*`, which is
+cross-origin by any definition — so preflight applies and the allowlist has to
+name a scheme that is neither `http` nor `https`. `CorsOrigins` defaults to
+`capacitor://localhost`; override it only if you also change
+`server.iosScheme`, and if you do, the two must change together.
+
+> ⚠ **`MEANDER_ALLOWED_ORIGINS=''` never meant "allow nothing".**
+> `backend/config.py:322` reads `_env_flag("MEANDER_ALLOW_LOCAL_ORIGINS", not
+> origins)` — the default is *on whenever no origins are configured*. The task
+> definition shipped an empty string, so the deployed allowlist was
+> `('http://localhost:5173', 'http://127.0.0.1:5173')`: production allowlisted
+> the Vite dev server. Setting `CorsOrigins` turns that default off as a side
+> effect of the list becoming non-empty, which is the behaviour we want —
+> `backend/tests/test_client_ip_and_cors.py` pins both halves so it stays true.
+
+Two things already verified and worth not re-deriving: the `/api/*` cache
+behaviour uses AWS-managed `AllViewerExceptHostHeader`
+(`b689b0a8-53d0-40ab-baf2-68738e2966ac`), which forwards `Origin` to the ALB,
+and `CachingDisabled` (`4135ea2d-6df8-44a3-9df3-4b5a84be39ad`), so a response is
+never cached across origins.
+
+Prove the preflight survives CloudFront before building any app — this is the
+single most likely thing to be quietly wrong:
+
+```bash
+curl -s -i -X OPTIONS $SITE/api/routes \
+  -H 'Origin: capacitor://localhost' \
+  -H 'Access-Control-Request-Method: POST' \
+  -H 'Access-Control-Request-Headers: content-type' | head -20
+```
+
+You want a `200` with `access-control-allow-origin: capacitor://localhost` and
+`POST` in `access-control-allow-methods`. A `403` means CloudFront answered
+instead of the ALB.
 
 ## Step 3 · Verify
 
@@ -182,9 +219,24 @@ extended, because most of it was never about Render.
 | *Everyone* getting 429 at once | `MEANDER_TRUSTED_PROXY_HOPS` is wrong. Behind CloudFront **and** an ALB it is `2`: the header is `viewer, cloudfront` and the limiter counts from the right. At `1` every request in the world shares one bucket, and the limiter still *works*, which is what makes it hard to spot. |
 | Routes appear but the map is blank | CSP `connect-src`/`img-src` is missing `https://tiles.openfreemap.org`. |
 | The map is blank **and** the app says it is showing a saved copy | Correct. Map tiles are deliberately never cached — a tile cache is a record of where you have been — so an offline route has no map. Everything the routes say is in the list. |
-| A route card says "saved 3 hours ago" | Correct, and the point of Phase 6.5. The service worker served it because the server was unreachable. |
+| Nothing is served offline at all | Correct **for now**, and a regression this tree owns. The service worker and the saved-route store belonged to the launch frontend and did not survive the reconciliation merge — BLOCKED.md §5. They are coming back on native storage, because a service worker never registers under `capacitor://localhost` in the first place. |
 | Rest stops are `null` rather than `[]` | Overpass timed out. `null` means "we could not look" and `[]` means "we looked and found none" — the difference is deliberate and the UI renders them differently. |
 | `narration` is `null` | No `ANTHROPIC_API_KEY`. The card says "Description still being written…". |
 | The router has no public IP and you cannot curl it | Correct. Its security group's only ingress rule names the API's security group. It is unauthenticated and compute-unbounded; that is the boundary. |
 | The frontend 404s on a deep link | The CloudFront custom error responses rewrite 403/404 to `/index.html`. If they are missing, the SPA cannot handle refreshes. |
-| First offline load after a deploy shows the previous version | The new service worker activates on the next navigation. `sw.js` must not be edge-cached, which is why it has its own CachingDisabled behaviour. |
+
+### The iOS build, specifically
+
+Each of these fails **silently**, which is the failure mode this project's whole
+ethic is built against. None of them produces an error anywhere.
+
+| symptom | cause |
+|---|---|
+| The app calls the API and the browser console says nothing, but every request fails | CORS. `MEANDER_ALLOWED_ORIGINS` does not name `capacitor://localhost` — see Step 2, and note that an *empty* value does not mean "deny", it means "allow the Vite dev server". |
+| All three routes arrive together at the end instead of one at a time | The `CapacitorHttp` plugin is enabled. It patches global `fetch`, so `res.body` is gone, and `realFetchRoutes()` in `client.js` falls through to its plain-JSON branch — the app still works, and the streaming choreography the UI is built around never fires. **Leave it disabled.** Fix CORS on the server, which is where it belongs. |
+| The map is blank in the app but fine on the website | The app has no server in front of it, so `infra/30-web.yaml`'s response headers never reach it. It needs its own `<meta http-equiv="Content-Security-Policy">` naming `https://tiles.openfreemap.org` in **both** `connect-src` and `img-src`. |
+| A frame of cream before the dark theme paints | `script-src 'self'` with no hash killed the inline anti-flash block in `index.html`. That script exists on purpose; add its SHA-256 to `script-src` and a build check that the hash still matches, because it will drift the first time anyone edits it. |
+| A "save this route for offline" control that does nothing | Service workers do not register under `capacitor://localhost` — WKWebView only registers them on `http`/`https` secure origins, and `registerServiceWorker()` catches the failure and says nothing. Re-base the store on native storage or **remove the affordance**. A control that does nothing is the exact dishonesty this project refuses. |
+| The 200 m barrier warning is visible but silent | `navigator.vibrate` is not implemented in WKWebView. It does not throw; it does nothing. Use a native haptic and keep the `role="alert"` announcement and the visual. |
+| Geolocation never returns a fix | `server.iosScheme` was changed away from the default. `capacitor://localhost` keeps `localhost` as the hostname, which is what makes the WebView a secure context — and without a secure context there is no `navigator.geolocation` and follow mode cannot start. Changing the scheme also changes the `Origin`, so Step 2 has to change with it. |
+| Route coordinates appear in a published container layer | `data/cache.db` is baked into the API image and its `route_cache` table holds real coordinate arrays. Run `make scrub` before any image build, and install the pre-commit hook — `scripts/install-hooks.sh`, which is **not** automatic on clone. There is no way to un-publish a container layer. |

@@ -138,6 +138,178 @@ def test_local_origins_can_still_be_opted_into(monkeypatch: pytest.MonkeyPatch) 
 
 
 # ---------------------------------------------------------------------------
+# CORS for the native app
+#
+# DEPLOY.md used to say "there is no CORS step, and that is deliberate". That
+# was true of the web deployment and only of it: one CloudFront distribution
+# serves the site and proxies /api/*, so the browser never makes a cross-origin
+# request. The iOS app serves its own assets from `capacitor://localhost` and
+# calls https://<distribution>/api/*, which is cross-origin by any definition.
+# Preflight and CORS apply, and the allowlist has to name a scheme that is not
+# http or https.
+# ---------------------------------------------------------------------------
+
+APP_ORIGIN = "capacitor://localhost"
+
+
+def test_a_custom_scheme_survives_the_allowlist_intact(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`capacitor://localhost` must come back exactly as it went in.
+
+    An Origin is compared as an opaque string, so anything that normalises or
+    re-serialises it — adding a trailing slash, lowercasing a host that was
+    already lowercase, running it through urlsplit and back — produces a value
+    that never matches and a failure that looks like the allowlist being
+    ignored.
+    """
+    monkeypatch.setenv("MEANDER_ALLOWED_ORIGINS", APP_ORIGIN)
+    monkeypatch.delenv("MEANDER_ALLOW_LOCAL_ORIGINS", raising=False)
+
+    assert config._resolve_origins() == (APP_ORIGIN,)
+
+
+def test_the_app_and_the_site_can_both_be_allowed(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The deployment serves a website and an app against one API."""
+    monkeypatch.setenv("MEANDER_ALLOWED_ORIGINS", f"{APP_ORIGIN},https://meander.example")
+    monkeypatch.delenv("MEANDER_ALLOW_LOCAL_ORIGINS", raising=False)
+
+    assert config._resolve_origins() == (APP_ORIGIN, "https://meander.example")
+
+
+def test_configuring_the_app_origin_stops_allowlisting_the_vite_dev_server(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The live defect this phase exists to close, pinned so it cannot return.
+
+    `_resolve_origins` defaults MEANDER_ALLOW_LOCAL_ORIGINS to `not origins`.
+    infra/20-services.yaml shipped MEANDER_ALLOWED_ORIGINS as the empty string,
+    so the deployed task's allowlist was never empty — it was exactly
+    ('http://localhost:5173', '127.0.0.1:5173'). Production allowlisted the Vite
+    dev server, and nothing said so.
+
+    Setting CorsOrigins flips that default off. It does so as a *side effect* of
+    the list becoming non-empty, which is the behaviour we want and precisely
+    the kind of thing that gets refactored away by someone tidying the
+    conditional. Hence a test that names it.
+    """
+    monkeypatch.setenv("MEANDER_ALLOWED_ORIGINS", APP_ORIGIN)
+    monkeypatch.delenv("MEANDER_ALLOW_LOCAL_ORIGINS", raising=False)
+
+    origins = config._resolve_origins()
+
+    assert "http://localhost:5173" not in origins
+    assert "http://127.0.0.1:5173" not in origins
+
+
+def test_an_empty_origin_list_still_means_local_development(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The other half of the same defect: '' is not 'deny everything'.
+
+    Documented rather than changed. A deployment that leaves CorsOrigins empty
+    gets the dev-server allowlist, which is wrong for production and right for a
+    developer running `make run` — and the fix is to configure it, which
+    infra/20-services.yaml now does.
+    """
+    monkeypatch.setenv("MEANDER_ALLOWED_ORIGINS", "")
+    monkeypatch.delenv("MEANDER_ALLOW_LOCAL_ORIGINS", raising=False)
+
+    assert config._resolve_origins() == (
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+    )
+
+
+def test_the_resolved_allowlist_is_what_the_middleware_was_given() -> None:
+    """The link between config and the app, which nothing else covers.
+
+    `_resolve_origins` is tested above and the middleware's behaviour below, but
+    both would still pass if main.py were changed to pass a hard-coded list. The
+    middleware is constructed once at import from `settings.allowed_origins`, so
+    this is the only place that join can be checked.
+    """
+    from starlette.middleware.cors import CORSMiddleware
+
+    from backend import main as main_mod
+
+    cors = [m for m in main_mod.app.user_middleware if m.cls is CORSMiddleware]
+    assert len(cors) == 1, "expected exactly one CORS middleware"
+    assert cors[0].kwargs["allow_origins"] == list(main_mod.settings.allowed_origins)
+
+
+def test_a_custom_scheme_origin_is_allowed_by_the_middleware_itself() -> None:
+    """An end-to-end check that Starlette's CORS implementation accepts
+    `capacitor://`, rather than an assumption that it treats an Origin as an
+    opaque string.
+
+    Built as a separate app because backend.main's middleware is constructed at
+    import time from the environment, and reloading that module mid-suite would
+    hand every other test a different `limiter` and `metrics` than conftest
+    resets.
+    """
+    from starlette.applications import Starlette
+    from starlette.middleware.cors import CORSMiddleware
+    from starlette.responses import PlainTextResponse
+    from starlette.routing import Route
+    from starlette.testclient import TestClient
+
+    from backend import main as main_mod
+
+    probe = Starlette(routes=[Route("/x", lambda _r: PlainTextResponse("ok"))])
+    configured = next(m for m in main_mod.app.user_middleware if m.cls is CORSMiddleware)
+    kwargs = dict(configured.kwargs)
+    kwargs["allow_origins"] = [APP_ORIGIN]
+    probe.add_middleware(CORSMiddleware, **kwargs)
+
+    with TestClient(probe) as client:
+        allowed = client.get("/x", headers={"Origin": APP_ORIGIN})
+        refused = client.get("/x", headers={"Origin": "https://not-meander.example"})
+
+        preflight = client.options(
+            "/x",
+            headers={
+                "Origin": APP_ORIGIN,
+                "Access-Control-Request-Method": "POST",
+                "Access-Control-Request-Headers": "content-type",
+            },
+        )
+
+    assert allowed.headers.get("access-control-allow-origin") == APP_ORIGIN
+    assert refused.headers.get("access-control-allow-origin") is None
+    assert preflight.status_code == 200
+    assert preflight.headers.get("access-control-allow-origin") == APP_ORIGIN
+    assert "POST" in preflight.headers.get("access-control-allow-methods", "")
+
+
+def test_a_foreign_origin_does_not(api_client) -> None:
+    """The allowlist has to actually exclude something, or it is decoration."""
+    resp = api_client.get("/api/healthz", headers={"Origin": "https://not-meander.example"})
+
+    assert resp.headers.get("access-control-allow-origin") is None
+
+
+def test_the_preflight_answers_the_route_request(api_client) -> None:
+    """`POST /api/routes` with Content-Type: application/json is not a simple
+    request, so the browser sends OPTIONS first and never sends the POST if it
+    does not like the answer. Both headers the client sets must be named."""
+    resp = api_client.options(
+        "/api/routes",
+        headers={
+            "Origin": "http://localhost:5173",
+            "Access-Control-Request-Method": "POST",
+            "Access-Control-Request-Headers": "content-type",
+        },
+    )
+
+    assert resp.status_code == 200
+    assert "POST" in resp.headers.get("access-control-allow-methods", "")
+    allowed = resp.headers.get("access-control-allow-headers", "").lower()
+    assert "content-type" in allowed
+    assert "accept" in allowed
+
+
+# ---------------------------------------------------------------------------
 # a fractional refill rate
 # ---------------------------------------------------------------------------
 

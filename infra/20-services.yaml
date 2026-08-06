@@ -31,6 +31,23 @@ Parameters:
     Type: String
     Default: ''
     Description: Where alarms go. Empty means the alarms exist and notify nobody.
+  CorsOrigins:
+    Type: String
+    Default: 'capacitor://localhost'
+    Description: >
+      Comma-separated Origin allowlist for the API, verbatim and with no
+      trailing slashes. Defaults to the iOS app's origin.
+
+      Leaving this EMPTY does not deny everything — backend/config.py defaults
+      MEANDER_ALLOW_LOCAL_ORIGINS to "no origins were configured", so an empty
+      value allowlists http://localhost:5173 and http://127.0.0.1:5173. That is
+      right for a workstation and wrong for a deployed task, which is why this
+      parameter has a default rather than being optional.
+
+      The website needs no entry here: CloudFront serves the SPA and proxies
+      /api/* from one distribution, so the web app is same-origin. The app is
+      not — it serves its own assets from capacitor://localhost and calls the
+      distribution over HTTPS, which is cross-origin by any definition.
   RouterCpu: { Type: String, Default: '1024' }
   RouterMemory: { Type: String, Default: '4096' }
   ApiCpu: { Type: String, Default: '512' }
@@ -254,9 +271,20 @@ Resources:
             - { Name: MEANDER_FIXTURES, Value: live }
             - { Name: MEANDER_STRICT_STARTUP, Value: '1' }
             - { Name: MEANDER_LOG_LEVEL, Value: INFO }
-            # Same-origin: CloudFront serves the SPA and /api/* from one
-            # distribution, so there is no cross-origin request to allow.
-            - { Name: MEANDER_ALLOWED_ORIGINS, Value: '' }
+            # The website is same-origin — CloudFront serves the SPA and /api/*
+            # from one distribution — and this used to be '' for that reason.
+            #
+            # ⚠ '' was never an empty allowlist. config.py:322 reads
+            # _env_flag("MEANDER_ALLOW_LOCAL_ORIGINS", not origins), so with
+            # nothing configured the default is *on* and the deployed task
+            # allowlisted the Vite dev server: a page on a developer's laptop
+            # could call production, and nothing anywhere said so.
+            #
+            # Setting this closes that as a side effect of the list becoming
+            # non-empty. test_client_ip_and_cors.py pins both halves, because a
+            # side effect is exactly what gets refactored away by someone
+            # tidying the conditional.
+            - { Name: MEANDER_ALLOWED_ORIGINS, Value: !Ref CorsOrigins }
             # Overpass's tail is 13.6 s (PROGRESS.md, launch phase 0). The old
             # 12 s default silently timed rest stops into null some fraction of
             # the time — honest, because null means "we could not look", but
