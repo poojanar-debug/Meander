@@ -879,14 +879,74 @@ fieldset.chips legend {
   color: var(--ink-2);
 }
 
-/* MapLibre ships 29px controls. The project's floor is 44px, so they are
-   enlarged rather than left as the one place the rule does not hold. */
-.map .maplibregl-ctrl-group button {
+/* MapLibre's own NavigationControl ships 29px buttons and no useful labels, so
+   the controls are ours. Being ours also puts them last in the DOM inside the
+   stage — and the stage comes after the panel — so a keyboard user reaching the
+   routes never traverses zoom buttons first (§9). */
+.map__controls {
+  position: absolute;
+  top: var(--s3);
+  inset-inline-end: var(--s3);
+  z-index: 5;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.map__ctrl {
+  display: grid;
+  place-items: center;
   width: var(--target);
   height: var(--target);
+  padding: 0;
+  border: 1px solid var(--rule-strong);
+  border-radius: var(--r-sm);
+  background: var(--raised);
+  color: var(--ink);
+  font: inherit;
+  font-size: 1.125rem;
+  font-weight: 600;
+  cursor: pointer;
+  box-shadow: var(--shadow-1);
 }
-.map .maplibregl-ctrl-group button .maplibregl-ctrl-icon {
-  transform: scale(1.15);
+.map__ctrl:hover {
+  background: var(--sunken);
+  border-color: var(--accent);
+}
+
+/* Legend, bottom-left. Hidden below 900px — there the rail is the legend. */
+.legend {
+  position: absolute;
+  inset-block-end: var(--s3);
+  inset-inline-start: var(--s3);
+  z-index: 5;
+  padding: var(--s2) var(--s3);
+  background: var(--raised);
+  border: 1px solid var(--rule);
+  border-radius: var(--r-md);
+  box-shadow: var(--shadow-1);
+  font-size: var(--t-small);
+}
+.legend__row {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  margin: 0;
+}
+.legend__row + .legend__row {
+  margin-top: var(--s1);
+}
+.legend__row.is-selected {
+  font-weight: 700;
+}
+.legend__line {
+  display: inline-block;
+  width: 28px;
+  height: 3px;
+  border-radius: 2px;
+  flex: none;
+}
+.legend__pattern {
+  color: var(--ink-2);
 }
 
 .marker {
@@ -902,17 +962,16 @@ fieldset.chips legend {
   border: 2px solid var(--raised);
   box-shadow: var(--shadow-1);
 }
-.marker--rest {
-  width: 18px;
-  height: 18px;
-  background: var(--raised);
-  color: var(--ink);
-  border-color: var(--accent);
-  font-size: 0.625rem;
-}
+/* 14px circle, 3px --raised ring, a ✕ glyph. Barriers are the one thing on
+   this map a user must not miss, so they keep the strongest treatment and stay
+   DOM markers with a real aria-label rather than becoming a paint layer. */
 .marker--blocker {
+  width: 20px;
+  height: 20px;
   background: var(--warn-ink);
   color: var(--raised);
+  border: 3px solid var(--raised);
+  font-size: 0.6875rem;
 }
 
 /* ------------------------------------------------------------------ rail */
@@ -1379,9 +1438,17 @@ fieldset.chips legend {
   .route-list {
     grid-template-columns: 1fr;
   }
-  /* The rail is the legend at this width. */
+  /* The rail is the legend at this width, and the map is only 36vh — a card
+     sitting in the corner of it would cover a third of the route. */
+  .legend {
+    display: none;
+  }
   .topbar__tagline {
     display: none;
+  }
+  .map__controls {
+    top: var(--s2);
+    inset-inline-end: var(--s2);
   }
   .ribbon {
     font-size: var(--t-micro);
