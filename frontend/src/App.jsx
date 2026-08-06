@@ -3,6 +3,8 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, u
 import { buildRouteRequest, fetchRoutes } from './api/client.js'
 import FirstRun from './components/FirstRun.jsx'
 import About from './components/About.jsx'
+import DaylightGuard from './components/DaylightGuard.jsx'
+import DepartureStrip from './components/DepartureStrip.jsx'
 import MapView from './components/MapView.jsx'
 import RouteDetail from './components/RouteDetail.jsx'
 import RouteRail from './components/RouteRail.jsx'
@@ -26,6 +28,7 @@ const DEBOUNCE = {
   objectives: 120,
   place: 0,
   retry: 0,
+  departure: 200,
 }
 
 const initialState = {
@@ -41,6 +44,9 @@ const initialState = {
   cache: null,
   reason: null,
   bestDeparture: null,
+  // When the user has picked a departure hour. Null means "now", which is
+  // what the backend assumes when depart_at is absent.
+  departAt: null,
   error: null,
   geoDenied: false,
   // A display preference, not an input to the route request. It deliberately
@@ -92,6 +98,9 @@ function reducer(state, action) {
 
     case 'retry':
       return withRefetch(state, {}, DEBOUNCE.retry)
+
+    case 'departAt':
+      return withRefetch(state, { departAt: action.value }, DEBOUNCE.departure)
 
     case 'locating':
       return { ...state, phase: 'locating', geoDenied: false }
@@ -200,6 +209,7 @@ export default function App() {
             minutes: state.minutes,
             mode: state.mode,
             objectives: state.objectives,
+            departAt: state.departAt,
           }),
           {
             signal: controller.signal,
@@ -381,6 +391,14 @@ export default function App() {
             onLocate={onLocate}
           />
 
+          <DepartureStrip
+            bestDeparture={state.bestDeparture}
+            reason={state.reason}
+            origin={state.origin}
+            departAt={state.departAt}
+            onDepartAt={(value) => dispatch({ type: 'departAt', value })}
+          />
+
           <div id="results">
             <StatusBanner
               phase={state.phase}
@@ -393,7 +411,9 @@ export default function App() {
               }
             />
 
-            {state.reason && <p className="field__hint">{state.reason}</p>}
+            {state.reason && !state.bestDeparture && (
+              <p className="field__hint">{state.reason}</p>
+            )}
 
             <RouteRail
               routes={state.routes}
@@ -404,7 +424,15 @@ export default function App() {
               onSelect={onSelect}
             />
 
-            <RouteDetail route={selectedRoute} theme={state.theme} />
+            <RouteDetail route={selectedRoute} theme={state.theme}>
+              <DaylightGuard
+                route={selectedRoute}
+                origin={state.origin}
+                departAt={state.departAt}
+                onMinutes={(value) => dispatch({ type: 'minutes', value })}
+                onDepartAt={(value) => dispatch({ type: 'departAt', value })}
+              />
+            </RouteDetail>
           </div>
 
           <div className="panel__spacer" aria-hidden="true" />
