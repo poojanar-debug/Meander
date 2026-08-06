@@ -11,6 +11,7 @@ import {
   restStopSentence,
 } from '../lib/format.js'
 import ElevationProfile from './ElevationProfile.jsx'
+import ReportBarrier from './ReportBarrier.jsx'
 import TakeItWithYou from './TakeItWithYou.jsx'
 import TrustSignal from './TrustSignal.jsx'
 
@@ -194,6 +195,8 @@ export default function RouteCard({ route, selected, onSelect, origin, dest }) {
             )}
           </div>
         )}
+
+        <ReportBarrier route={route} />
 
         <TakeItWithYou route={route} origin={origin} dest={dest} />
       </div>

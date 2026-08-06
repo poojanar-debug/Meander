@@ -159,3 +159,23 @@ export async function geocode(q, options = {}) {
   }
   return realGeocode(q, options)
 }
+
+/**
+ * File an obstruction as an OpenStreetMap note.
+ *
+ * ⚠ This is a **write to a public database**, and the only one this app makes.
+ * It targets api06.dev.openstreetmap.org — the OSM *development* server, whose
+ * data is disposable — and the backend asserts that host at call time rather
+ * than only configuring it, because a copy-paste that repointed it at
+ * production would put junk into the map everyone else relies on.
+ */
+export async function reportBarrier(report, { signal } = {}) {
+  const res = await fetch(url('/api/report-barrier'), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(report),
+    signal,
+  })
+  if (!res.ok) throw await toApiError(res)
+  return res.json()
+}

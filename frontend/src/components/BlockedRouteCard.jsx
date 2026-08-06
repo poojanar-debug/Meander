@@ -1,5 +1,6 @@
 import { routeColor } from '../lib/dash.js'
 import ElevationProfile from './ElevationProfile.jsx'
+import ReportBarrier from './ReportBarrier.jsx'
 import { Blockers } from './RouteCard.jsx'
 
 /**
@@ -74,6 +75,8 @@ export default function BlockedRouteCard({ route, selected, onSelect }) {
       {route.elevation?.steep_spans?.length > 0 && (
         <ElevationProfile profile={route.elevation} />
       )}
+
+      <ReportBarrier route={route} />
 
       {hasShape && (
         <p className="card__blocked-hint">

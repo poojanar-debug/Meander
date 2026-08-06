@@ -240,3 +240,62 @@ export const SCORE_META = {
       'It does not know where individual trees or buildings are.',
   },
 }
+
+/**
+ * The coordinate a given distance along a polyline.
+ *
+ * Used by barrier reporting, where "about 400 m along this route" is how people
+ * actually describe where something is — and, unlike a map tap, it is precision
+ * genuinely derived from the route rather than from a fingertip on a small
+ * screen.
+ */
+export function pointAtDistance(geometry, targetM) {
+  if (!geometry?.length) return null
+  if (geometry.length === 1) return { lon: geometry[0][0], lat: geometry[0][1] }
+
+  const R = 6371008.8
+  const rad = (d) => (d * Math.PI) / 180
+  const between = (a, b) => {
+    const [lon1, lat1] = a
+    const [lon2, lat2] = b
+    const dLat = rad(lat2 - lat1)
+    const dLon = rad(lon2 - lon1)
+    const h =
+      Math.sin(dLat / 2) ** 2 +
+      Math.cos(rad(lat1)) * Math.cos(rad(lat2)) * Math.sin(dLon / 2) ** 2
+    return 2 * R * Math.asin(Math.sqrt(Math.min(1, h)))
+  }
+
+  let travelled = 0
+  for (let i = 1; i < geometry.length; i += 1) {
+    const seg = between(geometry[i - 1], geometry[i])
+    if (travelled + seg >= targetM || i === geometry.length - 1) {
+      const t = seg > 0 ? Math.min(1, Math.max(0, (targetM - travelled) / seg)) : 0
+      const [lon1, lat1] = geometry[i - 1]
+      const [lon2, lat2] = geometry[i]
+      return { lon: lon1 + (lon2 - lon1) * t, lat: lat1 + (lat2 - lat1) * t }
+    }
+    travelled += seg
+  }
+  const last = geometry[geometry.length - 1]
+  return { lon: last[0], lat: last[1] }
+}
+
+/** Total length of a polyline, in metres. */
+export function polylineLength(geometry) {
+  if (!geometry || geometry.length < 2) return 0
+  const R = 6371008.8
+  const rad = (d) => (d * Math.PI) / 180
+  let total = 0
+  for (let i = 1; i < geometry.length; i += 1) {
+    const [lon1, lat1] = geometry[i - 1]
+    const [lon2, lat2] = geometry[i]
+    const dLat = rad(lat2 - lat1)
+    const dLon = rad(lon2 - lon1)
+    const h =
+      Math.sin(dLat / 2) ** 2 +
+      Math.cos(rad(lat1)) * Math.cos(rad(lat2)) * Math.sin(dLon / 2) ** 2
+    total += 2 * R * Math.asin(Math.sqrt(Math.min(1, h)))
+  }
+  return total
+}
