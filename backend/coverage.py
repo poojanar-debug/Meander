@@ -132,3 +132,34 @@ def message(extent: Coverage) -> str:
         f"world's map loaded — {extent.describe()} — and your starting point is "
         "outside it. Nothing you did caused this, and moving a little will not help."
     )
+
+
+def unroutable_point_message(extent: Coverage) -> str:
+    """For a point *inside* the bounding box that the router still cannot snap.
+
+    The bbox is a union, and this is where that matters. The `demo` region set
+    is three separate extracts whose union spans Sri Lanka to Britain, so Paris,
+    Berlin and most of Europe sit inside the rectangle and inside none of the
+    boxes. They reach the router, GraphHopper says "Cannot find point", and the
+    old translation told the user to move their start a little — the precise
+    sentence coverage.py was written to stop, arriving by the one path the
+    pre-flight check cannot see.
+
+    ⚠ **This deliberately does not claim which cause it is.** Two things produce
+    "Cannot find point" on a finite graph — an area that was never imported, and
+    a genuinely unroutable spot inside one that was, like the middle of the
+    Serpentine — and the API cannot tell them apart, because /info reports only
+    the union. Asserting either would be a guess presented as a fact, which is
+    the habit this project exists not to have. So it names both and lets the
+    reader decide which applies to where they are standing.
+
+    Establishing the truth properly needs per-region boxes, which GraphHopper
+    does not expose; `scripts/graphhopper.sh regions` has them, on the router's
+    disk, in a different container from the API. BLOCKED.md records it.
+    """
+    return (
+        "No routable path was found near that point. This server has only part of "
+        f"the world's map loaded — {extent.describe()}, and not all of it even "
+        "inside that — so either this area is not included yet, or there is no "
+        "path close enough to that exact spot. Nothing you did caused this."
+    )

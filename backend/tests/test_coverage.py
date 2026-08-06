@@ -22,6 +22,11 @@ from backend.routing import OutsideCoverage
 DEMO_BBOX = [-8.584844, 5.919332, 81.877776, 62.007902]
 
 
+async def _no_extent(*a, **k):
+    """A router that makes no coverage claim — the hosted API."""
+    return None
+
+
 @pytest.fixture(autouse=True)
 def _fresh():
     coverage.reset_cache()
@@ -179,3 +184,139 @@ async def test_a_destination_outside_the_graph_is_caught_too(
     with pytest.raises(OutsideCoverage):
         async for _ in main_mod.route_events(req):
             pass
+
+
+# ---------------------------------------------------------------------------
+# Inside the bounding box, inside none of the extracts
+#
+# The pre-flight check above compares against the graph's overall bbox, and that
+# bbox is a *union*. The `demo` region set is three separate extracts spanning
+# Sri Lanka to Britain, so Paris and Berlin sit inside the rectangle and inside
+# none of the boxes: they pass the check, reach the router, and come back
+# "Cannot find point".
+#
+# Found by running it. coverage.py's own docstring names Paris as the case it
+# exists to prevent, and Paris was reaching the old message by the one path the
+# pre-flight check cannot see.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_paris_is_inside_the_bbox_and_so_passes_the_preflight(graph_says) -> None:
+    """The premise of everything below. If this ever fails, the rest is moot."""
+    graph_says(DEMO_BBOX)
+    assert await coverage.outside_coverage(48.8566, 2.3522) is None
+
+
+@pytest.mark.asyncio
+async def test_an_unsnappable_point_on_a_finite_graph_does_not_say_move_a_little(
+    graph_says, tmp_cache_db, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    graph_says(DEMO_BBOX)
+
+    from backend import routing
+
+    async def cannot_find_point(*a, **k):
+        raise routing.NoRouteFound(
+            "No routable road or path was found near that point. "
+            "Try moving the start a little.",
+            point_not_snappable=True,
+        )
+
+    monkeypatch.setattr(routing, "_post_route", cannot_find_point)
+
+    req = RouteRequest(origin=Point(lat=48.8566, lon=2.3522), minutes=30)  # Paris
+    with pytest.raises(OutsideCoverage) as caught:
+        async for _ in main_mod.route_events(req):
+            pass
+
+    said = caught.value.human_message
+    assert "moving the start a little" not in said
+    assert "only part of the world's map loaded" in said
+    assert "Nothing you did caused this" in said
+
+
+@pytest.mark.asyncio
+async def test_it_does_not_claim_to_know_which_of_the_two_causes_it_is(
+    graph_says, tmp_cache_db, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Two things produce "Cannot find point" on a finite graph — an area never
+    imported, and an unroutable spot inside one that was — and /info reports
+    only the union, so the API cannot tell them apart. Naming one would be a
+    guess presented as a measurement."""
+    graph_says(DEMO_BBOX)
+
+    from backend import routing
+
+    async def cannot_find_point(*a, **k):
+        raise routing.NoRouteFound("nope", point_not_snappable=True)
+
+    monkeypatch.setattr(routing, "_post_route", cannot_find_point)
+
+    req = RouteRequest(origin=Point(lat=48.8566, lon=2.3522), minutes=30)
+    with pytest.raises(OutsideCoverage) as caught:
+        async for _ in main_mod.route_events(req):
+            pass
+
+    said = caught.value.human_message
+    assert "either" in said and " or " in said
+    # The certain wording belongs to the pre-flight path, where the answer
+    # really is certain. Borrowing it here would overstate what is known.
+    assert "does not cover that area yet" not in said
+
+
+@pytest.mark.asyncio
+async def test_the_hosted_api_still_says_move_a_little(
+    tmp_cache_db, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The upgrade is wrong against a router that has the whole planet.
+
+    There, "Cannot find point" really does mean a lake or a car park, and moving
+    the start a little really is the fix.
+    """
+    monkeypatch.setattr(coverage, "routable_extent", _no_extent)
+
+    from backend import routing
+
+    async def cannot_find_point(*a, **k):
+        raise routing.NoRouteFound(
+            "No routable road or path was found near that point. "
+            "Try moving the start a little.",
+            point_not_snappable=True,
+        )
+
+    monkeypatch.setattr(routing, "_post_route", cannot_find_point)
+
+    req = RouteRequest(origin=Point(lat=48.8566, lon=2.3522), minutes=30)
+    with pytest.raises(routing.NoRouteFound) as caught:
+        async for _ in main_mod.route_events(req):
+            pass
+
+    assert not isinstance(caught.value, OutsideCoverage)
+    assert "moving the start a little" in caught.value.human_message
+
+
+@pytest.mark.asyncio
+async def test_an_ordinary_no_route_is_left_alone(
+    graph_says, tmp_cache_db, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Only "Cannot find point" is reinterpreted. "No connection between those
+    two points" is about the pair, not about coverage, and stays as it is."""
+    graph_says(DEMO_BBOX)
+
+    from backend import routing
+
+    async def no_connection(*a, **k):
+        raise routing.NoRouteFound(
+            "There is no route between those two points for this mode of travel."
+        )
+
+    monkeypatch.setattr(routing, "_post_route", no_connection)
+
+    req = RouteRequest(origin=Point(lat=51.5074, lon=-0.1622), minutes=30)
+    with pytest.raises(routing.NoRouteFound) as caught:
+        async for _ in main_mod.route_events(req):
+            pass
+
+    assert not isinstance(caught.value, OutsideCoverage)
+    assert "no route between those two points" in caught.value.human_message

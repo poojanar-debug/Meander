@@ -41,7 +41,7 @@ from .config import (
     settings,
 )
 from .coverage import message as coverage_message
-from .coverage import outside_coverage
+from .coverage import outside_coverage, routable_extent, unroutable_point_message
 from .elevation import build_profile
 from .enrich import (
     AirQuality,
@@ -706,6 +706,30 @@ async def route_events(req: RouteRequest) -> AsyncIterator[dict[str, Any]]:
             log.info("outside_coverage")
             raise OutsideCoverage(coverage_message(extent))
 
+    async def _best_failure(failures: list[RoutingError]) -> RoutingError:
+        """The failure to surface, with the coverage caveat when it applies.
+
+        The pre-flight check above catches a point outside the graph's *bounding
+        box*. That box is a union: the `demo` region set is three separate
+        extracts spanning Sri Lanka to Britain, so Paris and Berlin sit inside
+        the rectangle and inside none of the boxes. They pass the check, reach
+        the router, and come back "Cannot find point" — which used to be
+        rendered as "try moving the start a little", the exact sentence
+        coverage.py exists to prevent, arriving by the one path it cannot see.
+
+        Upgraded only when the router actually has a finite extent. Against the
+        hosted API, which has the planet, "Cannot find point" really does mean a
+        lake and the original advice is right.
+        """
+        failure = failures[0] if failures else NoRouteFound("No route could be found from there.")
+        if not getattr(failure, "point_not_snappable", False):
+            return failure
+        extent = await routable_extent()
+        if extent is None:
+            return failure
+        log.info("unroutable_point_on_a_finite_graph")
+        return OutsideCoverage(unroutable_point_message(extent))
+
     routes: list[Route] = []
     routed: list[tuple[str, str, RawRoute]] = []
     fastest_route: RawRoute | None = None
@@ -799,7 +823,7 @@ async def route_events(req: RouteRequest) -> AsyncIterator[dict[str, Any]]:
     routed.sort(key=lambda item: ordered.index(item[0]))
 
     if not routed and not any(r.status == "ok" for r in routes):
-        raise failures[0] if failures else NoRouteFound("No route could be found from there.")
+        raise await _best_failure(failures)
 
     # --- first pass: emit every route the moment it exists -------------------
     #
@@ -858,7 +882,7 @@ async def route_events(req: RouteRequest) -> AsyncIterator[dict[str, Any]]:
         yield {"type": "route", "route": route.model_dump()}
 
     if not any(r.status == "ok" for r in routes):
-        raise failures[0] if failures else NoRouteFound("No route could be found from there.")
+        raise await _best_failure(failures)
 
     # Narration arrives after the routes, as a second pass over the same ids.
     # The client merges by id rather than appending.

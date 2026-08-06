@@ -90,7 +90,17 @@ class RoutingError(RuntimeError):
 
 
 class NoRouteFound(RoutingError):
-    def __init__(self, human_message: str) -> None:
+    def __init__(self, human_message: str, *, point_not_snappable: bool = False) -> None:
+        # True only for GraphHopper's "Cannot find point", which means the
+        # router could not attach the coordinate to any way it has.
+        #
+        # On the hosted API, which has the planet, that genuinely means the
+        # point is in a lake or offshore and moving a little will help. On a
+        # self-hosted graph it has a second, far more common cause: the area was
+        # never imported. The two need opposite advice, and only the caller
+        # knows which server answered — hence a flag rather than two messages
+        # decided here. See main.py, where it is read.
+        self.point_not_snappable = point_not_snappable
         super().__init__("no_route", human_message, status_code=422)
 
 
@@ -550,7 +560,8 @@ def _shape_upstream_error(response: httpx.Response) -> RoutingError:
         )
     if "cannot find point" in message.lower() or "point 0" in message.lower():
         return NoRouteFound(
-            "No routable road or path was found near that point. Try moving the start a little."
+            "No routable road or path was found near that point. Try moving the start a little.",
+            point_not_snappable=True,
         )
     if "connection between locations not found" in message.lower():
         return NoRouteFound(
