@@ -891,3 +891,94 @@ route available near you, but noticeably shorter than the time you asked for"*
 rather than silently handing over an 18-minute walk.
 
 **Live API calls:** GraphHopper hosted 0 (self-hosted is unmetered), Nominatim 3.
+
+---
+
+## Redesign phase 2 — Layout shell · 2026-08-06
+
+**Done**
+
+- The §3 two-column grid: 56px sticky topbar, full-width ribbon, then
+  `panel minmax(360px,420px)` + `stage minmax(0,1fr)`. The panel scrolls; the
+  map does not.
+- `Header.jsx` → `Topbar.jsx`. The header paragraph became a one-line tagline.
+- The entire footer became the §4.9 `<details>` at the foot of the panel, with
+  every sentence it used to carry, in the handoff's order.
+- `Ribbon.jsx` — the §4.2 demo-data warning.
+
+**Verified**
+
+- 0px horizontal overflow at 320, 390 and 1280.
+- The map fills the stage exactly — an 860×627 map in an 860×627 column.
+- Topbar measures 56px; panel `overflow-y` computes to `auto`.
+
+**Decisions**
+
+- **`minmax(0, 1fr)` and not `1fr`,** as the handoff insists. A plain `1fr`
+  resolves its minimum to min-content, the map's SVG reports a min-content width
+  wider than its column, and the grid ends up ~12px past the viewport with a
+  horizontal scrollbar. This is not theoretical — the same trap caught the trip
+  bar in phase 3, where a long place name refused to shrink and the ellipsis
+  never applied.
+- **No profile button in the topbar**, though §4.1 specifies one. The sheet it
+  opens is §6.5, which is deferred. A control that opens nothing reads as broken
+  rather than as unbuilt. The place for it is recorded in a comment.
+- Collapsing the footer is not deleting it. The OpenStreetMap tagging caveat
+  leads the disclosure because it is the sentence a reader most needs and least
+  expects, and it is the reason the project exists.
+
+**Deviations:** none.
+
+---
+
+## Redesign phase 3 — Trip bar · 2026-08-06
+
+**Done**
+
+- `Controls.jsx` → `TripBar.jsx` + `TripDrawer.jsx` + `ObjectiveChips.jsx`
+  (§4.3–4.5). Four segments, each showing its current value, each opening one
+  inline drawer; opening one closes the others.
+- `TimeDial.jsx` gained the §4.4 readout and the four preset pills. The native
+  `<input type="range">` and its `aria-valuetext` are unchanged.
+- `FirstRun.jsx` — the §7 empty state.
+- The a11y harness now matches `.route, .card` so it survives phase 4's rename.
+
+**Verified**
+
+- **The fetch model is byte-for-byte unchanged.** Diffed `App.jsx` against the
+  pre-redesign commit filtering for `DEBOUNCE`, `nonce`, `withRefetch`, `abort`
+  and every refetching action: the only hits are two added comments.
+- One drawer open at a time, `aria-expanded` and `hidden` agreeing, checked in
+  the browser rather than by inspection.
+- axe-core WCAG 2.0/2.1 A+AA: **0 violations, 0 best-practice violations.**
+
+**Decisions**
+
+- **Drawers render inline, not as an overlay.** An overlay would float over the
+  map, and below 900px — where the map sits *above* the panel — it would cover
+  the answer the user is adjusting.
+- **`hidden` rather than unmounting.** A half-typed place name survives closing
+  the drawer, and `aria-controls` always points at an element that exists.
+- **Presets dispatch the same `minutes` action the slider does.** No second code
+  path, so no second debounce to keep in step.
+- The first-run gate keys on `origin`, not on `routes`. MapLibre is therefore
+  not constructed until there is somewhere to draw, and once constructed it is
+  never unmounted — which is the one-instance rule the StrictMode fix depends on.
+
+**Deviations**
+
+- §7 is built here rather than in phase 2. It shares the preset pills with
+  §4.4, and building it alongside them avoided writing the component twice.
+
+**Found while working**
+
+Two best-practice regressions, both from the topbar rewrite and both caught by
+running axe rather than by reading the diff: the wordmark had become a `<span>`,
+leaving the page with no `<h1>`, and the ribbon sat outside every landmark.
+Fixed in the same phase.
+
+16 `color-contrast` checks report *incomplete* — axe cannot measure them. All
+are inside the old `.card` and all are on pairings §2 pre-verifies. Phase 4
+deletes that component; re-checked there rather than carried forward.
+
+**Live API calls:** none.
