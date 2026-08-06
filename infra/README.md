@@ -160,8 +160,33 @@ is real, and the free-tier credits a new account would absorb some of this with.
 
 ## Gate
 
-Every row is **UNVERIFIED**. Run the command; the expectation says what it
-should print.
+**Every row below is still UNVERIFIED against AWS.** Nothing has been deployed.
+
+Four of them have now been verified **locally**, against the self-hosted
+GraphHopper and a `uvicorn` on this machine, on 2026-08-06. That is a weaker
+claim than the row makes and is recorded separately for exactly that reason —
+it establishes that the *application* behaves as the row expects, and says
+nothing about whether the CloudFormation that is supposed to produce that
+arrangement works.
+
+| # | claim | verified locally | how |
+|---|---|---|---|
+| 6 | the API reached the router | **yes** | `self_hosted: true`, `self_hosted_source: "env"` |
+| 7 | the smoothness constraint can fire | **yes** | `path_details` = `road_class, surface, road_environment, smoothness`, and `scripts/verify_selfhosted.py` returns three distinct geometries at Colombo, Amsterdam and London |
+| 8 | pre-warmed CLIP scores shipped | **yes** | `segments_scored: 146`, `segments_clip: 146` |
+| 9 | a real route works end to end | **yes** | three routes at Hyde Park, `scoring_method: "clip"`, the accessible one blocked with one barrier and a reason |
+
+Two more things were established while doing it, neither of which is a row here:
+
+- **`/readyz` returns 503 with the router stopped and 200 with it running.**
+  Observed both ways, which had never been done before.
+- **`scripts/verify_selfhosted.py` fails at Princes Street, Edinburgh** — not a
+  routing defect. Its location list claims `great-britain`, and the `demo`
+  region set imports **Greater London** only. The script and the region set
+  disagree about what "great-britain" means; the script is the one that is
+  wrong.
+
+Run the command; the expectation says what it should print.
 
 | # | claim | how to verify | expected |
 |---|---|---|---|
@@ -177,7 +202,7 @@ should print.
 | 10 | the rate limiter sees real client IPs | 60 requests from one address | 429 after the bucket empties — **and** two different addresses must not share a bucket |
 | 11 | the bucket is not publicly readable | `curl -sI https://meander-web-$ACCOUNT.s3.$REGION.amazonaws.com/index.html` | `403` |
 | 12 | the SPA serves deep links | `curl -sI $SITE/some/deep/link` | `200` and `content-type: text/html` |
-| 13 | the service worker is not edge-cached | `curl -sI $SITE/sw.js \| grep -i cache-control` | `max-age=0, must-revalidate` |
+| 13 | ~~the service worker is not edge-cached~~ | — | **moot.** There is no `sw.js` on this branch; the service worker belonged to the launch frontend and did not survive the reconciliation merge (BLOCKED.md §5). `30-web.yaml` still carries the CachingDisabled behaviour for it, which is harmless and correct to keep — it costs nothing and the file is coming back. Re-open this row when it does. |
 | 14 | security headers are applied | `curl -sI $SITE/ \| grep -iE 'content-security-policy\|strict-transport'` | both present, CSP naming only `self` and `tiles.openfreemap.org` |
 | 15 | CI can deploy without a stored key | run the `deploy` workflow | green, and no `AWS_SECRET_ACCESS_KEY` anywhere in the repository or its secrets |
 | 16 | alarms fire | `aws ecs update-service --service meander-graphhopper --desired-count 0` | `meander-router-not-running` goes ALARM within ~3 min; set it back to 1 |

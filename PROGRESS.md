@@ -1982,3 +1982,87 @@ now been run on this machine, which is not automatic on clone and is the only
 thing that would catch it at commit time.
 
 **Live API calls this phase: zero.** 632 -> 640 backend tests.
+
+## iOS phase 1a — The graph was already there, and it hid a defect · 2026-08-06
+
+Reported at the end of phase 2 that JDK 21 was missing and Phase 1.2 was
+blocked. **Both wrong**, and wrong for the same reason: I ran `java -version`
+and `/usr/libexec/java_home -V`, and neither sees a keg-only Homebrew formula.
+`openjdk@21` (21.0.12) was installed the whole time, at exactly the first path
+`scripts/graphhopper.sh` checks.
+
+The script's own comment block documents the trap I walked into:
+
+> **`/usr/libexec/java_home -v 21` does not honour the version filter when
+> nothing matches.** On this machine, with only the Java 8 applet plugin
+> registered, `java_home -v 21` exits 0 and prints the Java 8 home. Trusting it
+> turned a working setup into "Java 8 is too old".
+
+Which is the brief's warning about the comments in this codebase being
+load-bearing, arriving as a demonstration rather than as advice. The lesson is
+narrower than "read the comments": **ask the tool that owns the question.**
+`scripts/graphhopper.sh regions` would have answered in one command, and it also
+revealed the `demo` graph had already been built — 71-second import, GraphHopper
+11.0, Sri Lanka + Greater London + Noord-Holland.
+
+### Verified against a live router
+
+`scripts/verify_selfhosted.py`, three of four locations: all three presets
+return distinct geometry, and `smoothness` is in `path_details` at every one —
+the fifth hard accessibility constraint firing from routing data, which the
+hosted API cannot supply at any price.
+
+`/readyz` returned 503 with the router stopped and 200 with it running.
+Observed both ways; it had only ever been asserted.
+
+Edinburgh failed, and it is the script that is wrong rather than the router:
+its location list says `great-britain`, and the `demo` region set imports
+**Greater London**. Recorded in `infra/README.md` rather than silently fixed,
+because the same disagreement will bite whoever next widens coverage.
+
+### The defect running it found
+
+Chasing Edinburgh led to the real one. The coverage pre-flight compares the
+origin against the graph's overall bounding box — and that box is a **union**.
+Three separate extracts spanning Sri Lanka to Britain make a rectangle of
+roughly 6°N–55°N, 1°W–80°E, and **Paris, Berlin and most of Europe are inside
+the rectangle and inside none of the extracts.** They passed the check, reached
+the router, came back "Cannot find point", and were told to *try moving the
+start a little* — the exact sentence `coverage.py` was written to prevent,
+naming Paris in its own docstring as the case it exists for, arriving by the one
+path the pre-flight cannot see.
+
+| | before | after |
+|---|---|---|
+| Paris | `no_route`, "move the start a little" | `outside_coverage` |
+| Berlin | `no_route`, "move the start a little" | `outside_coverage` |
+| Manchester | `outside_coverage` | unchanged — outside the bbox, caught up front |
+| Hyde Park | routes | unchanged |
+
+**The fix deliberately refuses to say which cause it is.** Two things produce
+"Cannot find point" on a finite graph — an area never imported, and a genuinely
+unroutable spot inside one that was — and `/info` reports only the union, so the
+API cannot distinguish them. Naming one would be a guess presented as a
+measurement, which is the habit this project exists not to have. The message
+names both. Establishing the truth needs per-region boxes, which GraphHopper
+does not expose and which live on the router's disk, in a different container
+from the API.
+
+Scoped narrowly: only "Cannot find point", only when the router reports a finite
+extent. Against the hosted API the original advice is right and is untouched.
+Five tests, including the two negative cases.
+
+**Why this one matters more than its size.** Appendix B of the brief ranks
+"reviewer tests outside the imported graph and reads it as broken" as the single
+highest rejection risk on this app — and on a phone the user's location is
+wherever they happen to be standing, not somewhere they typed.
+
+### What surprised me
+
+That the fix was found by running the verification script for an unrelated
+reason. Nothing in the brief pointed at it; the pre-flight check looked correct
+and its tests passed, because every test picked a point outside the union bbox.
+Sydney was outside. Paris never was.
+
+**Live API calls this phase:** GraphHopper self-hosted ~30 (unmetered), all
+others zero. 640 -> 645 backend tests.
