@@ -1,0 +1,43 @@
+{
+  "_meander_provenance": "recorded",
+  "_meander_recorded_at": "2026-08-06T06:24:04.171595+00:00",
+  "_meander_note": "Written by backend/fixtures.py. Secrets are redacted and excluded from the request signature.",
+  "request": {
+    "method": "GET",
+    "url": "https://graph.mapillary.com/images",
+    "params": {
+      "access_token": "<redacted>",
+      "fields": "id,thumb_1024_url,computed_geometry",
+      "bbox": "79.861012,6.912140,79.865012,6.916140",
+      "limit": 4
+    },
+    "json": null,
+    "data": {},
+    "content": null,
+    "headers": {
+      "Accept": "application/json"
+    }
+  },
+  "response": {
+    "status": 200,
+    "headers": {
+      "content-type": "application/json; charset=UTF-8",
+      "date": "Thu, 06 Aug 2026 06:24:04 GMT"
+    },
+    "json": {
+      "data": [
+        {
+          "id": "518470649328147",
+          "thumb_1024_url": "https://scontent.fcmb1-2.fna.fbcdn.net/m1/v/t6/An8w7C6MlsEU6GyZv6_C_9eoo4hnbk5YEeGjF9oxkne3gTA3V0N2iyGqLb_W_ZBZnvuxdCdb1L6V6xe2Yzq17W0qiLOXmqbGw3VvhJVXfMbMQFoSEzK-rUc4Rkrx_4Fxhpq-X0SFgAm33ZTCaz16IQ?stp=s1024x576&edm=AOnQwmMEAAAA&_nc_gid=Dm7x4E84rnJnrg6jDqc6tA&_nc_oc=AdozwY8s6pFvxuZR05SrW2W2bHvOHWaZ_X3TJ-bWQnXsSkdMpUa2vuY9oko59nMo5LE&ccb=10-5&oh=00_AQGyofCvGUf-uFRkdgkO_nUEVLvlIFlZKbH5I4CtHB0Z2w&oe=6A9BAAF5&_nc_sid=201bca",
+          "computed_geometry": {
+            "type": "Point",
+            "coordinates": [
+              79.861114137607,
+              6.9154204344616
+            ]
+          }
+        }
+      ]
+    }
+  }
+}

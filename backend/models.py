@@ -96,6 +96,26 @@ class RestStop(BaseModel):
     at_m: float
 
 
+class ElevationProfile(BaseModel):
+    """The route's shape, for drawing. Null when the router returned no elevation.
+
+    Null rather than an empty profile: "no elevation data" and "this route is
+    flat" are different statements, and a flat line drawn for the first makes
+    the second's claim.
+    """
+
+    distances_m: list[float]
+    elevations_m: list[float]
+    ascent_m: float
+    descent_m: float
+    max_gradient_pct: float
+    # [start, end) index pairs into the arrays above, for stretches over
+    # limit_pct. The limit is the same MAX_INCLINE_PCT the accessibility engine
+    # rejects on, so the drawing and the verdict cannot disagree.
+    steep_spans: list[list[int]]
+    limit_pct: float
+
+
 class Blocker(BaseModel):
     type: str
     lat: float
@@ -133,9 +153,12 @@ class Route(BaseModel):
     confidence: float
     rest_stops: list[RestStop] = Field(default_factory=list)
     blockers: list[Blocker] = Field(default_factory=list)
-    # Empty when the router returned no instructions. The frontend says so
-    # rather than inventing directions.
+    # Turn-by-turn directions. Empty when the router gave none — which is
+    # different from a route with no turns, but the UI says "no directions"
+    # either way rather than implying the route is a straight line, and never
+    # synthesises a turn from the geometry.
     steps: list[Step] = Field(default_factory=list)
+    elevation: ElevationProfile | None = None
     narration: str | None = None
 
     # Not in the original spec. Present because a route built from a hand-made
@@ -148,6 +171,17 @@ class Route(BaseModel):
     # blocker — "no route of this kind exists" has nowhere else to live in the
     # contract, and the UI has to be able to say it.
     status_note: str | None = None
+
+    # True on the first of two passes: the geometry, duration, accessibility
+    # assessment and coverage are final, but air, shade and rest stops have not
+    # been fetched yet and a second `route` event with the same id will follow.
+    #
+    # This exists because `rest_stops` cannot be null. An empty list means "we
+    # looked and found none", which would be a false claim about a route we have
+    # not looked at yet — and the whole project turns on absence of data never
+    # being reported as a finding. The UI must not render rest stops or the air
+    # and shade scores as measured while this is true.
+    enrichment_pending: bool = False
 
 
 class CacheInfo(BaseModel):

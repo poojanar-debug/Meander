@@ -38,10 +38,63 @@ GRAPHHOPPER_URL = os.environ.get(
 )
 
 
-def graphhopper_is_self_hosted() -> bool:
-    """A self-hosted server needs no API key and has no plan restrictions."""
+SELF_HOSTED_ENV = "MEANDER_GRAPHHOPPER_SELF_HOSTED"
+
+_LOOPBACK_HOSTS = frozenset({"localhost", "127.0.0.1", "0.0.0.0", "::1"})
+
+
+def _hostname_looks_self_hosted() -> bool:
     host = GRAPHHOPPER_URL.split("//", 1)[-1].split("/", 1)[0].split(":", 1)[0].lower()
-    return host in {"localhost", "127.0.0.1", "0.0.0.0", "::1"} or host.endswith(".local")
+    return host in _LOOPBACK_HOSTS or host.endswith(".local")
+
+
+def graphhopper_is_self_hosted() -> bool:
+    """Is the routing server one we run ourselves?
+
+    Four unrelated behaviours hang off this answer, and **none of them fails
+    loudly when it is wrong**:
+
+    1. ``path_details()`` requests ``smoothness`` only when self-hosted, because
+       the hosted API has no such encoded value and referencing one that does
+       not exist fails the whole request. Get this wrong in the False direction
+       and the accessible custom model silently stops excluding IMPASSABLE
+       surfaces — one of the five hard constraints stops firing, the app keeps
+       answering, and its answers get quietly less safe.
+    2. ``Settings.missing_keys()`` stops demanding ``GRAPHHOPPER_KEY``, so with
+       ``MEANDER_STRICT_STARTUP=1`` a wrong answer refuses to boot against a
+       perfectly good router.
+    3. ``build_request_body()`` sets ``ch.disable`` for round trips, because a
+       self-hosted server with CH prepared answers "algorithm=round_trip cannot
+       be used with CH". Only the *fastest* round trip is affected — the other
+       two presets carry a custom model and get ``ch.disable`` regardless — and
+       a fastest failure is re-raised, so the whole request dies.
+    4. ``route_nature()`` searches all six loop candidates and picks on merit
+       when unmetered, but only the first two with an early break when it thinks
+       it is paying per call. So this flag changes **which route the user gets**,
+       not merely how the server is operated.
+
+    Hostname sniffing was the original answer and it is wrong the moment the
+    router lives anywhere real — a private ALB, ECS Service Connect,
+    ``graphhopper.meander.internal``, a VPC address. That is exactly the
+    deployment this repository is heading for, so the flag is now explicit and
+    the sniff is only the default when nothing is configured. Local development
+    keeps working with no configuration at all.
+    """
+    raw = os.environ.get(SELF_HOSTED_ENV)
+    if raw is not None and raw.strip():
+        return raw.strip().lower() in {"1", "true", "yes", "on"}
+    return _hostname_looks_self_hosted()
+
+
+def self_hosted_resolution() -> dict[str, object]:
+    """How the flag was decided, for one startup log line and /api/health."""
+    raw = os.environ.get(SELF_HOSTED_ENV)
+    explicit = raw is not None and raw.strip() != ""
+    return {
+        "self_hosted": graphhopper_is_self_hosted(),
+        "source": "env" if explicit else "hostname",
+        "endpoint_host": GRAPHHOPPER_URL.split("//", 1)[-1].split("/", 1)[0],
+    }
 GRAPHHOPPER_GEOCODE_URL = "https://graphhopper.com/api/1/geocode"
 MAPILLARY_URL = "https://graph.mapillary.com/images"
 OVERPASS_URL = "https://overpass-api.de/api/interpreter"
@@ -78,20 +131,25 @@ def _env_int(name: str, default: int) -> int:
         return default
 
 
-# Hard ceilings on live network calls, enforced in fixtures.py. Hitting a cap
+# Ceilings on live network calls, enforced in fixtures.py. Hitting a cap
 # downgrades that service to replay-only rather than failing the run.
 #
-# These are *development* guard rails: their job is to stop an iteration loop
-# quietly draining a 500-credit/day quota and then failing in a way that looks
-# exactly like a code bug. They are lifetime totals, not per-day, and they
-# persist in fixtures/_budget.json.
+# These are *development* guard rails and nothing else: their job is to stop an
+# iteration loop quietly draining a 500-credit/day quota and then failing in a
+# way that looks exactly like a code bug. They are **per UTC day** and reset on
+# their own; the counters live in fixtures/_budget.json.
 #
-# **They are far too small for real use.** At 3 credits per route request an
-# 80-call GraphHopper budget is about 26 route requests, after which every new
-# location returns "no fixture for that request". Running the app for arbitrary
-# locations means raising these — see MEANDER_BUDGET_* below. In production the
-# quota is protected by the rate limiter and the daily ceiling instead, which
-# are per-day and reset.
+# fixtures.budget_applies() decides when they are consulted at all. They are
+# skipped entirely in live mode — production is protected by the rate limiter
+# and the daily route ceiling — and skipped for a self-hosted GraphHopper,
+# which has no quota to protect. Before that was true, a deployed instance
+# metered its own router at 3 credits a call against an 80-call *lifetime* cap,
+# which is three route requests per container and then 503 forever.
+#
+# Raising them with MEANDER_BUDGET_* is still available for a long recording
+# session against the hosted API, but is no longer load-bearing for a
+# deployment: forgetting one used to produce a service that worked three times
+# and then stopped.
 _DEV_LIVE_CALL_BUDGET: dict[str, int] = {
     "graphhopper": 80,
     "mapillary": 200,
@@ -138,10 +196,51 @@ def path_details() -> list[str]:
     return list(SELF_HOSTED_PATH_DETAILS if graphhopper_is_self_hosted() else DEFAULT_PATH_DETAILS)
 SECRET_HEADERS = frozenset({"authorization", "x-api-key", "anthropic-api-key"})
 
+def _env_float(name: str, default: float) -> float:
+    raw = os.environ.get(name)
+    if raw is None or not raw.strip():
+        return default
+    try:
+        return float(raw)
+    except ValueError:
+        return default
+
+
 # Every request goes through these. Kept low so a wedged upstream degrades the
 # response instead of holding a request open.
-HTTP_TIMEOUT_S = 12.0
-HTTP_CONNECT_TIMEOUT_S = 5.0
+#
+# 12 s was too aggressive to be a default and had to become configurable:
+# Overpass measured **13.6 s** for a trivial bench query on this project, so
+# rest stops were already timing out into `null` at random. `null` is honest —
+# it means "we could not look", distinct from `[]` — but the resulting httpx
+# error surfaces as "Could not reach the routing service", which sends an
+# operator hunting a network fault that does not exist.
+HTTP_TIMEOUT_S = _env_float("MEANDER_HTTP_TIMEOUT_S", 20.0)
+HTTP_CONNECT_TIMEOUT_S = _env_float("MEANDER_HTTP_CONNECT_TIMEOUT_S", 5.0)
+
+# Whole-request ceiling. Past this, /api/routes returns what it already has
+# rather than holding the connection open — every subsystem below it is
+# best-effort and degrades to null, so a partial answer is a real answer.
+# Deliberately under a typical 60 s proxy idle timeout.
+REQUEST_DEADLINE_S = _env_float("MEANDER_REQUEST_DEADLINE_S", 45.0)
+
+# How many proxies of *your own* sit in front of this service.
+#
+# Defaults to 0, which ignores X-Forwarded-For entirely and rate-limits on the
+# socket peer. That is the only safe default: trusting a hop that is not there
+# is a complete bypass (a client sends its own X-Forwarded-For and gets a fresh
+# token bucket every request), whereas distrusting one that is there merely
+# makes everybody share a bucket.
+#
+# **Set this to 1 behind an ALB.** Left at 0 there, every request appears to
+# come from the load balancer and the whole service rate-limits as one client.
+TRUSTED_PROXY_HOPS = _env_int("MEANDER_TRUSTED_PROXY_HOPS", 0)
+
+# How long shutdown waits for in-flight SSE streams to finish before closing the
+# cache under them. Must stay comfortably below uvicorn's
+# --timeout-graceful-shutdown, which must in turn stay below the orchestrator's
+# SIGTERM-to-SIGKILL window.
+DRAIN_TIMEOUT_S = _env_float("MEANDER_DRAIN_TIMEOUT_S", 20.0)
 
 
 @dataclass(frozen=True)
@@ -168,6 +267,9 @@ class Settings:
 
         A self-hosted GraphHopper needs no key, so demanding one would make
         MEANDER_STRICT_STARTUP refuse to boot a perfectly good deployment.
+
+        ⚠ This is a *completeness* list, not a readiness list. Two of the three
+        are optional at runtime — see missing_required_keys().
         """
         missing = []
         if not self.graphhopper_key and not graphhopper_is_self_hosted():
@@ -177,6 +279,26 @@ class Settings:
         if not self.anthropic_api_key:
             missing.append("ANTHROPIC_API_KEY")
         return missing
+
+    def missing_required_keys(self) -> list[str]:
+        """Keys without which this instance genuinely cannot serve a route.
+
+        Deliberately much shorter than missing_keys(), and readiness must use
+        this one. MAPILLARY_TOKEN and ANTHROPIC_API_KEY are in missing_keys()
+        whenever they are unset, and **neither is needed to serve routes**: CLIP
+        is cache-read-only in the deploy image, and narration is simply skipped
+        without a key. Wiring readiness to missing_keys() would 503 a perfectly
+        healthy instance for ever and the load-balancer target would never come
+        into service.
+
+        In replay mode nothing is required at all — that is the keyless demo,
+        and it answers for the recorded locations without any credentials.
+        """
+        if self.fixture_mode == "replay":
+            return []
+        if not self.graphhopper_key and not graphhopper_is_self_hosted():
+            return ["GRAPHHOPPER_KEY"]
+        return []
 
 
 def _resolve_fixture_mode() -> FixtureMode:
@@ -189,11 +311,18 @@ def _resolve_fixture_mode() -> FixtureMode:
 def _resolve_origins() -> tuple[str, ...]:
     raw = os.environ.get("MEANDER_ALLOWED_ORIGINS", "")
     origins = [o.strip() for o in raw.split(",") if o.strip()]
-    # Local dev servers are always permitted; the deployed origin comes from env.
-    defaults = ["http://localhost:5173", "http://127.0.0.1:5173"]
-    for d in defaults:
-        if d not in origins:
-            origins.append(d)
+    # The Vite dev server used to be appended to *every* deployment's allowlist
+    # unconditionally, which quietly means a page served from a developer's
+    # laptop can call production.
+    #
+    # The default is now "only when no origins were configured at all", i.e.
+    # local development, where it is the whole allowlist. Configure
+    # MEANDER_ALLOWED_ORIGINS — which any deployment must — and localhost stops
+    # being allowed unless MEANDER_ALLOW_LOCAL_ORIGINS says otherwise.
+    if _env_flag("MEANDER_ALLOW_LOCAL_ORIGINS", not origins):
+        for d in ("http://localhost:5173", "http://127.0.0.1:5173"):
+            if d not in origins:
+                origins.append(d)
     return tuple(origins)
 
 
@@ -213,7 +342,10 @@ def load_settings() -> Settings:
         osm_dev_token=_clean("OSM_DEV_TOKEN"),
         allowed_origins=_resolve_origins(),
         per_ip_bucket_capacity=_env_int("MEANDER_RATE_CAPACITY", 12),
-        per_ip_refill_per_min=float(_env_int("MEANDER_RATE_REFILL_PER_MIN", 3)),
+        # _env_float, not float(_env_int(...)): the latter parsed "0.5" with
+        # int(), hit ValueError, and silently returned the default of 3 — a
+        # six-fold difference from what the operator asked for, with no error.
+        per_ip_refill_per_min=_env_float("MEANDER_RATE_REFILL_PER_MIN", 3.0),
         global_daily_route_ceiling=_env_int("MEANDER_DAILY_ROUTE_CEILING", 120),
         route_cache_ttl_s=_env_int("MEANDER_ROUTE_CACHE_TTL_S", 6 * 60 * 60),
         log_level=os.environ.get("MEANDER_LOG_LEVEL", "INFO").upper(),

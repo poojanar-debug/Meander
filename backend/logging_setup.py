@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import logging
 import sys
+from contextvars import ContextVar
 from datetime import UTC, datetime
 from typing import Any
 
@@ -22,6 +23,11 @@ BANNED_FIELDS = frozenset(
     }
 )
 
+# Bound per request by the middleware in main.py, and attached to every record
+# emitted while handling it — including from modules that know nothing about
+# the request, which is most of them.
+request_id_var: ContextVar[str | None] = ContextVar("request_id", default=None)
+
 _RESERVED = frozenset(
     {
         "name", "msg", "args", "levelname", "levelno", "pathname", "filename",
@@ -32,13 +38,44 @@ _RESERVED = frozenset(
 )
 
 
+def _could_carry_a_coordinate(value: Any) -> bool:
+    """Could this value under a banned key actually be a location?
+
+    The banned list is keyed on names, and some of those names are ordinary
+    words. ``points`` is a coordinate array in routing.py and a plain count
+    almost everywhere else; ``origin`` is a coordinate in a route request and an
+    HTTP header in a CORS log line. Redacting a count or a scheme-and-host
+    throws away the only useful part of a log line for no privacy gain.
+
+    So: integers and booleans are counts and flags, never coordinates. Strings
+    with no digits cannot encode one. Everything else — floats, lists, dicts,
+    digit-bearing strings — is redacted. Deliberately asymmetric: over-redacting
+    costs a log field, under-redacting publishes somebody's location.
+    """
+    if isinstance(value, bool | int):
+        return False
+    if isinstance(value, str):
+        return any(ch.isdigit() for ch in value)
+    return True
+
+
 class PrivacyFilter(logging.Filter):
     """Strip banned keys rather than dropping the record — a log is still useful."""
 
     def filter(self, record: logging.LogRecord) -> bool:
         for key in list(record.__dict__):
-            if key.lower() in BANNED_FIELDS:
+            if key.lower() in BANNED_FIELDS and _could_carry_a_coordinate(record.__dict__[key]):
                 record.__dict__[key] = "<redacted>"
+        return True
+
+
+class RequestIdFilter(logging.Filter):
+    """Attach the in-flight request id to every record, from anywhere."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        rid = request_id_var.get()
+        if rid is not None:
+            record.request_id = rid
         return True
 
 
@@ -72,6 +109,8 @@ def configure_logging(level: str = "INFO") -> None:
         return
     handler = logging.StreamHandler(sys.stdout)
     handler.setFormatter(JsonFormatter())
+    handler.addFilter(RequestIdFilter())
+    # Last, so it also sees anything the filters above added.
     handler.addFilter(PrivacyFilter())
 
     root = logging.getLogger()

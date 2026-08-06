@@ -14,7 +14,8 @@ Three things in here have cost people whole days:
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+import asyncio
+from collections.abc import AsyncIterator, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -91,6 +92,19 @@ class RoutingError(RuntimeError):
 class NoRouteFound(RoutingError):
     def __init__(self, human_message: str) -> None:
         super().__init__("no_route", human_message, status_code=422)
+
+
+class OutsideCoverage(RoutingError):
+    """The point is outside the imported graph.
+
+    A first-class outcome, not a routing failure. Separate from NoRouteFound
+    because the two need opposite advice: "try moving the start a little" is
+    right for a point in the middle of a lake and actively misleading for a
+    point in a city this deployment simply did not import.
+    """
+
+    def __init__(self, human_message: str) -> None:
+        super().__init__("outside_coverage", human_message, status_code=422)
 
 
 class PresetUnavailable(RoutingError):
@@ -200,6 +214,16 @@ NATURE_BUDGET_FIT_WEIGHT = 0.4
 # card should say so rather than let someone assume it fills their budget.
 NATURE_BUDGET_UNDERSHOOT = 0.7
 
+# Said when there was no fastest route to measure against, so neither the
+# duration cap nor the greenness floor could be applied. The caller routes a
+# baseline specifically to avoid this, so reaching it means that baseline
+# request itself failed — rare, but the alternative is presenting an unchecked
+# route under a label that promises it was checked.
+UNCOMPARED_NOTE = (
+    "This route could not be compared against the fastest one, so we cannot "
+    "promise it is greener than the direct way or inside your time budget."
+)
+
 
 def _budget_fit(duration_min: float, requested_min: int) -> float:
     """1.0 when a route uses exactly the time asked for, falling off either side."""
@@ -281,6 +305,22 @@ class RouteStep:
 
 
 @dataclass
+class Step:
+    """One turn instruction, already reduced to what a person needs.
+
+    GraphHopper's own instruction objects carry sign codes, interval indices and
+    street references. Only the sentence, the distance and where it happens
+    survive here — the rest is routing-engine detail that would have to be
+    re-explained on the way to the screen.
+    """
+
+    text: str
+    distance_m: float
+    lat: float
+    lon: float
+
+
+@dataclass
 class RawRoute:
     """A route as GraphHopper returned it, before scoring or enrichment."""
 
@@ -319,12 +359,17 @@ def _base_body(profile: str, elevation: bool = True) -> dict[str, Any]:
     return {
         "profile": profile,
         "points_encoded": False,
-        # Turn instructions, for the step list. Asking for them changes the
-        # request body, and fixtures are keyed on a hash of that body — so
-        # flipping this invalidates every recorded GraphHopper fixture and the
-        # offline suite starts missing every one of them. The synthetic
-        # fixtures are regenerated from this same function, so they follow
-        # automatically; recorded ones need re-recording.
+        # ⚠ Changing anything in this dict changes the signature every committed
+        # fixture is keyed on, and the offline suite — the whole safety net —
+        # then fails wholesale with no_fixture 503s. Flipping this flag required
+        # re-recording all 68 GraphHopper fixtures in the same commit; see
+        # scripts/migrate_fixtures.py.
+        #
+        # It is also why this branch could merge two independently-recorded
+        # fixture sets as a union rather than re-recording either: both branches
+        # turned `instructions` on and neither changed anything else here, so
+        # build_request_body is byte-identical across them and a signature means
+        # the same request on both sides. Verified before the merge, not assumed.
         "instructions": True,
         "calc_points": True,
         "elevation": elevation,
@@ -477,6 +522,20 @@ def _shape_upstream_error(response: httpx.Response) -> RoutingError:
         )
 
     if status in (401, 403):
+        # A self-hosted GraphHopper has no concept of an API key, so "the key is
+        # missing or rejected" is not merely unhelpful there, it is a wrong
+        # diagnosis that sends an operator hunting for a credential that does
+        # not exist. A 401/403 from our own router is a proxy, a security group
+        # or an auth layer in front of it.
+        if graphhopper_is_self_hosted():
+            return RoutingError(
+                "auth",
+                "The routing service refused this request. That server is one this "
+                "deployment runs itself, so this is something in front of it — a "
+                "proxy or an access rule — rather than an API key. Nothing you did "
+                "caused this.",
+                status_code=503,
+            )
         return RoutingError(
             "auth",
             "Routing is not configured on this server — its GraphHopper key is missing or "
@@ -513,7 +572,15 @@ def _shape_upstream_error(response: httpx.Response) -> RoutingError:
 
 
 async def _post_route(body: dict[str, Any], mode: EffectiveMode, preset: str) -> RawRoute:
-    params = {"key": settings.graphhopper_key} if settings.graphhopper_key else None
+    # Only the hosted API is sent the key.
+    #
+    # It travels as a *query parameter*, so a deployment that keeps
+    # GRAPHHOPPER_KEY configured for fallback — which is a perfectly sensible
+    # thing to do — was putting it in the query string of every request to its
+    # own router, and therefore into that server's access log, in plaintext,
+    # forever. A self-hosted server has no use for it either way.
+    send_key = settings.graphhopper_key and not graphhopper_is_self_hosted()
+    params = {"key": settings.graphhopper_key} if send_key else None
     try:
         response = await fetch(
             "POST",
@@ -653,9 +720,37 @@ async def route_nature(
     ``preset_note`` explaining which promise it missed.
     """
     from .geometry import score_geometry
+    from .scoring import clip_term_for_route
 
     def greenness(route: RawRoute) -> float:
-        return score_geometry(route.points, route.elevations or None, route.details).nature
+        """**The same number the card will show.** Not a proxy for it.
+
+        This used to call ``score_geometry`` without the CLIP term, and it was
+        wrong in a way nothing could detect until now: CLIP carries weight 0.45,
+        the largest single term in the nature score, so a route was *chosen* on
+        a measure that excluded the dominant component and then *displayed* with
+        one that included it. The "greener than the fastest route" bar — the one
+        this function exists to enforce, and which the docstring above calls not
+        optional — was being applied to a different number from the one a reader
+        sees on the card.
+
+        It stayed invisible for the whole project because ``data/cache.db``
+        shipped with zero CLIP rows, so ``clip_score`` was always None and the
+        two measures were arithmetically identical. Pre-warming the cache is
+        what made them able to disagree, and the first warmed run disagreed
+        straight away: at Hyde Park the nature route showed 0.4806 against the
+        fastest route's 0.4854 while still passing the floor.
+
+        The lookup is a cache read — no torch, no network — and the request path
+        already does exactly this once per route in ``main.py``.
+        """
+        clip = clip_term_for_route(route.points)
+        return score_geometry(
+            route.points,
+            route.elevations or None,
+            route.details,
+            clip_score=clip.score,
+        ).nature
 
     cap = fastest.duration_min * NATURE_DURATION_CAP if fastest else None
     floor = greenness(fastest) if fastest else None
@@ -673,11 +768,48 @@ async def route_nature(
     acceptable: list[tuple[float, RawRoute]] = []
     fallback: tuple[float, RawRoute] | None = None
 
-    for influence, scale in candidates:
-        body = build_request_body(
-            origin, destination, minutes, mode, "nature", influence, scale
+    async def _candidate(influence: int, scale: float) -> RawRoute:
+        body = build_request_body(origin, destination, minutes, mode, "nature", influence, scale)
+        return await _post_route(body, mode, "nature")
+
+    if unmetered:
+        # Independent requests against a server that charges nothing, so there
+        # is no reason to wait for one before starting the next. The metered
+        # path below must stay sequential: its whole point is to stop at the
+        # first acceptable candidate rather than pay for all of them.
+        #
+        # gather with return_exceptions so one bad candidate cannot lose the
+        # others — a single unroutable variant is not a failed request.
+        settled = await asyncio.gather(
+            *(_candidate(i, s) for i, s in candidates), return_exceptions=True
         )
-        candidate = await _post_route(body, mode, "nature")
+        results: list[tuple[tuple[int, float], RawRoute]] = []
+        for spec, outcome in zip(candidates, settled, strict=True):
+            if isinstance(outcome, RawRoute):
+                results.append((spec, outcome))
+            else:
+                log.info(
+                    "nature_candidate_failed",
+                    extra={"distance_influence": spec[0], "loop_scale": spec[1],
+                           "error": type(outcome).__name__},
+                )
+        if not results:
+            # Every variant failed, so re-raise a representative failure rather
+            # than pretend the preset produced nothing for a benign reason.
+            first = next(o for o in settled if isinstance(o, BaseException))
+            raise first
+    else:
+        results = []
+
+    async def _iter_candidates() -> AsyncIterator[tuple[tuple[int, float], RawRoute]]:
+        if unmetered:
+            for spec, route in results:
+                yield spec, route
+        else:
+            for spec in candidates:
+                yield spec, await _candidate(*spec)
+
+    async for (influence, scale), candidate in _iter_candidates():
         green = greenness(candidate)
         within = cap is None or candidate.duration_min <= cap
         greener = floor is None or green > floor
@@ -715,6 +847,8 @@ async def route_nature(
                 "noticeably shorter than the time you asked for — nothing "
                 "greener was reachable within your budget."
             )
+        elif fastest is None:
+            chosen.preset_note = UNCOMPARED_NOTE
         return chosen
 
     assert fallback is not None  # at least one candidate always runs
@@ -846,6 +980,7 @@ __all__ = [
     "PresetUnavailable",
     "RawRoute",
     "RoutingError",
+    "Step",
     "accessible_custom_model",
     "build_request_body",
     "from_post_point",

@@ -894,6 +894,24 @@ rather than silently handing over an 18-minute walk.
 
 ---
 
+## Two programmes, from the same commit
+
+Everything above is shared history. From `867e8e2` the project ran in two
+directions at once, and both logs are kept below in full rather than one being
+folded into the other — they describe different work, they were measured
+independently, and a reader trying to understand why a file looks the way it
+does needs whichever one touched it.
+
+**The redesign programme** comes first: eight phases rebuilding the frontend
+against `docs/DESIGN-HANDOFF.md`. **The launch programme** follows: the
+deployment, the hardening and the infrastructure. They were reconciled onto one
+branch on 2026-08-06; the entry at the very end of this file records what that
+merge kept, what it dropped, and why.
+
+---
+
+# The redesign programme
+
 ## Redesign phase 2 — Layout shell · 2026-08-06
 
 **Done**
@@ -1243,3 +1261,660 @@ profile, §6.6 barrier detail popover, §6.8 saved places.
 
 **Live API calls this phase:** GraphHopper 16, all against the self-hosted
 server and therefore unmetered.
+
+---
+
+# The launch programme
+
+Branched from the same `867e8e2` as the redesign above, and unaware of it. Where
+the two overlap — both added turn-by-turn directions, both added a dark mode,
+both wrote a `RouteRow` — the reconciliation kept the redesign's frontend and
+this programme's backend. The measurements below stand; the frontend ones
+describe a layout that is no longer in the tree, and are marked where that
+matters.
+
+## Launch phase 0 · Baseline, and one number that was wrong
+
+Branched `feat/launch` off `main` at 867e8e2.
+
+**Where the tree actually is.** 387 tests pass offline, 2 skipped — not the 367
+the audit was written against. The frontend builds clean:
+
+| chunk | raw | gzip |
+|---|---|---|
+| `maplibre` | 1,055.24 kB | 283.74 kB |
+| `index` js | 222.77 kB | 70.61 kB |
+| `index` css | 80.30 kB | 12.79 kB |
+| `index.html` | 1.16 kB | 0.63 kB |
+
+**Three real routes, end to end.** Backend in `live` mode against the
+self-hosted GraphHopper 11, 45-minute foot round trip near Hyde Park, nothing
+cached: **14.0 s**, **8 GraphHopper requests** — 6 nature candidates, 1 fastest,
+1 accessible, exactly the arithmetic the audit predicted. `fastest` 35.9 min /
+64% checked, `nature` 22.4 min / 88% checked and genuinely greener (0.666 vs
+0.646), `accessible` blocked. `segments_scored` 0, so all three are
+`geometry_only`; self-hosting did nothing for BLOCKED.md §2 and it was worth
+re-confirming rather than assuming.
+
+**Then the 14 s turned out to be the wrong story.** Timing each SSE frame on
+arrival, the routing loop finishes in **0.02 s** and then nothing happens for
+**3.9 s**. Measured directly:
+
+| upstream | latency |
+|---|---|
+| GraphHopper, one foot route, localhost | **0.024 s** |
+| Open-Meteo forecast | 0.578 s |
+| Open-Meteo air quality | 0.836 s |
+| Overpass, one trivial bench query | **13.553 s** |
+
+Three consecutive uncached Hyde Park requests took 4.18 s, 1.19 s and 9.36 s.
+That spread is Overpass, not us.
+
+So the audit's "the objective loop is sequential and the worst case is well over
+two minutes" is right about the code and wrong about where the time goes **once
+the router is your own**. Eight local routing requests cost about 0.2 s
+together. The sequential enrichment — Overpass, then forecast, then air quality
+— is the entire budget, and its worst leg is 13.6 s.
+
+Which surfaces a defect nobody had written down: `HTTP_TIMEOUT_S` is **12.0 s**
+and Overpass just took 13.6 s. Rest stops are already silently timing out into
+`null` some fraction of the time. `null` is honest — it means "we could not
+look", distinct from `[]` — so this degrades correctly rather than lying, but it
+means the rest-stop feature is quietly absent at random. Phase 1.5 gathers the
+three enrichment calls, which turns worst-case ≈ sum into worst-case ≈ Overpass,
+and makes the timeout configurable so it can be set above Overpass's actual
+tail.
+
+**What surprised me.** That the first measurement was misleading in the
+flattering direction. 14 s for eight routing requests reads like "routing is
+slow, parallelise it". Parallelising the routing would have bought ~0.15 s and
+left a 13 s p99 completely untouched.
+
+**A privacy trap, reproduced deliberately.** `data/cache.db` is tracked. One
+uncached request left it byte-identical on disk with the route parked in
+`cache.db-wal`, which is gitignored — `git status` said clean. A checkpoint then
+took the tracked file from 4 KB to 45 KB carrying a full coordinate array. It is
+now guarded: `scripts/scrub_cache_db.py --check` inspects the **staged blob**,
+not the working tree, because a developer can stage the dirty file and then
+clean the working copy. Hooks live in `scripts/git-hooks/`.
+
+**Live API calls:** GraphHopper self-hosted ~40 (unmetered), Overpass 5,
+Open-Meteo 10, Nominatim 0.
+
+---
+
+## Launch phases 1–3 · What the audit got right, and two things it did not
+
+### Phase 1 — the launch blockers
+
+Seven fixes, each with its own commit and tests. The three that mattered most:
+
+**The self-hosted flag.** `graphhopper_is_self_hosted()` sniffed the hostname,
+which is right on a laptop and wrong the moment the router has a real name.
+Four behaviours hang off it and none fails loudly; the dangerous one is that
+`path_details()` drops `smoothness`, so the accessible model silently stops
+excluding IMPASSABLE surfaces. Now `MEANDER_GRAPHHOPPER_SELF_HOSTED`, with the
+sniff only as the default. conftest pins it in the same commit — the fixture
+signature depends on it, and getting that wrong fails the whole suite on
+`no_fixture`. Verified by running the suite with a hostile environment
+exported: 411 passed, byte-identical.
+
+**Nature with no baseline.** `{"objectives": ["nature"]}` is a valid public
+request, and it made `route_nature` receive `fastest=None`, which switches off
+*both* its bars — the 1.6× cap and the greenness floor. Every candidate becomes
+acceptable and the winner ships labelled Nature with no note. Fixed by routing
+a baseline whenever nature is asked for.
+
+**Time to first route: 3.96 s → 0.03 s.** The audit read this as "the objective
+loop is sequential, parallelise it". Measuring says routing was never the cost:
+a self-hosted router answers a whole foot route in 24 ms, so all eight requests
+together are ~0.2 s. The cost is the *shared* enrichment pass, and it sat
+between routing and the first route event. Each route is now emitted twice —
+immediately, then again enriched — using the merge-by-id the client already
+had for narration. `enrichment_pending` says so, because `rest_stops` cannot be
+null and `[]` would mean "we looked and found none".
+
+### Phase 2 — production hardening
+
+The rate limiter was defeated by one header: `X-Forwarded-For.split(",")[0]` is
+the value the *client* sent. Now read from the right, `parts[-hops]`, defaulting
+to zero trusted hops. 50 requests each inventing a different XFF now map to one
+bucket.
+
+`/healthz` and `/readyz` split from `/api/health`, verified by suspending the
+router with SIGSTOP: liveness stayed 200 throughout, readiness went 503 and
+came back. Readiness deliberately does **not** use `missing_keys()`, which
+names MAPILLARY_TOKEN and ANTHROPIC_API_KEY — neither is needed to serve a
+route, and wiring readiness to it would 503 a healthy instance for ever.
+
+One finding worth recording because I got it wrong first: **Starlette's
+GZipMiddleware does not leave streaming responses alone.** I wrote a comment
+claiming it did; the test returned `content-encoding: gzip` on a
+text/event-stream response. That would have silently undone the whole of Phase
+1.5. ConditionalGZip decides on the request's Accept header.
+
+### Phase 3 — the graph, which is the entire bill
+
+|                      | demo    | countries |
+|----------------------|---------|-----------|
+| download             | ~370 MB | ~3.5 GB   |
+| merged extract       | 346 MB  | 3.5 GB    |
+| graph on disk        | 620 MB  | 6.6 GB    |
+| import               | 96 s    | ~31 min   |
+| minimum serve heap   | **2 GB** (1 GB OOMs) | 20 GB |
+| cold start to route  | 1.1 s   | —         |
+| first route          | 44 ms   | —         |
+
+**Contraction hierarchies are gone**, and the measurement is why: CH is
+incompatible with a custom model, so it only ever served `fastest`. Dropping it
+costs 4 ms on that one preset (5.1 → 9.2 ms) and saves 22% of the graph and 40%
+of the import. Four milliseconds against a request budget dominated by Overpass
+at seconds.
+
+**RAM_STORE vs MMAP for elevation is a no-op**, which is not what I expected.
+Boot 1.1 s both ways, flexible route 12.5 vs 12.3 ms, RSS 1051 vs 1073 MB.
+Elevation is consumed at import time and baked into the graph; at serve time
+the setting does nothing. The audit's suggestion that RAM_STORE is "probably
+the wrong call on a memory-billed container" does not hold.
+
+**What surprised me.** Both real bugs in this phase were found by *running* the
+script, not by reading it. `/usr/libexec/java_home -v 21` returns a Java 8 home
+when no JDK 21 is registered — it ignores the version filter — so discovery
+that trusted it turned a working machine into "Java 8 is too old". And
+Geofabrik answers **HTTP 200 with an HTML page** for a region path that does
+not exist, so `curl -f` succeeds and a 12 KB HTML document lands named
+`.osm.pbf`; it died three steps later inside osmium. The checksum guard I had
+just written treated "no published checksum" as a warning and stepped past it.
+It now treats it as the failure it is.
+
+**What I did not do.** Docker is not installed on this machine. The two
+Dockerfiles, the entrypoint and the compose stack are written and reviewed but
+have never been built or run. Everything above the container boundary was
+exercised for real.
+
+**Live API calls:** GraphHopper self-hosted ~120 (unmetered), Overpass ~12,
+Open-Meteo ~25, Geofabrik 4 extracts.
+
+---
+
+## Launch phase 6.5 · The PWA, and three bugs only a real offline load finds
+
+The brief asks for a manifest, icons, a service worker, and the app shell plus
+the last result cached. The hard requirement is the one the project turns on:
+**an offline-served route must be visibly labelled as cached, with its age.**
+
+### The thing the brief does not settle, and how it was settled
+
+The house rule is that browser storage is opt-in and labelled. The brief says
+cache the last result. Those pull in opposite directions, because a *result* is
+a polyline through the streets around wherever the user is standing — the most
+location-revealing object this app touches.
+
+They are only in tension if the cache is treated as one thing. It is two:
+
+- **the shell** — HTML, JS, CSS, icons. Cached unconditionally. It is the
+  program. Identical bytes for every visitor, reveals nothing, and it is the
+  entire reason the app opens on a train.
+- **the result** — cached **only after an explicit opt-in, off by default**, one
+  route at a time and never a history, with the revocation actually deleting
+  rather than merely ceasing to add.
+
+**Map tiles are cached under neither.** A tile cache is a record of where you
+have been, and they are third-party. The cost is that an offline route has no
+map behind it — affordable precisely because Phase D verified the map is not
+load-bearing: with `MapView` display:none, the list still carries every
+duration, score, blocker and rest stop.
+
+### Where the label lives, and why in four places
+
+`TrustSignal`'s rule is that volume scales with severity but presence never
+does. The same shape applies to age, so `lib/offline.js` is the single place
+that decides the wording, tiered at 15 minutes and 6 hours — thresholds set by
+the *enrichment*, which is what actually rots. A route's shape and its
+accessibility findings hold for weeks; air quality, rest stops and the best
+departure time are measurements of a moment.
+
+| surface | form | why it has to be there |
+|---|---|---|
+| pill under the top bar | `saved 14m ago` | the one no panel snap can hide |
+| compact row | `saved 14m ago` | at peek the row *is* the whole route |
+| card | headline + what has gone stale | the long form, where there is room |
+| results block | headline + cause | says *why* there is a saved copy |
+
+**An unknown age is the loudest tier, not the quietest.** A missing timestamp,
+an unparseable one, and one in the future because the device clock moved all
+produce "Saved copy. Meander cannot tell how old it is." A cache entry that
+cannot say how old it is is the one least worth trusting, and rounding that to
+"0 minutes ago" would be a specific false claim rather than a missing one.
+
+**"You are offline" and "the server is unreachable" are different sentences.**
+The second is commoner and sending that user to restart a router that was never
+the problem is a small lie with a real cost.
+
+### Two bugs that were not about caching
+
+**A departure time can expire, and `BetterLater` had no notion of it.**
+`best_departure` is an absolute instant computed when the request was made, so a
+tab left open past it — or a route replayed hours later — kept advising *"better
+if you leave at 19:15"* at ten in the evening. It is withdrawn now, not
+recomputed: choosing a new time needs the air-quality and cloud-cover series for
+the hours ahead, which is exactly what an expired or cached response no longer
+has. The clock ticks (`useNow`) rather than being read once, because the
+ordinary way to hit this is a phone left on a table, where nothing re-renders.
+
+**The README claimed "no browser storage."** That stopped being true at 6.7,
+when the units preference landed, and nobody updated the sentence. Corrected to
+a table of what is kept, when, and what it took to be allowed to keep it.
+
+### Three bugs the browser found, and one the build did
+
+Every one of these produced output that looked fine.
+
+1. **`Vary: Origin` versus Vite's `crossorigin`.** Vite writes `crossorigin` on
+   exactly two tags — the module script and the stylesheet — so those requests
+   carry an `Origin` header while the worker's precache fetches do not. Cache
+   API matching honours `Vary`, so the stored entries were rejected for the
+   app's own JavaScript and CSS while the manifest and icons matched perfectly.
+   The document came back from cache, the tab title was right, `#root` was in
+   the DOM, and the page was blank. `ignoreVary: true` is correct rather than
+   merely convenient: every shell URL is one immutable content-hashed
+   representation, so there is no second variant to serve by mistake.
+
+2. **Caching the stream deadlocked the request.** `await` on
+   `response.clone().text()` before returning meant waiting for an SSE stream to
+   *end* before the page saw its first byte — and against the tee's backpressure
+   it never resolved at all. `event.waitUntil` instead, which is what the hook
+   is for. The symptom was an empty cache, pointing nowhere near streaming.
+
+3. **`fetch(request)` consumes the request body.** The cache key is a SHA of
+   that body, and hashing it *after* the fetch throws `Request body is already
+   used`. Inside `waitUntil` that rejection goes nowhere: the page got its
+   routes, nothing was logged, and the only evidence was a results cache that
+   existed and was empty. The key is computed before the fetch now, and the old
+   entry is dropped only once the new one is ready to write — deleting first is
+   the obvious order and leaves the device with neither on any failure.
+
+4. **A non-global `String.replace` substituted a comment.** The build plugin
+   fills `__VERSION__` and `__PRECACHE__` into `sw.js`; the first occurrence of
+   each was the sentence in the file's own header explaining what they were. The
+   worker shipped with a literal `__PRECACHE__` in it. `replaceAll`, plus an
+   assertion that no placeholder survives, plus one that `/index.html` is in the
+   list — the plugin also needed `enforce: 'post'`, because Vite emits the
+   document after the default hook order and the first precache list was
+   everything except the page.
+
+### Verified
+
+- **`scripts/pwa-gate.mjs`, 25/25.** It does not emulate being offline, it
+  **stops the server** — `Network.emulateNetworkConditions` applies to the
+  page's network stack, and the requests that matter here are the worker's, so
+  an emulated run can pass while a real one fails.
+- Separate from `gate.mjs` on purpose, which stays at **14/14**. That number is
+  quoted elsewhere and adding checks to it would move something people read.
+- **The permalink contract turns out to be what makes offline work at all.**
+  Geocoding is never cached — a search box's contents are the user's words — so
+  an offline reload cannot look a place up. It does not need to: the controls
+  are already in the URL, and `check:permalink` guarantees the decoded state
+  rebuilds a byte-identical request body, which is exactly the key the worker
+  stored the result under. Two features written for unrelated reasons, and one
+  is load-bearing for the other.
+- `check:offline`, 13 checks in the build, covering the invariant directly:
+  there is no age — including one it cannot work out — for which the label is
+  absent, empty, or quieter than the situation deserves.
+- A two-line row costs 20 px each, so peek grows 60 px rather than dropping a
+  route or truncating "Accessible" to make room. Measured, not derived.
+- 567 tests, 2 skipped. ruff clean. axe clean in the offline state too.
+
+### What I did not do
+
+- **No `vite-plugin-pwa`.** It is a good plugin, but it brings Workbox to
+  generate a worker whose behaviour around POST caching and a permission gate is
+  the interesting part of this phase, not boilerplate to delegate.
+- **No rasteriser dependency for four flat-colour icons.** `scripts/make-icons.mjs`
+  draws them with `node:zlib` and a distance field. The maskable variant is a
+  *different drawing* — smaller against a full-bleed plate — rather than the
+  standard one relabelled, which is the usual mistake and clips the corners off
+  the mark. The first attempt put a dot at the end of the route to read as a
+  destination; at icon sizes it touched the stroke and the whole thing read as a
+  snake with a head.
+- **Not tested on a real phone.** Installability is asserted from the manifest,
+  the icons and a registered worker in headless Chrome. Whether the install
+  prompt appears, and what the icon looks like on a home screen, is still
+  BLOCKED.md-adjacent and is the same open request as Phase 5's.
+
+**Live API calls:** GraphHopper self-hosted ~30 (unmetered), Nominatim 0
+(recorded), Overpass ~6, Open-Meteo ~12.
+
+---
+
+## Launch phase 4 · AWS, written and not applied
+
+Four CloudFormation stacks, a deploy workflow on GitHub OIDC, and a gate table
+where every row says UNVERIFIED and names the command that would settle it.
+
+**Nothing was applied.** The credentials here are account root and creating
+billable resources was out of scope. What *was* done is run
+`aws cloudformation validate-template` — a read-only call — and then `cfn-lint`,
+against all four. Both pass. That is a much weaker claim than "it works", and
+`infra/README.md` opens by saying so: a template that parses proves nothing
+about whether a security group rule is right or two services can reach each
+other.
+
+CloudFormation rather than Terraform or CDK for exactly that reason. It is the
+only one of the three whose templates can be checked against the real AWS API
+without installing a provider, standing up state, or creating anything.
+
+**What the account can actually do, checked rather than assumed.** There is no
+Route 53 hosted zone, and the `freshhaul.com` certificate in us-east-1 is
+`VALIDATION_TIMED_OUT` — requested, never validated, expired after 72 hours
+because the DNS records were never published. So the domain and both
+certificates are optional parameters and the distribution falls back to its own
+`cloudfront.net` name. HANDOFF.md said "an ACM cert exists"; it exists and it is
+dead, which is a different thing.
+
+**Three settings that are load-bearing and none fails loudly**
+
+`MEANDER_GRAPHHOPPER_SELF_HOSTED=1`, because the hostname sniff resolves a
+Cloud Map name to *not* self-hosted, `path_details()` then drops `smoothness`,
+and the accessible model silently stops excluding surfaces recorded as
+impassable.
+
+`MEANDER_TRUSTED_PROXY_HOPS=2`, and HANDOFF.md said 1. Both are right for
+different topologies: 1 behind an ALB alone, 2 behind CloudFront *and* an ALB,
+because CloudFront sets X-Forwarded-For to the viewer and the ALB appends
+CloudFront's address. The app sees `viewer, cloudfront` and counts from the
+right. At 1 the limiter still works — it just puts every request in the world
+in one bucket, which is what makes it hard to notice.
+
+`MEANDER_CACHE_DB` deliberately unset, because setting it points the API away
+from the `data/cache.db` baked into the image and every route quietly drops to
+`geometry_only`. Phase K found this in `render.yaml`.
+
+**The cost estimate has two lines worth arguing about.** ~$108/month, and the
+NAT gateway is $32 of it — more than the API it serves — while the load balancer
+is $18, about as much as everything it balances. `infra/README.md` says plainly
+that below this size ECS is the wrong shape and a single small instance would
+do. An IaC document that only argues for itself is not much use.
+
+**What I did not do.** No WAF: $6/month plus per-request, and the app already
+has a per-IP bucket and a daily ceiling — worth adding when there is traffic to
+protect, not before. No autoscaling: a scaling policy with nothing to size it
+from is a guess with a bill attached. No database: there is no user data, and
+adding one would create the retention question this project exists not to have.
+
+---
+
+## Launch phase 3, revisited · The images, finally built
+
+Phase 3 wrote both Dockerfiles, the entrypoint and the compose stack, and never
+built any of them. Building them found what building always finds.
+
+**`.dockerignore` governs two images and was written for one.** Both Dockerfiles
+build from the repository root, so the blanket `graphhopper/` exclusion — right
+for keeping a multi-GB graph out of the API image — also took the router's own
+`config.yml` with it. The router build failed on its first ever run.
+
+**The graph was in the router image three times.** `docker history` on a 485 MB
+graph showed 509 + 509 + 556 MB: the staging COPY, the `cp -a` into place (and
+`rm -rf` afterwards writes a whiteout, so the bytes stay in the layer below),
+and then a `chown -R` that rewrote every file's metadata — layers being
+copy-on-write per *file*, that copied all of it again. **2.65 GB → 1.2 GB**:
+create the user first, `COPY --chown` straight to the final path, leave /app
+root-owned because `gh` only reads the JAR.
+
+The conditional bake-in is two stages selected by `GRAPH_SOURCE`, which is the
+only way to make a COPY conditional. It needs BuildKit, and that is the point:
+BuildKit builds the selected stage alone, so `GRAPH_SOURCE=none` really produces
+an image with no graph (520 MB) rather than quietly including whatever happened
+to be staged.
+
+**Verified on colima + Docker 29 + buildx, arm64.** Both images build both ways;
+`docker compose up` reaches healthy on both services; `/api/health` reports
+`clip_available: false`, 146 CLIP segments, and `self_hosted_source: "env"` with
+`smoothness` present — which is precisely the case Phase 1.1 exists for, since
+the API reaches the router at `http://graphhopper:8989`, a hostname. A real
+request returns three routes with `scoring_method: "clip"`.
+
+---
+
+## Launch phase 7 · Technical soundness, and four bugs the new tests found
+
+567 tests to **626**, plus a coverage floor, CI, a Makefile, a runbook and six
+ADRs. The interesting part is that every new category of test found something.
+
+**The greenness regression test — the promise nothing was checking.** The app is
+named after a claim no test asserted end to end. `scripts/verify_selfhosted.py`
+checks something adjacent: that the three presets return *different geometries*
+against a live server. That is a check on the router, it needs a network, and it
+would pass happily on three routes of identical greenness.
+
+The invariant is not "nature is always greener" but **greener, or it admits it**
+— `route_nature` ships the best it can find with a `preset_note` naming the
+promise it missed. Which is exactly the shape of the defect found while
+pre-warming the cache, where the greenness floor was measured without the CLIP
+term while the card was rendered with it.
+
+**Property tests over coordinates found two real bugs on their first run.** The
+existing tests check the maths against hand-computable cases, which catches a
+wrong formula and not the class of bug that actually bites geographic code.
+
+`bearing_deg` could return exactly **360.0** — `atan2` gives -2.8e-14 degrees
+for a due-north step across the antimeridian, Python's float modulo takes the
+sign of the divisor, and 360 minus that much is not representable. The docstring
+promised `[0, 360)`. And `interpolate` between -89.99999999999999 and 90.0
+returns 90.00000000000001: a nanometre past the pole, and still a latitude
+`models.py` refuses.
+
+Two of the properties were themselves wrong, which was also instructive.
+`SamplePoint` carries `at_m`, not `distance_m`. And `to_lonlat_pairs` rounds to
+six decimal places — deliberately, so two people searching the same place
+produce a byte-identical request body (Phase J, defect 3) — so the round-trip
+property asserts routing precision rather than float equality. There is now a
+property pinning that rounding, because it is also a privacy property: a
+coordinate at full float precision is far more identifying than one at 0.1 m.
+
+`derandomize=True`, because this is a build gate. Without it Hypothesis explores
+a different set each run and the same commit can pass then fail, which is how a
+property suite gets labelled flaky and deleted.
+
+**The SSE contract, asserted against the file that parses it.** The existing
+streaming tests read the stream through a helper that mirrors the frontend's
+parser — right for behaviour, wrong for a wire format, because changing the
+framing on both sides of a shared helper leaves every test green and the browser
+blank. The last test reads the literal `line.slice(5)` out of `client.js`.
+Verified by breaking it.
+
+**`/metrics`, and a test that it can never describe a person.** Every series is
+a whole-instance total with no labels, and the tests assert the *shape*: no
+label, no non-integer value, no series named after a request attribute. That
+last check first searched the raw text for "ip" and failed on the word "clip" in
+a HELP line — the sort of check that gets deleted rather than fixed, taking the
+rule with it.
+
+**The coverage floor is 85%, measured at 87.33%,** over source modules with the
+tests excluded. Statement coverage rather than branch, and the reason is
+recorded: `branch = true` collides with the subprocess in
+`test_privacy_guard.py`, because pytest-cov's `.pth` auto-instruments the child
+without branch mode and combining the two fails the entire run. That subprocess
+is the test proving the privacy guard holds in a fresh interpreter.
+
+**The load test measures the right question, after measuring the wrong one.**
+Not requests per second — that would be a measurement of Overpass, whose tail is
+13.6 s against routing's 24 ms. Its first run reported p50 0.00 s and p95 9.81 s,
+which is not a distribution but two: a 429 is refused in microseconds and 38 of
+50 requests were refused, because all the load came from one address and shares
+one bucket by design. With served and refused reported separately and the
+limiter raised: 50/50 served, **p50 3.48 s, p95 5.36 s** — the shape the p95
+alarm was sized for. The hint it printed named an environment variable that does
+not exist.
+
+**CI runs the suite twice**, the second time under `unshare -n` with no network
+namespace at all. conftest blocks sockets and a meta-test proves the guard is
+active, but if that guard were removed the suite would still pass on a
+developer's network and silently start depending on it.
+
+---
+
+## Launch phase 8 · Finishing
+
+`DEPLOY.md` rewritten for AWS, keeping and extending the one part of it worth
+keeping — the "things that will look like bugs and are not" table, which went
+from 8 rows to 15. Most of it was never about Render: `clip_available: false`,
+`scoring_method: geometry_only`, identical routes from an ignored custom model,
+`null` rest stops. The new rows are the silent ones — `MEANDER_CACHE_DB` set,
+`smoothness` missing from `path_details`, everyone rate-limited at once — each
+of which leaves the app looking healthy.
+
+`render.yaml` and `vercel.json` moved to `docs/legacy/` with a note on what the
+AWS version changed and why, and how to go back if the cheaper shape is worth
+losing two of the three presets for.
+
+**What a reviewer should still be sceptical about**, unchanged in kind from the
+hostile audit and shorter than it was:
+
+- **Nothing is deployed.** The templates validate; that is all.
+- **The CLIP prompt choice rests on three location pairs**, one of which has two
+  images, and the winning pair measures aesthetic appeal rather than greenery.
+- **No real phone.** Everything about the mobile layout and the PWA is measured
+  in headless Chrome at 390×844.
+- **The naturalness and air-blend weightings are judgements**, written down
+  rather than buried.
+
+**Live API calls this phase:** Mapillary ~600 (metadata and image downloads for
+the cache pre-warm), GraphHopper self-hosted ~200 (unmetered), Overpass ~40,
+Open-Meteo ~60, Nominatim 0.
+
+---
+
+# The iOS run
+
+## iOS phase 0 — Reconciling the two branches · 2026-08-06
+
+The brief for this run recommended taking `feat/launch` as the base and porting
+three features onto it. It also said to build both frontends, screenshot them at
+390 × 844, and let the project owner choose with their eyes rather than from a
+table. That happened, and **the answer came back the other way**: keep the
+redesign's frontend, port the launch programme onto it.
+
+**One thing the brief could not have known.** It was written against `main` at
+`867e8e2` with both branches unmerged. By the time this run started, the
+redesign had already been merged — `origin/main` was `0de9c7a`, "Merge pull
+request #2". So "branch from `feat/launch`" no longer meant branching from the
+trunk; it meant branching away from it and paying the reconciliation at PR time
+instead of now. That is most of why the recommendation was not followed.
+
+### What was checked before it was trusted
+
+The brief's own provenance note says 9 of its 126 claims were wrong, and asks
+the reader to expect the same ratio. Everything load-bearing was re-checked:
+
+| claim | verdict |
+|---|---|
+| `res.body.getReader()` silently falls through to a non-streaming branch under a patched `fetch` | confirmed, `client.js:89` and `:95` |
+| `navigator.vibrate` does nothing in WKWebView, so the 200 m barrier warning is silent | confirmed, `FollowMode.jsx:164` |
+| `MEANDER_ALLOWED_ORIGINS` is `''` in the task definition | confirmed, `infra/20-services.yaml:259` |
+| …and `MEANDER_ALLOW_LOCAL_ORIGINS` therefore defaults *on*, so production allowlists `localhost:5173` | confirmed, `config.py:322` |
+| `env(safe-area-inset-*)` exists on `feat/launch` and not on the redesign | confirmed — and now the reason Phase 5 is implementation rather than verification |
+| the redesign's `index.html` has an inline anti-flash script; `feat/launch`'s does not | confirmed — so the CSP will need its SHA-256, which the brief called a trap and it is |
+| Xcode 26 minimum for Capacitor 8 | machine has 26.6; not a blocker |
+
+**One that was wrong, and it mattered.** The brief warned that a GraphHopper
+fixture is keyed on a hash of the request body, that both branches had turned
+`instructions` on independently, and that this would have to be reconciled. The
+implication everyone would draw is that one set of fixtures must be re-recorded
+— which needs a live router, which needs a JDK 21 this machine does not have.
+
+`build_request_body` is **byte-identical on both branches**. Diffed rather than
+read. So a fixture signature means the same request on both sides, and the two
+sets could simply be unioned: 136 files from the redesign, 297 from launch, 111
+shared. The 111 shared ones differ only in their regeneration timestamp. The 25
+and 34 unique GraphHopper signatures are not competing recordings of the same
+request — they are *different requests*, exercised by tests that only exist on
+one side.
+
+Total: **322 fixture files, no re-recording, no live call.** That was the single
+biggest risk in the phase and it evaporated on inspection, which is an argument
+for inspecting.
+
+### What the merge actually did
+
+`frontend/` was resolved to main's tree **byte-for-byte** — verified with a
+`diff --name-only` that came back empty, not by reading the conflicts. Thirty-
+seven files from the launch frontend were dropped rather than landed unused, and
+BLOCKED.md §5 lists the seven that have to come back and what each is for.
+Everything else took `feat/launch`: the backend, `infra/`, the containers, the
+Makefile, the scripts, the ADRs and the runbook.
+
+**Three silent duplications the auto-merge produced**, all of which would have
+been someone's afternoon:
+
+1. `models.py` ended up with **two `class Step`** — the launch one carrying
+   `lat`/`lon`, the redesign one carrying `interval` and `street_name`. Python
+   keeps the last definition, so it would have "worked", and the frontend reads
+   `.interval`. The launch one was deleted.
+2. `routing.py` ended up with **two `_parse_instructions`**, likewise resolved
+   by definition order rather than by anyone deciding.
+3. `main.py` ended up with **two `steps=` in one `Route(...)` call**. That one
+   is a `SyntaxError`, so it would have failed loudly — the only reason it is
+   listed with the other two is that it came from the same cause.
+
+None of the three appeared as a conflict. `git` merged each cleanly and produced
+something wrong. A `compileall` pass and a duplicate-definition scan over every
+backend module are what found them.
+
+### Two tests that asserted things about the machine
+
+Taking the baseline, before touching anything: **two frontend tests and one
+backend test failed on a clean checkout**, and all three pass in CI. That split
+is worse than a red suite, because CI cannot reproduce it and the developer
+cannot trust it.
+
+`sun.test.js` carried the comment *"the suite runs under TZ=UTC"* and nothing
+set `TZ`. `canStateLocalTime` compares a longitude's solar offset against the
+viewer's timezone, so on a machine in Asia/Colombo both assertions inverted:
+London refused, Colombo accepted, and nothing in the failure named the clock.
+
+The backend one was this project's own BLOCKED.md §3, filed and left. Its
+proposed fix — `monkeypatch.delenv` — **does not work**: `Settings` is a frozen
+dataclass resolved at import, so the module under test has already read the
+variable. Replacing the module-level `settings` object is what reaches it.
+
+Both are now supplied by the harness rather than by the environment, and both
+have a test pinning the property directly.
+
+### Measured
+
+| | before | after |
+|---|---|---|
+| backend tests | 395 | **632** |
+| frontend tests | 43 passed, 2 failed | **46** |
+| statement coverage | — | **87.55%**, floor 85% |
+| `cfn-lint infra/*.yaml` | — | clean, 4 templates |
+| GraphHopper fixtures | 53 | 87 |
+| all fixture files | 136 | 322 |
+
+`make check` is green and now runs the whole of CI rather than most of it — the
+frontend suite was not in it before.
+
+**Live API calls this phase: zero.** Nothing in it needed a network.
+
+### What surprised me
+
+The reconciliation was supposed to be the hard part and the fixtures were
+supposed to be the hardest part of that. Neither was. The genuinely dangerous
+thing was that `git merge` reported success on three files it had quietly
+broken, and two of those three would have run.
+
+### What was deliberately not done
+
+- **No frontend features were ported.** Not safe-area insets, not permalinks,
+  not export, not the offline store. Each needs wiring into a different
+  component tree than it was written for, and doing that inside a 265-file merge
+  commit would make both unreviewable.
+- **`pwa-gate.mjs` was not brought back and will not be** in its current form.
+  It asserts that a service worker serves the shell with the server stopped.
+  Service workers do not register under `capacitor://localhost`, so on the
+  platform this is now aimed at it would assert nothing while reading as
+  coverage.
+- **The graph was not built.** `scripts/graphhopper.sh setup` needs a JDK 21 and
+  this machine has Java 1.8.

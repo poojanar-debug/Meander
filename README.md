@@ -30,25 +30,93 @@ negotiable; that is not.
 
 ## Status
 
-Eleven build phases (`phase-a` … `phase-k`) plus an eight-phase frontend redesign
-(`redesign-phase-1` … `redesign-phase-8`) against
-[docs/DESIGN-HANDOFF.md](docs/DESIGN-HANDOFF.md). 393 backend tests and 45 frontend tests pass
-offline, the frontend has no WCAG 2.1 AA violations in an automated pass at light desktop, dark
-desktop and 390 px, and the deploy build boots with torch absent.
+**It produces real routes.** That was not true when the first eleven build phases were tagged
+(`phase-a` … `phase-k`), and the sentence that used to sit here — "it has never produced a real
+route" — is what a self-hosted GraphHopper 11 fixed.
 
-One backend test fails, for an environmental reason rather than a regression — see
-[BLOCKED.md](BLOCKED.md) #3.
+Two branches then grew from that point in parallel and have now been reconciled onto one:
+`feat/launch` built the deployment — backend hardening, containers, CloudFormation, observability
+— and `claude/code-prompt-design-handoff` rebuilt the frontend across eight phases against
+[docs/DESIGN-HANDOFF.md](docs/DESIGN-HANDOFF.md). **This tree is the launch backend under the
+redesign frontend.** The launch branch's own frontend was not merged; [BLOCKED.md](BLOCKED.md) §5
+lists the seven pieces of it that have to come back, and why each one is wanted.
 
-**It does produce real routes now**, against a self-hosted GraphHopper covering Sri Lanka, Greater
-London and Noord-Holland. Eighteen hand-made fixtures remain for the offline test suite, and any
-route derived from one still says so in the response, on the card, and in a banner across the top
-of the app. [BLOCKED.md](BLOCKED.md) records what is resolved and what still needs a human — the
-short version is that **no route has ever been scored by CLIP**, because `data/cache.db` has never
-been pre-warmed. [PROGRESS.md](PROGRESS.md) is the full build log, including the hostile self-audit
-and what a reviewer should still be sceptical about.
+### What is proven
 
-Nothing here is deployed. [DEPLOY.md](DEPLOY.md) is written to be followed without asking
-questions.
+**632 backend tests and 46 frontend tests pass offline**, at 87.55% statement coverage against an
+85% floor. The suite never opens a socket, and a job in CI runs it under `unshare -n` to prove
+that rather than trust it. The deploy image imports with torch absent, checked against the real
+requirements file. The frontend reports no WCAG 2.1 AA violations in an automated pass at light
+desktop, dark desktop and 390 px.
+
+All three presets route, against a self-hosted server carrying Sri Lanka + the Netherlands + Great
+Britain in one graph. `scripts/verify_selfhosted.py` asserts it at four points, one per imported
+region: all three presets answer, their geometries differ from each other, and `smoothness` comes
+back as a path detail — which is the fifth hard accessibility constraint, and the one the hosted
+API cannot supply at all.
+
+**The frontend answers "when should I go?" and "which way, exactly?"** — a best-departure window,
+sunrise and sunset computed in the browser, turn-by-turn directions with a barrier rendered inside
+the step you would meet it on, and a live follow mode in which the position never leaves the page,
+measured at zero outbound requests.
+
+⚠ **It no longer installs or opens offline, and that is a regression this tree owns.** The service
+worker, the offline store and the two headless-browser gates belonged to the launch frontend and
+did not merge. The claim that used to sit here — 25 checks with the server stopped — was true of a
+frontend this branch does not have, so it is withdrawn rather than restated. It is coming back
+re-based on native storage, because a service worker never registers under `capacitor://localhost`
+in the first place; [BLOCKED.md](BLOCKED.md) §5 has the list.
+
+### What is measured
+
+One uncached `POST /api/routes` — a 45-minute foot round trip near Hyde Park, all three
+objectives, nothing cached:
+
+| | |
+|---|---|
+| wall clock | **14.0 s** |
+| GraphHopper requests issued | **8** — 6 nature candidates, 1 fastest, 1 accessible |
+| fastest | 35.9 min · 2,939 m · 64% of its length checked · 3 findings |
+| nature | 22.4 min · 1,791 m · 88% checked · greener than fastest (0.666 vs 0.646) |
+| accessible | **blocked** — hard constraints reject it, and it says so |
+
+That is one measurement on one machine against a warm graph, not a benchmark. The nature route
+came back well under the time budget and carries a `preset_note` saying so, which is the app
+working as intended rather than a defect.
+
+### What is still unverified
+
+**Nothing is deployed, and the AWS stacks have never been applied.** All four
+CloudFormation templates validate and `cfn-lint` passes, which proves they are
+well-formed and nothing else. [`infra/README.md`](infra/README.md) lists
+seventeen gate items and marks every one UNVERIFIED with the command that would
+settle it.
+
+**The scenery scores are now real, and you should still read the caveats.**
+`data/cache.db` ships with 146 pre-warmed CLIP segments and `/api/routes`
+returns `scoring_method: "clip"` — but the prompt pair was chosen from three
+location pairs, one of which rests on two images, and `v2_plain` measures
+aesthetic appeal rather than greenery. The full table and both caveats are in
+`backend/scoring.py` beside the constant, and in
+[BLOCKED.md](BLOCKED.md) §2.
+
+**Not tested on a real phone.** The layout and the targets are measured in headless Chrome at
+390×844. That is not the same claim as a phone in a hand, and it is about to matter a great deal
+more — this tree is the base for a native iOS build, where a browser at 390×844 reports zero
+safe-area insets and this frontend has no `env(safe-area-inset-*)` in it at all.
+
+### What is deployed
+
+Nothing. [`infra/`](infra/) is four CloudFormation stacks that would deploy it —
+ECS Fargate for the API and the router, CloudFront and S3 for the app, GitHub
+OIDC for CI with no stored AWS credentials — and none has been applied.
+[DEPLOY.md](DEPLOY.md) is written to be followed without guessing.
+
+What *has* run end to end is the same stack under `docker compose`: both images
+build, both containers reach healthy, and a real request returns three routes
+with real CLIP scores. [PROGRESS.md](PROGRESS.md) is the full build log,
+including the hostile self-audit and what a reviewer should still be sceptical
+about. [docs/adr/](docs/adr/) has the six decisions worth questioning.
 
 ### What the redesign added
 
@@ -94,7 +162,7 @@ questions.
 
 ### The split that makes it deployable
 
-CLIP needs 2–3 GB of RAM. The Render free tier has 512 MB. So scoring is split in two:
+CLIP needs 2–3 GB of RAM. The deployed container has 1 GB. So scoring is split in two:
 
 | local (`requirements.txt`) | deployed (`requirements-deploy.txt`) |
 |---|---|
@@ -109,7 +177,10 @@ Cached regions get real CLIP scores. Everywhere else falls back to geometry with
 
 ## Setup from a clean clone
 
-Requires Python 3.11+ and Node 18+.
+Requires Python 3.13 and Node 18+. `make help` lists every command in the
+project; `make check` runs exactly what CI runs.
+
+> Python 3.14 cannot build `pydantic-core` as of this writing. Use 3.13.
 
 ```bash
 git clone https://github.com/<you>/meander.git && cd meander
@@ -241,13 +312,41 @@ Full contract, including the streaming shape and the blocked-route cases: [docs/
 
 ## Privacy
 
-Stateless by design. No location history, no cookies, no third-party analytics, no browser
-storage. Coordinates, IP addresses and user agents are never logged or persisted — there is a
-filter in `backend/logging_setup.py` that redacts them as a backstop.
+Stateless by design. No location history, no cookies, no third-party analytics. Coordinates, IP
+addresses and user agents are never logged or persisted — there is a filter in
+`backend/logging_setup.py` that redacts them as a backstop.
 
 Usage is counted as aggregates only (`route_requests_total`, `routes_blocked_total`,
 `cache_hits_total`, `segments_scored_total`) plus a daily unique-session count derived from an
 in-memory digest keyed by a salt generated at process start and never written anywhere.
+
+### What the browser keeps
+
+**One key, holding one word.**
+
+| what | when | why it is allowed |
+|---|---|---|
+| `meander:theme` — `light` or `dark` | after you pick one | five characters, says nothing about anybody, and without it a dark-mode reader gets a frame of cream on every load |
+
+Nothing else. No route is written anywhere, no units preference, no service worker cache, no map
+tiles, no cookie, no history. The theme read is wrapped in a `try`, because Safari in private mode
+throws on access rather than on write.
+
+> This section used to describe three things the browser kept, including a saved route and a
+> service-worker app cache. That was the launch branch's frontend, which did not merge — see
+> [BLOCKED.md](BLOCKED.md) §5. Saved routes are coming back on native storage rather than a
+> service worker, and this table changes when they do, not before.
+
+Map tiles will **never** be cached. A tile cache is a record of where you have been, and they come
+from a third party. The cost is that an offline route has no map behind it — which the app says,
+and which it can afford, because the list carries every duration, score, blocker and rest stop.
+
+A route served from that cache is always labelled as saved, with its age, on the row, on the card
+and on a pill under the top bar that no panel position can hide. Past fifteen minutes it also
+names what has stopped being true: air quality, rest stops and the best time to leave are
+measurements of a moment, while the shape of the route is not.
+`frontend/scripts/check-offline.mjs` holds that contract — there is no age, including an age it
+cannot work out, for which the label is allowed to be absent or quiet.
 
 ---
 
@@ -281,22 +380,36 @@ confidence sentence is warning you about.
 
 ### Scenery scores are estimates, and they say which kind
 
-| `scoring_method` | what produced the number |
+Every route reports `scoring_method`, and it means exactly three things:
+
+| value | what produced the numbers |
 |---|---|
-| `clip` | CLIP inference over Mapillary street-level imagery near the route |
-| `geometry_only` | route shape, elevation profile and OSM road tags — no imagery |
-| `placeholder` | **not a measurement.** Do not present it as one. |
+| `clip` | CLIP over real Mapillary street imagery, read from the pre-warmed cache |
+| `geometry_only` | OSM road-class and surface tags, curviness and elevation — no imagery |
+| `placeholder` | The route itself came from a hand-built fixture. The maths ran; the terrain is invented. Not a measurement of anywhere. |
 
-CLIP scoring only exists where somebody has run the offline pre-warm for that area. Everywhere
-else falls back to geometry, which is a judgement encoded in a lookup table, not an observation.
-The naturalness and air-proxy weightings in `geometry.py` are opinions, and reasonable people would
-choose different numbers.
+`data/cache.db` ships with 146 CLIP segments across the five demo locations, so
+those return `clip`. Anywhere else returns `geometry_only` and says so.
 
-The prompt pair that drives CLIP scoring was chosen against generated reference images, not real
-street photography — see PROGRESS.md, Phase G. Four of the seven pairs tried, including the one
-originally specified, ranked an asphalt image as *more* scenic than a foliage one. That is a
-warning about how brittle zero-shot aesthetic scoring is, and it has not yet been re-checked
-against real imagery.
+**Three things to be sceptical about, and they are not small.**
+
+The prompt pair was chosen on three real location pairs. Of the seven variants,
+only `v2_plain` and `v1_extreme` pointed the right way on all three — the
+previous default `v3_nature` and the widest-separating London variant
+`v5_street` **both invert on the Colombo pair**, scoring a city fort greener
+than a park. The full table is in `backend/scoring.py`.
+
+The evidence behind that is thin: four to six images per location, and only two
+at Viharamahadevi — which is the single point deciding the one pair that
+separates the candidates, and the only non-European pair.
+
+And `v2_plain` is "a photo of a beautiful place" against "a photo of an ugly
+place", which measures **aesthetic appeal, not greenery**, while the number it
+feeds is presented as a nature score. They correlate on this sample. A
+photogenic stone street would score well without a tree in it.
+
+The naturalness and air-blend weightings are judgements rather than
+measurements, written down here and in PROGRESS.md rather than buried.
 
 ### Air quality is regional, blended with a local proxy
 
@@ -312,17 +425,22 @@ everywhere, and the app cannot tell a usable bench from a broken one. When Overp
 the field is `null` — "we could not look" — which is deliberately distinct from `[]`, "we looked
 and found none".
 
-### The demo runs on hand-built routing data
+### The keyless demo runs on hand-built routing data
 
-There is no GraphHopper key in this checkout, so the GraphHopper fixtures are **synthetic**: real
-response schema, plausible geometry, invented streets. Every route derived from one carries
-`synthetic_upstream: true`, is labelled `placeholder`, and the UI prints "Built from demonstration
-data, not a live routing response. Do not follow it." Add a key and re-record to get real routes —
-see [BLOCKED.md](BLOCKED.md).
+Out of the box (`MEANDER_FIXTURES=replay`, no routing server) the committed GraphHopper fixtures
+are **synthetic**: real response schema, plausible geometry, invented streets. Every route derived
+from one carries `synthetic_upstream: true`, is labelled `placeholder`, and the UI prints "Built
+from demonstration data, not a live routing response. Do not follow it."
+
+Point the app at a self-hosted GraphHopper and that stops being true — the routes above under
+**Status** are real ones. The distinction survives in the response: `scoring_method` and
+`synthetic_upstream` say which kind you are looking at, on every route, always.
 
 ### Other things worth knowing
 
-- The free Render instance sleeps; the first request after a quiet spell takes 30–60 seconds.
+- Offline, the map is blank and the route list is not. Map tiles are deliberately never
+  cached — a tile cache is a record of where you have been, and they come from a third party.
+  A route served from the cache is always labelled with its age.
 - The daily routing ceiling is a real ceiling. When it is reached the app says so and stops.
 - Round-trip loops come from GraphHopper's `round_trip` algorithm with a fixed seed. The direction
   is not controllable, and the distance is derived from your time budget using conservative average

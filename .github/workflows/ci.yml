@@ -1,14 +1,22 @@
 name: ci
 
-# There was no CI on `main` at all, so nothing checked this pull request. This
-# is the smallest workflow that makes the project's own claims verifiable
-# rather than asserted — the standard CONTRIBUTING.md sets for everything else
-# here.
+# There was no CI on `main` at all, so nothing checked the redesign pull
+# request. This is the smallest workflow that makes the project's own claims
+# verifiable rather than asserted — the standard CONTRIBUTING.md sets for
+# everything else here.
 #
-# A larger version of this file exists on the `feat/launch` branch, with jobs
-# for the service worker, the headless-browser gates and the CloudFormation
-# templates. None of those things exist on this branch, so none of them are
-# checked here; when that branch lands, its file supersedes this one.
+# This file used to end by saying that `feat/launch` carried a larger version
+# which would supersede it. That branch has now landed, and it did not: the two
+# were reconciled rather than replaced, because most of what made the launch
+# workflow larger was checking a frontend this branch does not have. The
+# service-worker and headless-browser jobs are gone with the code they graded —
+# there is no sw.js, no gate.mjs and no pwa-gate.mjs here. `infrastructure` is
+# kept, because infra/ arrived in the same merge and cfn-lint is the only thing
+# standing between a malformed template and finding out at deploy time.
+#
+# When the frontend gates are ported back — wired to this frontend rather than
+# copied — their jobs come with them. Adding the jobs first would give five
+# green checks that grade nothing.
 
 # `push` is scoped to main rather than to '**', and that is the whole of the
 # de-duplication. With `push: ['**']` alongside `pull_request`, every commit on
@@ -68,8 +76,10 @@ jobs:
       # Mapillary token, and now supplies the absent token itself. BLOCKED.md #3
       # records why. This job would therefore catch the same regression even if
       # a runner somehow acquired one.
-      - name: Tests
-        run: python -m pytest backend/tests
+      - name: Tests, with the coverage floor
+        # The floor lives in pyproject.toml so it is the same number here and on
+        # a workstation. `make check` runs exactly this.
+        run: python -m pytest backend/tests --cov --cov-report=term:skip-covered
 
   suite-opens-no-sockets:
     # conftest.py blocks sockets and a meta-test proves the guard is active, so
@@ -158,3 +168,21 @@ jobs:
             exit 1
           fi
           echo "every colour is declared in the token blocks"
+
+  infrastructure:
+    # Every template that describes the deployment must at least be
+    # well-formed. This is a syntax check and nothing more — infra/README.md is
+    # explicit that none of it has ever been applied, and a template that parses
+    # is not a template that works.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: '3.13' }
+      - name: CloudFormation templates parse
+        # cfn-lint rather than `aws cloudformation validate-template`, which
+        # needs credentials. It also catches more: unresolved !Ref targets,
+        # unknown resource properties, and bad intrinsic function arguments.
+        run: |
+          python -m pip install cfn-lint
+          cfn-lint infra/*.yaml

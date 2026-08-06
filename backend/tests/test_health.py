@@ -57,7 +57,15 @@ def test_health_reports_which_routing_server_is_in_use(tmp_cache_db) -> None:
     with _client(tmp_cache_db) as client:
         routing = client.get("/api/health").json()["routing"]
 
-    assert set(routing) == {"endpoint", "self_hosted", "custom_models_available", "path_details"}
+    assert set(routing) == {
+        "endpoint",
+        "self_hosted",
+        # "hostname" on a deployed instance means nobody set the flag and the
+        # answer was guessed — which is how smoothness goes quietly missing.
+        "self_hosted_source",
+        "custom_models_available",
+        "path_details",
+    }
     assert isinstance(routing["self_hosted"], bool)
     assert routing["custom_models_available"] == routing["self_hosted"]
 
@@ -67,6 +75,9 @@ def test_a_self_hosted_deployment_does_not_demand_an_api_key(monkeypatch) -> Non
     self-hosted deployment over a key it has no use for."""
     from backend import config
 
+    # conftest pins the explicit flag for the whole suite; clear it to reach the
+    # hostname fallback this test is about.
+    monkeypatch.delenv(config.SELF_HOSTED_ENV, raising=False)
     monkeypatch.setattr(config, "GRAPHHOPPER_URL", "http://localhost:8989/route")
     assert "GRAPHHOPPER_KEY" not in config.Settings().missing_keys()
 

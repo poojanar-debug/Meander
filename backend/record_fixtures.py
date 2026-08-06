@@ -156,9 +156,18 @@ async def _record_enrichment(force: bool) -> int:
 async def main_async(services: list[str], force: bool) -> int:
     configure_logging(settings.log_level)
 
-    if settings.fixture_mode == "replay":
+    # Exactly `record`, not merely "not replay".
+    #
+    # `live` used to be accepted here and is what this repository's own .env
+    # sets, which was fine while every mode persisted fixtures. It no longer
+    # does — only `record` writes, because a deployed instance must not — so
+    # running this under `live` would spend real API credits, report
+    # "recorded N", and write nothing at all.
+    if settings.fixture_mode != "record":
         print(
-            "MEANDER_FIXTURES is 'replay', so nothing would be recorded.\n"
+            f"MEANDER_FIXTURES is '{settings.fixture_mode}', and only 'record' writes "
+            "fixtures. Under 'live' this would spend credits and save nothing; under "
+            "'replay' it would do nothing at all.\n"
             "Re-run as:  MEANDER_FIXTURES=record python3 -m backend.record_fixtures",
             file=sys.stderr,
         )

@@ -13,6 +13,7 @@ failure mode for something that cannot fail.
 
 from __future__ import annotations
 
+import asyncio
 import math
 from collections.abc import Sequence
 from dataclasses import dataclass
@@ -21,10 +22,17 @@ from itertools import pairwise
 from typing import Any
 
 import httpx
+import numpy as np
 
 from .config import OPEN_METEO_AQ_URL, OPEN_METEO_URL, OVERPASS_URL
 from .fixtures import BudgetExhausted, FixtureMissing, fetch
-from .geometry import LatLon, bearing_deg, cumulative_distance_m, haversine_m, sample_every
+from .geometry import (
+    EARTH_RADIUS_M,
+    LatLon,
+    bearing_deg,
+    cumulative_distance_m,
+    sample_every,
+)
 from .logging_setup import get_logger
 from .metrics import metrics
 
@@ -359,6 +367,7 @@ def rest_stops_on_route(points: Sequence[LatLon], elements: list[dict[str, Any]]
     cum = cumulative_distance_m(points)
     found: list[RestStop] = []
 
+    candidates: list[tuple[LatLon, str]] = []
     for element in elements:
         try:
             node = LatLon(float(element["lat"]), float(element["lon"]))
@@ -367,23 +376,42 @@ def rest_stops_on_route(points: Sequence[LatLon], elements: list[dict[str, Any]]
         amenity = (element.get("tags") or {}).get("amenity")
         if not amenity:
             continue
+        candidates.append((node, str(amenity).replace("_", " ")))
 
-        # Nearest vertex is close enough at this corridor width, and avoids a
-        # point-to-segment projection for every node in the bbox.
-        best_index, best_distance = 0, float("inf")
-        for i, p in enumerate(points):
-            d = haversine_m(node, p)
-            if d < best_distance:
-                best_index, best_distance = i, d
-        if best_distance > REST_STOP_CORRIDOR_M:
+    if not candidates or len(points) == 0:
+        return []
+
+    # One (nodes x vertices) haversine in numpy, rather than a Python loop over
+    # up to 200 Overpass nodes times every polyline vertex, per route, on the
+    # event loop. Same arithmetic as geometry.haversine_m, broadcast.
+    #
+    # Nearest vertex is close enough at this corridor width, and avoids a
+    # point-to-segment projection for every node in the bbox.
+    node_lat = np.radians(np.fromiter((n.lat for n, _ in candidates), float, len(candidates)))
+    node_lon = np.radians(np.fromiter((n.lon for n, _ in candidates), float, len(candidates)))
+    pt_lat = np.radians(np.fromiter((p.lat for p in points), float, len(points)))
+    pt_lon = np.radians(np.fromiter((p.lon for p in points), float, len(points)))
+
+    dlat = pt_lat[None, :] - node_lat[:, None]
+    dlon = pt_lon[None, :] - node_lon[:, None]
+    h = (
+        np.sin(dlat / 2.0) ** 2
+        + np.cos(node_lat)[:, None] * np.cos(pt_lat)[None, :] * np.sin(dlon / 2.0) ** 2
+    )
+    distances = 2.0 * EARTH_RADIUS_M * np.arcsin(np.sqrt(np.minimum(1.0, h)))
+
+    nearest = distances.argmin(axis=1)
+    nearest_m = distances[np.arange(len(candidates)), nearest]
+
+    for i, (node, amenity) in enumerate(candidates):
+        if nearest_m[i] > REST_STOP_CORRIDOR_M:
             continue
-
         found.append(
             RestStop(
                 lat=round(node.lat, 6),
                 lon=round(node.lon, 6),
-                type=str(amenity).replace("_", " "),
-                at_m=round(float(cum[best_index])),
+                type=amenity,
+                at_m=round(float(cum[int(nearest[i])])),
             )
         )
 
@@ -548,9 +576,20 @@ async def enrich_context(
     midpoint = longest[len(longest) // 2]
     when = depart_at or datetime.now(UTC)
 
-    nodes = await _degrade("rest_stops", fetch_rest_stop_nodes(_sampled_for_overpass(all_points)))
-    air = await _degrade("air_quality", fetch_air_quality(midpoint, when))
-    cloud = await _degrade("cloud_cover", fetch_cloud_cover(midpoint, when))
+    # Three independent upstreams, three different hosts. Awaited in sequence
+    # this was the entire latency budget of a request: measured on this project,
+    # Overpass alone took 13.6 s for a trivial bench query while the two
+    # Open-Meteo calls took 0.58 s and 0.84 s, and a self-hosted GraphHopper
+    # answered a whole route in 0.024 s. Gathering turns worst-case ~= sum into
+    # worst-case ~= Overpass.
+    #
+    # _degrade() already swallows every failure into None, so gather cannot
+    # raise here and one slow or broken service cannot take the other two down.
+    nodes, air, cloud = await asyncio.gather(
+        _degrade("rest_stops", fetch_rest_stop_nodes(_sampled_for_overpass(all_points))),
+        _degrade("air_quality", fetch_air_quality(midpoint, when)),
+        _degrade("cloud_cover", fetch_cloud_cover(midpoint, when)),
+    )
 
     sun = solar_position(when, midpoint)
     # "How much shade will you get relative to how much you need." With no cloud

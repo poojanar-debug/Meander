@@ -1,15 +1,39 @@
-# What CI and a contributor need to run the checks — and nothing more.
+# The test environment: everything the deployed service needs, plus the test
+# tooling — and **no torch**.
 #
-# This is requirements-deploy.txt plus the test tooling, deliberately NOT
-# requirements.txt. That file pulls 2.5 GB of torch so that two CLIP tests can
-# un-skip, and it is the *further* environment from production, which has no
-# torch either. Testing against the deploy set means the suite exercises the
-# same import graph the deployed service has.
+# requirements.txt is the full local environment and pulls torch, open-clip and
+# their dependency tree, which is about 2.5 GB. That is the right thing on a
+# workstation that runs `backend.batch_score`, and the wrong thing in CI: two
+# tests skip without torch, and every other one does not care. Downloading
+# 2.5 GB on every run to un-skip two tests is minutes of wall clock and a lot of
+# bandwidth for nothing.
 #
-# Install the full requirements.txt when you are working on scoring itself.
+# It is also the closer match to production, which has no torch either — so a
+# module-level torch import that would kill the deployed instance fails here
+# too, rather than passing locally and being caught only by the one test that
+# greps the source for it.
+#
+#   CI and the deploy gate   requirements-dev.txt   (this file)
+#   the running service      requirements-deploy.txt
+#   a workstation scoring    requirements.txt
+#   imagery with CLIP
 
 -r requirements-deploy.txt
 
 pytest==8.3.4
 pytest-asyncio==0.25.2
 ruff==0.9.2
+
+# The coverage floor lives in pyproject.toml so it is the same number in CI and
+# on a workstation.
+pytest-cov==6.0.0
+
+# Property tests over coordinates (test_geometry_properties.py). It found two
+# real defects on its first run — a bearing of exactly 360.0, and an
+# interpolation that leaves the planet at the poles — neither of which any
+# example-based test was ever going to generate.
+hypothesis==6.125.1
+
+# CloudFormation templates in infra/. Catches more than
+# `aws cloudformation validate-template` and, unlike it, needs no credentials.
+cfn-lint==1.54.0

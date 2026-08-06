@@ -11,18 +11,38 @@ import asyncio
 import hashlib
 import importlib.util
 import json
+import time
+import uuid
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from dataclasses import dataclass
+from datetime import UTC
 from typing import Any
 
 from fastapi import FastAPI, Query, Request, Response
+from fastapi.concurrency import run_in_threadpool
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
+from starlette.datastructures import Headers
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from . import __version__
 from .accessibility import VERY_LOW_CONFIDENCE_THRESHOLD, assess_route
 from .cache import get_cache
-from .config import STRICT_STARTUP, settings
+from .config import (
+    DRAIN_TIMEOUT_S,
+    REQUEST_DEADLINE_S,
+    STRICT_STARTUP,
+    TRUSTED_PROXY_HOPS,
+    path_details,
+    self_hosted_resolution,
+    settings,
+)
+from .coverage import message as coverage_message
+from .coverage import outside_coverage
+from .elevation import build_profile
 from .enrich import (
     AirQuality,
     EnrichContext,
@@ -31,12 +51,14 @@ from .enrich import (
 )
 from .enrich import RestStop as EnrichRestStop
 from .geometry import score_geometry
-from .logging_setup import configure_logging, get_logger
+from .health import check_routing
+from .logging_setup import configure_logging, get_logger, request_id_var
 from .metrics import metrics
 from .models import (
     BarrierReport,
     Blocker,
     CacheInfo,
+    ElevationProfile,
     GeocodeResponse,
     RestStop,
     Route,
@@ -50,6 +72,7 @@ from .ratelimit import RateLimiter
 from .routing import (
     PRESETS,
     NoRouteFound,
+    OutsideCoverage,
     RawRoute,
     RoutingError,
     geometry_for_wire,
@@ -77,6 +100,9 @@ SYNTHETIC_NOTE = (
 
 # ~110 m. Two requests from the same street corner should share a cached answer.
 CACHE_COORD_DECIMALS = 3
+
+# Every legitimate request is two coordinates and a few scalars.
+MAX_BODY_BYTES = 64 * 1024
 
 
 def clip_available() -> bool:
@@ -110,9 +136,24 @@ def _check_startup() -> list[str]:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+    # Module state, so it survives a previous run of this app object — which
+    # happens in tests, and would happen to anything that restarts the app
+    # in-process. Left set, every stream would immediately answer
+    # "this server is restarting".
+    global _open_streams
+    _shutting_down.clear()
+    _open_streams = 0
+
     missing = _check_startup()
     cache = get_cache()
-    purged = cache.purge_expired_routes()
+    # Startup runs on the event loop like everything else, and a large
+    # route_cache makes this a multi-second stall before the first request.
+    purged = await run_in_threadpool(cache.purge_expired_routes)
+    # Logged explicitly because four behaviours hang off it and none of them
+    # fails loudly when it is wrong — most importantly, a False here drops the
+    # smoothness hard constraint and the app just gets quietly less safe. See
+    # config.graphhopper_is_self_hosted().
+    resolution = self_hosted_resolution()
     log.info(
         "startup",
         extra={
@@ -121,14 +162,41 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             "clip_available": clip_available(),
             "missing_keys": missing,
             "routes_purged": purged,
-            "cache_stats": cache.stats(),
+            "cache_stats": await run_in_threadpool(cache.stats),
+            "graphhopper_self_hosted": resolution["self_hosted"],
+            "graphhopper_flag_source": resolution["source"],
+            "path_details": path_details(),
         },
     )
     yield
+
+    # ECS sends SIGTERM and then SIGKILL. Everything below happens inside that
+    # window, so it is ordered by how bad losing it would be.
     from .fixtures import aclose_client
 
+    # 1. Tell in-flight streams to stop. They check between events and emit a
+    #    `shutting_down` error frame, so a client gets an explanation instead of
+    #    a connection cut from under it mid-response.
+    _shutting_down.set()
+    for _ in range(int(DRAIN_TIMEOUT_S / 0.25)):
+        if _open_streams == 0:
+            break
+        await asyncio.sleep(0.25)
+    if _open_streams:
+        log.warning("shutdown_streams_still_open", extra={"count": _open_streams})
+
+    # 2. The httpx client, so nothing is mid-flight to an upstream.
     await aclose_client()
-    log.info("shutdown")
+
+    # 3. The cache. Cache.close() existed and had no caller anywhere, so the
+    #    thread-local sqlite connections were never closed — which is also the
+    #    leak a long-running load test would have found.
+    try:
+        get_cache().close()
+    except Exception as exc:  # noqa: BLE001 — shutdown must not raise
+        log.warning("cache_close_failed", extra={"error": type(exc).__name__})
+
+    log.info("shutdown", extra={"streams_open_at_exit": _open_streams})
 
 
 app = FastAPI(
@@ -144,8 +212,149 @@ app.add_middleware(
     allow_credentials=False,
     allow_methods=["GET", "POST", "OPTIONS"],
     allow_headers=["Content-Type", "Accept"],
+    # Without this a cross-origin browser cannot read any of them at all, which
+    # is why ApiError.retryAfter in frontend/src/api/client.js has always been 0
+    # and the backoff logic behind it has never once run. A split deployment —
+    # CloudFront for the site, an ALB for the API — is cross-origin by
+    # construction, so this is the normal case rather than an edge one.
+    expose_headers=["Retry-After", "X-Meander-Cache", "X-Request-Id"],
     max_age=600,
 )
+
+
+class ConditionalGZip:
+    """GZip everything except a stream.
+
+    Starlette's GZipMiddleware does **not** leave streaming responses alone —
+    measured here, it happily returned `content-encoding: gzip` on a
+    text/event-stream response. Compression buffers, and a buffered stream is
+    not a stream: the whole point of the SSE path is that a route reaches the
+    browser at 30 ms instead of 12 s.
+
+    Decided on the *request's* Accept header rather than the response's content
+    type, because by the time a content type is known the response wrapper has
+    already been installed.
+    """
+
+    def __init__(self, app: Any, **kwargs: Any) -> None:
+        self.app = app
+        self.gzip = GZipMiddleware(app, **kwargs)
+
+    async def __call__(self, scope: Any, receive: Any, send: Any) -> None:
+        if scope["type"] == "http":
+            accept = Headers(scope=scope).get("accept", "")
+            if "text/event-stream" in accept:
+                await self.app(scope, receive, send)
+                return
+        await self.gzip(scope, receive, send)
+
+
+app.add_middleware(ConditionalGZip, minimum_size=1024, compresslevel=5)
+
+
+@app.exception_handler(RequestValidationError)
+async def validation_error(request: Request, exc: RequestValidationError) -> JSONResponse:
+    """One error shape for the whole API.
+
+    FastAPI's default is {"detail": [...]} while everything else here answers
+    {"error": {"kind", "message"}}, so the frontend carried a special case for
+    exactly one status code — and docs/API.md documented the FastAPI shape,
+    which meant the documented contract and the real one disagreed depending on
+    which endpoint you read.
+    """
+    first = (exc.errors() or [{}])[0]
+    location = ".".join(str(p) for p in first.get("loc", ()) if p != "body")
+    message = first.get("msg", "That request was not valid.")
+    return JSONResponse(
+        status_code=422,
+        content={
+            "error": {
+                "kind": "invalid_request",
+                "message": f"{location}: {message}" if location else message,
+            }
+        },
+    )
+
+
+@app.exception_handler(StarletteHTTPException)
+async def http_error(request: Request, exc: StarletteHTTPException) -> JSONResponse:
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={"error": {"kind": "http_error", "message": str(exc.detail)}},
+        headers=getattr(exc, "headers", None),
+    )
+
+
+@app.middleware("http")
+async def limit_body_size(request: Request, call_next: Any) -> Response:
+    """Reject an oversized body before it is parsed.
+
+    Every legitimate request here is two coordinates and a handful of scalars —
+    a few hundred bytes. Without a ceiling, an unauthenticated caller can make
+    the service buffer as much as it likes.
+    """
+    declared = request.headers.get("content-length")
+    if declared and declared.isdigit() and int(declared) > MAX_BODY_BYTES:
+        return JSONResponse(
+            status_code=413,
+            content={
+                "error": {
+                    "kind": "payload_too_large",
+                    "message": "That request body is too large.",
+                }
+            },
+        )
+    return await call_next(request)
+
+
+@app.middleware("http")
+async def request_context(request: Request, call_next: Any) -> Response:
+    """One id per request, on every log line it produces, and back in a header.
+
+    logging_setup disables uvicorn's access log — it echoes client IPs — and
+    replaced it with nothing at all, so a deployed instance had no per-request
+    record whatsoever. This is that record: method, path, status, duration,
+    request id, cache hit or miss. **No IP and no coordinates**, which is why
+    uvicorn's was turned off in the first place.
+
+    An inbound X-Amzn-Trace-Id is honoured so a line here can be joined to an
+    ALB access log entry without correlating on timestamps.
+    """
+    incoming = request.headers.get("x-amzn-trace-id") or request.headers.get("x-request-id")
+    request_id = incoming or uuid.uuid4().hex[:16]
+    token = request_id_var.set(request_id)
+    started = time.monotonic()
+    try:
+        response = await call_next(request)
+    except Exception:
+        log.exception(
+            "request_failed",
+            extra={
+                "method": request.method,
+                "path": request.url.path,
+                "duration_ms": round((time.monotonic() - started) * 1000, 1),
+            },
+        )
+        request_id_var.reset(token)
+        raise
+
+    duration_ms = round((time.monotonic() - started) * 1000, 1)
+    response.headers["X-Request-Id"] = request_id
+    # Probes are the overwhelming majority of requests on a load-balanced
+    # service and say nothing; logging them buries everything that does.
+    if request.url.path not in ("/healthz", "/readyz"):
+        log.info(
+            "request",
+            extra={
+                "method": request.method,
+                "path": request.url.path,
+                "status": response.status_code,
+                "duration_ms": duration_ms,
+                "cache": response.headers.get("X-Meander-Cache"),
+            },
+        )
+    request_id_var.reset(token)
+    return response
 
 
 def _error(kind: str, message: str, status: int) -> JSONResponse:
@@ -157,11 +366,41 @@ def _client_ip(request: Request) -> str | None:
 
     The value is passed straight into a salted digest and never stored, logged
     or returned.
+
+    **Read from the right, never the left.** X-Forwarded-For is appended to by
+    each proxy, so the rightmost entries are the ones your own infrastructure
+    added and the leftmost are whatever the client sent. Taking
+    ``split(",")[0]`` meant a client could send its own X-Forwarded-For, land
+    first in the list, and get a fresh token bucket on every single request —
+    which is the entire rate limiter defeated by one header.
+
+    With one trusted proxy a spoofed request arrives as ``1.2.3.4, <real
+    client>``: ``parts[-1]`` is the address the proxy observed and ``parts[-2]``
+    is the attacker's invention.
+
+    ``MEANDER_TRUSTED_PROXY_HOPS`` is how many proxies of your own sit in front
+    of this service. It defaults to **0**, which ignores the header completely
+    and uses the socket peer — the only safe default, because trusting a hop
+    that is not there is a bypass while distrusting one that is there is merely
+    a shared bucket. **A deployment behind an ALB must set it to 1**, or every
+    client shares one bucket and the service rate-limits itself as a whole.
     """
+    hops = TRUSTED_PROXY_HOPS
+    peer = request.client.host if request.client else None
+    if hops <= 0:
+        return peer
+
     forwarded = request.headers.get("x-forwarded-for")
-    if forwarded:
-        return forwarded.split(",")[0].strip()
-    return request.client.host if request.client else None
+    if not forwarded:
+        return peer
+    parts = [p.strip() for p in forwarded.split(",") if p.strip()]
+    if not parts:
+        return peer
+    if len(parts) < hops:
+        # Shorter than configured: something is not appending. Fall back to the
+        # socket peer rather than trusting a client-controlled entry.
+        return peer
+    return parts[-hops]
 
 
 # ---------------------------------------------------------------------------
@@ -188,6 +427,19 @@ def route_cache_key(req: RouteRequest) -> str:
             "minutes": req.minutes,
             "mode": req.mode,
             "objectives": list(req.resolved_objectives()),
+            # depart_at drives best_departure, the air-quality hour index and
+            # the shade score, so two requests differing only in departure time
+            # are different answers. Without it they shared one cached payload
+            # and the later one got the earlier one's departure advice for up to
+            # the 6 hour TTL.
+            #
+            # Bucketed to the hour, which is the granularity best_departure and
+            # the air-quality series actually use, and for the same reason the
+            # coordinates above are rounded to 3 dp: an unrounded timestamp
+            # would miss the cache on literally every request. Nothing sends
+            # departAt today, so this is latent — until Phase 5.5 plumbs a real
+            # timestamp through, at which point it stops being latent.
+            "depart_at": _departure_bucket(req),
             "version": __version__,
         },
         sort_keys=True,
@@ -195,21 +447,32 @@ def route_cache_key(req: RouteRequest) -> str:
     return hashlib.sha256(material.encode()).hexdigest()[:24]
 
 
-def _scored_route(
-    route_id: str,
-    label: str,
-    raw: RawRoute,
-    rest_stops: list[EnrichRestStop] | None = None,
-    air: AirQuality | None = None,
-    shade: float | None = None,
-) -> Route:
-    """Turn a routed path into a wire Route, scored as well as it honestly can be.
+def _departure_bucket(req: RouteRequest) -> str | None:
+    """The departure hour, in UTC, or None when the caller did not ask for one."""
+    if req.depart_at is None:
+        return None
+    when = req.depart_at
+    if when.tzinfo is None:
+        when = when.replace(tzinfo=UTC)
+    return when.astimezone(UTC).strftime("%Y-%m-%dT%H")
 
-    A route built from a hand-authored fixture keeps `scoring_method:
-    "placeholder"` even though the scoring maths ran: the maths is real but the
-    geometry it ran on is not, and a number derived from invented terrain is not
-    a measurement of anywhere.
+
+@dataclass
+class _Assessment:
+    """The expensive, enrichment-independent half of scoring a route.
+
+    Split out because a route is now emitted twice — once as soon as it is
+    routed, once when enrichment lands — and assess_route() plus
+    score_geometry() must not run twice for that.
     """
+
+    scores: Any
+    access: Any
+    clip_score: float | None
+    elevation: Any = None
+
+
+def _assess(raw: RawRoute) -> _Assessment:
     # Cache read only — this never imports torch, and returns nothing for any
     # region batch_score.py has not pre-warmed.
     clip = _guard("clip_lookup", clip_term_for_route, raw.points)
@@ -223,6 +486,33 @@ def _scored_route(
         clip_score=clip_score,
     )
     access = _guard("accessibility", assess_route, raw.points, raw.elevations or None, raw.details)
+    # Same input, same threshold, computed in the same place as the verdict.
+    profile = _guard("elevation_profile", build_profile, raw.points, raw.elevations or None)
+    return _Assessment(
+        scores=scores, access=access, clip_score=clip_score, elevation=profile
+    )
+
+
+def _scored_route(
+    route_id: str,
+    label: str,
+    raw: RawRoute,
+    rest_stops: list[EnrichRestStop] | None = None,
+    air: AirQuality | None = None,
+    shade: float | None = None,
+    assessment: _Assessment | None = None,
+    enrichment_pending: bool = False,
+) -> Route:
+    """Turn a routed path into a wire Route, scored as well as it honestly can be.
+
+    A route built from a hand-authored fixture keeps `scoring_method:
+    "placeholder"` even though the scoring maths ran: the maths is real but the
+    geometry it ran on is not, and a number derived from invented terrain is not
+    a measurement of anywhere.
+    """
+    if assessment is None:
+        assessment = _assess(raw)
+    scores, access, clip_score = assessment.scores, assessment.access, assessment.clip_score
     synthetic = raw.synthetic_upstream
 
     if synthetic or scores is None:
@@ -263,6 +553,9 @@ def _scored_route(
         # figure. Synthetic routes report no confidence at all.
         confidence=0.0 if (synthetic or access is None) else access.coverage,
         blockers=blockers,
+        elevation=(
+            ElevationProfile(**vars(assessment.elevation)) if assessment.elevation else None
+        ),
         rest_stops=[
             RestStop(lat=s.lat, lon=s.lon, type=s.type, at_m=s.at_m)
             for s in (rest_stops or [])
@@ -283,6 +576,7 @@ def _scored_route(
             SYNTHETIC_NOTE if synthetic else (access.sentence() if access else UNASSESSED_NOTE)
         ),
         status_note=_status_note(route_id, blocked, access, raw),
+        enrichment_pending=enrichment_pending,
     )
 
 
@@ -400,6 +694,18 @@ async def route_events(req: RouteRequest) -> AsyncIterator[dict[str, Any]]:
     destination = req.destination.to_latlon() if req.destination else None
     objectives = req.resolved_objectives()
 
+    # Asked before routing rather than after failing. GraphHopper's own answer
+    # for a point outside the graph is "Cannot find point", which routing.py
+    # renders as "try moving the start a little" — right for a point in a lake,
+    # actively misleading for a city this deployment did not import.
+    for point in (origin, destination):
+        if point is None:
+            continue
+        extent = await outside_coverage(point.lat, point.lon)
+        if extent is not None:
+            log.info("outside_coverage")
+            raise OutsideCoverage(coverage_message(extent))
+
     routes: list[Route] = []
     routed: list[tuple[str, str, RawRoute]] = []
     fastest_route: RawRoute | None = None
@@ -408,48 +714,117 @@ async def route_events(req: RouteRequest) -> AsyncIterator[dict[str, Any]]:
     # fastest first when present: nature's duration cap is relative to it.
     ordered = sorted(objectives, key=lambda o: 0 if o == "fastest" else 1)
 
-    for index, objective in enumerate(ordered):
-        label = ROUTE_LABELS.get(objective, objective.title())
-        yield {
-            "type": "progress",
-            "pct": 10 + int(45 * index / max(1, len(ordered))),
-            "text": f"Routing the {label.lower()} way",
-            "segments_scored": 0,
-        }
-        preset_fn = PRESETS.get(objective)
-        if preset_fn is None:
-            # Objectives beyond the implemented three (quiet/shade/air) are not
-            # silently dropped — the UI is told they are not available yet.
+    # `objectives` accepts any subset, so {"objectives": ["nature"]} is a valid
+    # public request. Without this, fastest is never routed, route_nature gets
+    # fastest=None, and **both** of its bars quietly switch off: the
+    # NATURE_DURATION_CAP and the "must be greener than fastest" floor. Every
+    # candidate then counts as acceptable and the winner ships labelled Nature
+    # with no preset_note — a label with nothing behind it, which is exactly
+    # what route_nature's own docstring says must never happen.
+    #
+    # So fastest is routed as a baseline whenever nature is asked for, and
+    # simply not emitted as a route. It costs one request, which is ~24 ms
+    # against a self-hosted router.
+    if "nature" in objectives and "fastest" not in objectives:
+        try:
+            fastest_route = await PRESETS["fastest"](origin, destination, req.minutes, mode)
+        except RoutingError as exc:
+            # Not fatal: the caller did not ask for this route. route_nature
+            # says on the card that the comparison could not be made.
+            log.info("nature_baseline_unavailable", extra={"kind": exc.kind})
+
+    async def _run(objective: str) -> tuple[str, RawRoute | None, RoutingError | None]:
+        """Route one objective. Never raises; the caller decides what a failure means."""
+        preset_fn = PRESETS[objective]
+        try:
+            if objective == "nature":
+                return objective, await preset_fn(
+                    origin, destination, req.minutes, mode, fastest_route
+                ), None
+            return objective, await preset_fn(origin, destination, req.minutes, mode), None
+        except RoutingError as exc:
+            return objective, None, exc
+
+    def _record_failure(objective: str, label: str, exc: RoutingError) -> None:
+        if isinstance(exc, NoRouteFound):
+            log.info("preset_unroutable", extra={"objective": objective, "kind": exc.kind})
+            metrics.incr("routes_blocked_total")
+        else:
+            log.warning("preset_failed", extra={"objective": objective, "kind": exc.kind})
+            metrics.incr("upstream_failures_total")
+        failures.append(exc)
+        routes.append(_blocked_route(objective, label, mode, exc.human_message))
+
+    # Objectives beyond the implemented three (quiet/shade/air) are not silently
+    # dropped — the UI is told they are not available yet.
+    for objective in ordered:
+        if objective not in PRESETS:
+            label = ROUTE_LABELS.get(objective, objective.title())
             routes.append(
                 _blocked_route(objective, label, mode,
                                f"The {label.lower()} objective is not implemented yet.")
             )
-            continue
 
-        try:
-            if objective == "nature":
-                raw = await preset_fn(origin, destination, req.minutes, mode, fastest_route)
-            else:
-                raw = await preset_fn(origin, destination, req.minutes, mode)
-        except NoRouteFound as exc:
-            log.info("preset_unroutable", extra={"objective": objective, "kind": exc.kind})
-            metrics.incr("routes_blocked_total")
-            routes.append(_blocked_route(objective, label, mode, exc.human_message))
-            failures.append(exc)
-            continue
-        except RoutingError as exc:
-            log.warning("preset_failed", extra={"objective": objective, "kind": exc.kind})
-            metrics.incr("upstream_failures_total")
-            failures.append(exc)
-            if objective == "fastest":
+    # fastest is routed alone and first. This ordering is load-bearing, not
+    # stylistic: route_nature takes it and derives both the NATURE_DURATION_CAP
+    # and the greenness floor from it. A flat gather over all three would pass
+    # fastest=None and silently disable both — see test_nature_baseline.py.
+    if "fastest" in objectives:
+        yield {"type": "progress", "pct": 15, "text": "Routing the fastest way",
+               "segments_scored": 0}
+        _, raw, exc = await _run("fastest")
+        if exc is not None:
+            if not isinstance(exc, NoRouteFound):
+                metrics.incr("upstream_failures_total")
                 # Without the baseline there is nothing to show at all.
-                raise
-            routes.append(_blocked_route(objective, label, mode, exc.human_message))
-            continue
-
-        if objective == "fastest":
+                raise exc
+            _record_failure("fastest", ROUTE_LABELS.get("fastest", "Fastest"), exc)
+        else:
             fastest_route = raw
-        routed.append((objective, label, raw))
+            routed.append(("fastest", ROUTE_LABELS.get("fastest", "Fastest"), raw))
+
+    # nature and accessible are independent of each other, so they go together.
+    rest = [o for o in ordered if o in PRESETS and o != "fastest"]
+    if rest:
+        yield {"type": "progress", "pct": 35, "text": "Routing the other ways",
+               "segments_scored": 0}
+        for objective, raw, exc in await asyncio.gather(*(_run(o) for o in rest)):
+            label = ROUTE_LABELS.get(objective, objective.title())
+            if exc is not None:
+                _record_failure(objective, label, exc)
+            else:
+                routed.append((objective, label, raw))
+
+    # Preserve the caller's order rather than completion order.
+    routed.sort(key=lambda item: ordered.index(item[0]))
+
+    if not routed and not any(r.status == "ok" for r in routes):
+        raise failures[0] if failures else NoRouteFound("No route could be found from there.")
+
+    # --- first pass: emit every route the moment it exists -------------------
+    #
+    # Enrichment is the entire latency budget of a request — Overpass measured
+    # 13.6 s against 0.024 s for a whole self-hosted route — and it is shared
+    # across all three routes, so waiting for it meant nothing at all reached
+    # the browser for up to fourteen seconds. The map can draw these now.
+    #
+    # enrichment_pending says plainly that air, shade and rest stops are not
+    # yet measured, because `rest_stops` cannot be null and an empty list would
+    # otherwise read as "we looked and found none".
+    assessments: dict[str, _Assessment] = {}
+    for objective, label, raw in routed:
+        assessments[objective] = await run_in_threadpool(_assess, raw)
+        route = _scored_route(
+            objective, label, raw, None, None, None,
+            assessment=assessments[objective], enrichment_pending=True,
+        )
+        if route.status == "blocked":
+            metrics.incr("routes_blocked_total")
+        yield {"type": "route", "route": route.model_dump()}
+
+    for route in routes:
+        if route.status == "blocked" and not route.geometry:
+            yield {"type": "route", "route": route.model_dump()}
 
     yield {
         "type": "progress",
@@ -458,9 +833,12 @@ async def route_events(req: RouteRequest) -> AsyncIterator[dict[str, Any]]:
         "segments_scored": 0,
     }
 
+    # --- second pass: the same routes, now enriched --------------------------
+    #
     # Enrichment runs once for the whole request, over every route's geometry.
-    # It is entirely best-effort: every field below may be None, and the
-    # response says `null` rather than inventing a number.
+    # It is entirely best-effort: every field may be None, and the response says
+    # `null` rather than inventing a number. The client merges route events by
+    # id, which is the same mechanism narration already uses.
     context = EnrichContext()
     if routed:
         context = await enrich_context([r.points for _, _, r in routed], req.depart_at)
@@ -468,21 +846,16 @@ async def route_events(req: RouteRequest) -> AsyncIterator[dict[str, Any]]:
     cache = get_cache()
     for objective, label, raw in routed:
         stops = (
-            rest_stops_on_route(raw.points, context.rest_stop_nodes)
+            await run_in_threadpool(rest_stops_on_route, raw.points, context.rest_stop_nodes)
             if context.rest_stop_nodes is not None
             else None
         )
-        route = _scored_route(objective, label, raw, stops, context.air, context.shade_score)
-        if route.status == "blocked":
-            metrics.incr("routes_blocked_total")
+        route = _scored_route(
+            objective, label, raw, stops, context.air, context.shade_score,
+            assessment=assessments.get(objective),
+        )
         routes.append(route)
-        # Emitted the moment it exists, so the map draws it while the rest are
-        # still being computed.
         yield {"type": "route", "route": route.model_dump()}
-
-    for route in routes:
-        if route.status == "blocked" and not route.geometry:
-            yield {"type": "route", "route": route.model_dump()}
 
     if not any(r.status == "ok" for r in routes):
         raise failures[0] if failures else NoRouteFound("No route could be found from there.")
@@ -514,9 +887,82 @@ async def route_events(req: RouteRequest) -> AsyncIterator[dict[str, Any]]:
                 context.departure.when.isoformat() if context.departure else None
             ),
             reason=reason or (context.departure.reason if context.departure else None),
-            cache=CacheInfo(segments_scored=cache.segment_count(), hit_rate=_hit_rate()),
+            cache=CacheInfo(
+                segments_scored=await run_in_threadpool(cache.segment_count),
+                hit_rate=_hit_rate(),
+            ),
         ).model_dump(),
     }
+
+
+DEADLINE_NOTE = (
+    "This took longer than expected, so what had been worked out is shown here. "
+    "Air quality, shade and rest stops may be missing. Try again for the full picture."
+)
+
+
+async def route_events_with_deadline(
+    req: RouteRequest, deadline_s: float | None = None
+) -> AsyncIterator[dict[str, Any]]:
+    """route_events, but it returns what it has rather than hanging.
+
+    Nothing underneath this had an overall ceiling. Every upstream has its own
+    timeout, but they compose: three enrichment fetches plus a routing pass each
+    allowed HTTP_TIMEOUT_S is a worst case far past any proxy's idle timeout,
+    and the user gets a dead connection instead of a partial answer.
+
+    Everything below the routing itself is best-effort and already degrades to
+    null, so a truncated response is a real response — it just has less on it,
+    and says so.
+    """
+    deadline_s = REQUEST_DEADLINE_S if deadline_s is None else deadline_s
+    partial: dict[str, dict[str, Any]] = {}
+    agen = route_events(req).__aiter__()
+    expires_at = time.monotonic() + deadline_s
+
+    try:
+        while True:
+            remaining = expires_at - time.monotonic()
+            if remaining <= 0:
+                raise TimeoutError
+            try:
+                # wait_for rather than wrapping the loop in asyncio.timeout: the
+                # clock must not run while this generator is suspended at a
+                # yield waiting on a slow client.
+                event = await asyncio.wait_for(agen.__anext__(), timeout=remaining)
+            except StopAsyncIteration:
+                return
+            if event["type"] == "route":
+                partial[event["route"]["id"]] = event["route"]
+            yield event
+    except TimeoutError:
+        usable = [r for r in partial.values() if r.get("geometry")]
+        log.warning(
+            "request_deadline_exceeded",
+            extra={"deadline_s": deadline_s, "routes_ready": len(usable)},
+        )
+        metrics.incr("request_deadline_exceeded_total")
+        if not usable:
+            yield {
+                "type": "error",
+                "kind": "timeout",
+                "message": (
+                    "This took too long and no route was ready in time. "
+                    "Please try again."
+                ),
+            }
+            return
+        yield {
+            "type": "done",
+            "payload": RoutesResponse(
+                routes=[Route(**r) for r in usable],
+                best_departure=None,
+                reason=DEADLINE_NOTE,
+                cache=CacheInfo(segments_scored=0, hit_rate=_hit_rate()),
+            ).model_dump(),
+        }
+    finally:
+        await agen.aclose()
 
 
 SSE_HEADERS = {
@@ -536,19 +982,98 @@ def _wants_stream(request: Request) -> bool:
     return "text/event-stream" in (request.headers.get("accept") or "")
 
 
+# Long enough not to be chatter, short enough to beat a 60 s proxy idle
+# timeout. There is otherwise a silent gap between the 60% progress event and
+# the enriched routes that can exceed one.
+KEEPALIVE_S = 15.0
+
+# Set by lifespan on SIGTERM so in-flight streams can say goodbye rather than
+# having the connection cut from under them.
+_shutting_down = asyncio.Event()
+_open_streams = 0
+
+
 async def _stream(req: RouteRequest, cache_key: str) -> AsyncIterator[str]:
-    """Forward each event as it is produced, and cache the final payload."""
+    """Forward each event as it is produced, and cache the final payload.
+
+    Three things this has to survive that it previously did not.
+
+    **Anything that is not a RoutingError.** A sqlite3.OperationalError from
+    put_route or a pydantic error in model_dump escaped mid-stream, the client
+    got a truncated response with no error event, and the frontend resolved to
+    null — an empty screen with no explanation.
+
+    **A client that goes away.** A disconnect at 90% cancelled the generator and
+    threw away every GraphHopper call the request had made, caching nothing.
+
+    **A long silence.** Nothing was written between the 60% progress event and
+    the first enriched route, which on a slow Overpass is long enough for a
+    proxy to close an idle connection.
+    """
+    global _open_streams
+    _open_streams += 1
+    agen = route_events_with_deadline(req).__aiter__()
+    finished: dict[str, Any] | None = None
+    cached = False
+
     try:
-        async for event in route_events(req):
+        while True:
+            if _shutting_down.is_set():
+                yield _sse({
+                    "type": "error",
+                    "kind": "shutting_down",
+                    "message": (
+                        "This server is restarting. Your request was not finished — "
+                        "please try again in a moment."
+                    ),
+                })
+                return
+            try:
+                event = await asyncio.wait_for(agen.__anext__(), timeout=KEEPALIVE_S)
+            except TimeoutError:
+                # A comment frame. SSE clients ignore it; proxies see traffic.
+                yield ": keepalive\n\n"
+                continue
+            except StopAsyncIteration:
+                return
+
             if event["type"] == "done":
-                metrics.incr("daily_routes_served")
-                get_cache().put_route(cache_key, event["payload"], settings.route_cache_ttl_s)
+                finished = event["payload"]
+                await run_in_threadpool(
+                    get_cache().put_route, cache_key, finished, settings.route_cache_ttl_s
+                )
+                cached = True
             yield _sse(event)
+
+    except asyncio.CancelledError:
+        # The client hung up. If the answer was already computed, keep it —
+        # every GraphHopper call behind it has been paid for either way.
+        if finished is not None and not cached:
+            try:
+                await run_in_threadpool(
+                    get_cache().put_route, cache_key, finished, settings.route_cache_ttl_s
+                )
+            except Exception:  # noqa: BLE001 — never mask the cancellation
+                log.warning("partial_cache_failed")
+        metrics.incr("client_disconnects_total")
+        log.info("stream_cancelled", extra={"had_result": finished is not None})
+        raise
     except RoutingError as exc:
         metrics.incr("upstream_failures_total")
         # The status line has already been sent, so the error has to travel as
         # an event. The client turns it back into its normal error banner.
         yield _sse({"type": "error", "kind": exc.kind, "message": exc.human_message})
+    except Exception:
+        metrics.incr("stream_failures_total")
+        log.exception("stream_failed")
+        yield _sse({
+            "type": "error",
+            "kind": "internal",
+            "message": "Something went wrong while building your routes. Please try again.",
+        })
+    finally:
+        _open_streams -= 1
+        await agen.aclose()
 
 
 @app.post("/api/routes")
@@ -568,7 +1093,7 @@ async def post_routes(req: RouteRequest, request: Request, response: Response) -
 
     cache = get_cache()
     key = route_cache_key(req)
-    cached = cache.get_route(key)
+    cached = await run_in_threadpool(cache.get_route, key)
     if cached is not None:
         metrics.incr("cache_hits_total")
         limiter.refund(_client_ip(request))
@@ -598,7 +1123,7 @@ async def post_routes(req: RouteRequest, request: Request, response: Response) -
 
     try:
         payload: dict[str, Any] | None = None
-        async for event in route_events(req):
+        async for event in route_events_with_deadline(req):
             if event["type"] == "done":
                 payload = event["payload"]
     except RoutingError as exc:
@@ -608,8 +1133,7 @@ async def post_routes(req: RouteRequest, request: Request, response: Response) -
     if payload is None:
         return _error("upstream", "No route could be produced for that request.", 502)
 
-    metrics.incr("daily_routes_served")
-    cache.put_route(key, payload, settings.route_cache_ttl_s)
+    await run_in_threadpool(cache.put_route, key, payload, settings.route_cache_ttl_s)
     response.headers["X-Meander-Cache"] = "miss"
     return payload
 
@@ -627,7 +1151,24 @@ def _hit_rate() -> float:
 
 
 @app.get("/api/geocode", response_model=GeocodeResponse)
-async def geocode(q: str = Query(min_length=2, max_length=120)) -> Any:
+async def geocode(request: Request, q: str = Query(min_length=2, max_length=120)) -> Any:
+    """Place search, proxied to Nominatim.
+
+    Rate-limited like everything else. It was previously unauthenticated **and
+    unlimited**, and Nominatim's usage policy is one request per second enforced
+    by banning the offending IP — which here is this service's egress address,
+    so one script pointed at /api/geocode gets place search banned for every
+    user of the deployment, not for the script.
+    """
+    decision = limiter.check(_client_ip(request))
+    if not decision.allowed:
+        metrics.incr("rate_limited_total")
+        return JSONResponse(
+            status_code=429,
+            content={"error": {"kind": decision.reason, "message": decision.message}},
+            headers={"Retry-After": str(max(1, decision.retry_after_s))},
+        )
+
     from .routing import GeocodeError
     from .routing import geocode_search as search
 
@@ -680,13 +1221,120 @@ async def report_barrier(report: BarrierReport, request: Request) -> Any:
 
 
 # ---------------------------------------------------------------------------
-# health
+# health and metrics
 # ---------------------------------------------------------------------------
 
 
+@app.get("/metrics")
+async def prometheus_metrics() -> Response:
+    """Aggregate counters in Prometheus text exposition format.
+
+    **Every series here is a whole-instance total with no labels, and that is
+    the privacy design rather than an omission.** A `path`, `region` or
+    `status` label would turn this into a low-cardinality description of who
+    asked for what and when, and a coordinate label would be unthinkable. What
+    it exports is exactly what `/api/health` already reports to anyone —
+    `metrics.py` never holds a request attribute in the first place, so there
+    is nothing here that could be labelled even by mistake.
+
+    `unique_sessions_today` comes from a digest keyed by a salt generated at
+    process start and never written down, so it cannot be joined to yesterday's
+    figure or to anything outside this process.
+
+    Unauthenticated, like `/healthz`, because it reveals no more than
+    `/api/health` does. Scrape it from inside the VPC; the load balancer in
+    infra/20-services.yaml has no rule that reaches it from outside.
+    """
+    snapshot = metrics.snapshot()
+
+    # Written by hand rather than with prometheus_client: that is 200 KB and a
+    # registry abstraction to serialise eleven integers, and it would be the
+    # first entry in requirements-deploy.txt that exists purely for
+    # observability.
+    described = {
+        "route_requests_total": ("counter", "Route requests accepted."),
+        "routes_blocked_total": ("counter", "Routes rejected by the accessibility engine."),
+        "cache_hits_total": ("counter", "Whole-route cache hits."),
+        "cache_misses_total": ("counter", "Whole-route cache misses."),
+        "segments_scored_total": ("counter", "Segments served from pre-warmed CLIP scores."),
+        "rate_limited_total": ("counter", "Requests refused by the rate limiter."),
+        "upstream_failures_total": ("counter", "Upstream calls that failed."),
+        "narration_failures_total": ("counter", "Narration attempts that failed."),
+        "enrichment_failures_total": ("counter", "Enrichment stages that failed."),
+        "unique_sessions_today": ("gauge", "Distinct sessions today, from an unpersisted digest."),
+        "uptime_s": ("gauge", "Seconds since this process started."),
+    }
+
+    lines: list[str] = []
+    for name, value in snapshot.items():
+        kind, description = described.get(name, ("gauge", ""))
+        metric = f"meander_{name}"
+        if description:
+            lines.append(f"# HELP {metric} {description}")
+        lines.append(f"# TYPE {metric} {kind}")
+        lines.append(f"{metric} {value}")
+    lines.append("")
+
+    return Response(
+        content="\n".join(lines),
+        # `version=0.0.4` is part of the contract, not decoration: a scraper
+        # given bare text/plain treats the body as an unparseable exposition.
+        media_type="text/plain; version=0.0.4; charset=utf-8",
+    )
+
+
+@app.get("/healthz")
+async def healthz() -> dict[str, str]:
+    """Liveness. No disk, no upstream, no dependencies.
+
+    This is what the load balancer polls, so it must keep answering while the
+    instance is degraded: a readiness failure should take an instance out of
+    rotation, not have it killed and restarted straight back into the same
+    failure. If this process can execute this function, it is alive.
+    """
+    return {"status": "ok", "version": __version__}
+
+
+@app.get("/readyz")
+async def readyz(response: Response) -> dict[str, Any]:
+    """Readiness. 503 when this instance genuinely cannot serve a route.
+
+    ⚠ "Required" here is Settings.missing_required_keys(), which is a much
+    shorter list than missing_keys(). The latter names MAPILLARY_TOKEN and
+    ANTHROPIC_API_KEY whenever they are unset, and neither is needed to serve
+    routes — CLIP is cache-read-only in the deploy image and narration is
+    simply skipped without a key. Wiring readiness to that list would 503 a
+    perfectly healthy instance for ever and the target would never register.
+    """
+    checks: dict[str, Any] = {}
+
+    missing = settings.missing_required_keys()
+    checks["keys"] = {"ok": not missing, "missing": missing}
+
+    try:
+        await run_in_threadpool(get_cache().segment_count)
+        checks["cache"] = {"ok": True}
+    except Exception as exc:  # noqa: BLE001 — any cache failure is unreadiness
+        checks["cache"] = {"ok": False, "detail": type(exc).__name__}
+
+    routing_ok, routing_detail = await check_routing()
+    checks["routing"] = {"ok": routing_ok, "detail": routing_detail}
+
+    ready = all(c["ok"] for c in checks.values())
+    if not ready:
+        response.status_code = 503
+    return {"status": "ready" if ready else "not_ready", "checks": checks}
+
+
 @app.get("/api/health")
-def health() -> dict[str, Any]:
-    from .fixtures import budget_snapshot, fixture_inventory
+def health(verbose: int = Query(0, ge=0, le=1)) -> dict[str, Any]:
+    """The rich human diagnostic. Not a probe — see /healthz and /readyz.
+
+    Deliberately does not name which secrets are unset, and does not publish
+    how much of the rate-limit budget is left: both are free reconnaissance for
+    an anonymous caller, and neither helps the operator more than keys_ok does.
+    """
+    from .fixtures import budget_regime, budget_snapshot, fixture_inventory
 
     cache = get_cache()
     from .config import GRAPHHOPPER_URL, graphhopper_is_self_hosted, path_details
@@ -702,19 +1350,39 @@ def health() -> dict[str, Any]:
         "routing": {
             "endpoint": GRAPHHOPPER_URL,
             "self_hosted": self_hosted,
+            # "hostname" here on a deployed instance means nobody set
+            # MEANDER_GRAPHHOPPER_SELF_HOSTED and the answer was guessed from
+            # the URL. If the router is behind a real name that guess is False,
+            # and smoothness — a hard accessibility constraint — is silently
+            # absent from path_details below.
+            "self_hosted_source": self_hosted_resolution()["source"],
             "custom_models_available": self_hosted,
             "path_details": path_details(),
         },
         "fixture_mode": settings.fixture_mode,
-        "missing_keys": settings.missing_keys(),
+        # Not the list of names: telling an anonymous caller exactly which
+        # secrets this deployment is missing is free reconnaissance. The
+        # operator needs the boolean; the names are in the startup log.
+        "keys_ok": not settings.missing_keys(),
+        "required_keys_ok": not settings.missing_required_keys(),
         "cache": cache.stats(),
-        "live_call_budget": budget_snapshot(),
-        "fixtures": fixture_inventory(),
+        "live_call_budget": budget_regime(),
         "counters": metrics.snapshot(),
         "rate_limit": {
             "per_ip_capacity": settings.per_ip_bucket_capacity,
             "per_ip_refill_per_min": settings.per_ip_refill_per_min,
             "daily_ceiling": settings.global_daily_route_ceiling,
+            # served_today, but never `remaining`: publishing how much headroom
+            # is left tells anyone who asks exactly how much more to send to
+            # take the service down for the day.
             "served_today": limiter.served_today(),
         },
+        # fixture_inventory() walks the whole fixture tree and JSON-parses every
+        # file — 150-odd files, on every call, on an endpoint anyone can hit.
+        # Behind ?verbose=1, and the budget counters with it.
+        **(
+            {"fixtures": fixture_inventory(), "live_call_counters": budget_snapshot()}
+            if verbose
+            else {}
+        ),
     }

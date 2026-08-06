@@ -1,0 +1,180 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >
+  Meander platform. Image registries, the secret the API reads its keys from,
+  and the role GitHub Actions assumes to deploy — with no stored AWS
+  credentials anywhere.
+
+# NOTHING IN infra/ HAS BEEN APPLIED. See infra/README.md.
+# Deploy this stack first: the ECR repositories must exist before any image can
+# be pushed, and the OIDC role must exist before CI can push one.
+
+Parameters:
+  ProjectName:
+    Type: String
+    Default: meander
+  GitHubOwner:
+    Type: String
+    Default: poojanar-debug
+  GitHubRepo:
+    Type: String
+    Default: Meander
+  GitHubRef:
+    Type: String
+    Default: refs/heads/main
+    Description: >
+      The single git ref allowed to assume the deploy role. A wildcard here is
+      the whole vulnerability: `repo:owner/name:*` lets a pull request from a
+      fork run with deploy permissions.
+
+Resources:
+
+  # --- image registries ---------------------------------------------------
+
+  ApiRepository:
+    Type: AWS::ECR::Repository
+    Properties:
+      RepositoryName: !Sub '${ProjectName}/api'
+      ImageTagMutability: IMMUTABLE   # a tag must always mean the same image
+      ImageScanningConfiguration: { ScanOnPush: true }
+      EncryptionConfiguration: { EncryptionType: AES256 }
+      LifecyclePolicy:
+        LifecyclePolicyText: |
+          {
+            "rules": [{
+              "rulePriority": 1,
+              "description": "Keep the last 10 images; ECR storage is billed per GB-month.",
+              "selection": {"tagStatus": "any", "countType": "imageCountMoreThan", "countNumber": 10},
+              "action": {"type": "expire"}
+            }]
+          }
+
+  RouterRepository:
+    Type: AWS::ECR::Repository
+    Properties:
+      RepositoryName: !Sub '${ProjectName}/graphhopper'
+      ImageTagMutability: IMMUTABLE
+      ImageScanningConfiguration: { ScanOnPush: true }
+      EncryptionConfiguration: { EncryptionType: AES256 }
+      LifecyclePolicy:
+        # Three, not ten. Each router image carries the baked graph — 1.2 GB
+        # for the demo set — so ten of them is 12 GB of ECR storage for images
+        # nobody will roll back to.
+        LifecyclePolicyText: |
+          {
+            "rules": [{
+              "rulePriority": 1,
+              "description": "Keep the last 3. Each image carries a multi-GB graph.",
+              "selection": {"tagStatus": "any", "countType": "imageCountMoreThan", "countNumber": 3},
+              "action": {"type": "expire"}
+            }]
+          }
+
+  # --- secrets ------------------------------------------------------------
+
+  # Created empty and populated out of band. A secret whose value is in the
+  # template is a secret in git, in the CloudFormation console, and in every
+  # `describe-stacks` output — see infra/README.md for the put-secret-value
+  # command. Nothing here is needed to serve a route: the API starts and routes
+  # without any of them, and /api/health reports which are missing.
+  ApiSecrets:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Name: !Sub '${ProjectName}/api'
+      Description: >
+        Optional upstream credentials. MAPILLARY_TOKEN is only read by the
+        offline batch scorer, ANTHROPIC_API_KEY only by narration, and
+        GRAPHHOPPER_KEY only when routing against the hosted API rather than
+        the container next door.
+
+  # --- GitHub Actions, without a stored credential ------------------------
+
+  GitHubOidcProvider:
+    Type: AWS::IAM::OIDCProvider
+    Properties:
+      Url: https://token.actions.githubusercontent.com
+      ClientIdList: [sts.amazonaws.com]
+      # No ThumbprintList. IAM stopped requiring one for this provider in 2023
+      # and now validates against its own trust store; a pinned thumbprint here
+      # is a time bomb that breaks deploys when GitHub rotates its certificate.
+
+  DeployRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub '${ProjectName}-github-deploy'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal: { Federated: !Ref GitHubOidcProvider }
+            Action: sts:AssumeRoleWithWebIdentity
+            Condition:
+              StringEquals:
+                # Both conditions matter. `aud` alone is satisfied by any
+                # GitHub Actions run anywhere in the world; `sub` is what ties
+                # it to this repository and this branch.
+                token.actions.githubusercontent.com:aud: sts.amazonaws.com
+                token.actions.githubusercontent.com:sub: !Sub 'repo:${GitHubOwner}/${GitHubRepo}:ref:${GitHubRef}'
+      Policies:
+        - PolicyName: push-images
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: ecr:GetAuthorizationToken
+                Resource: '*'   # this action does not accept a resource
+              - Effect: Allow
+                Action:
+                  - ecr:BatchCheckLayerAvailability
+                  - ecr:CompleteLayerUpload
+                  - ecr:InitiateLayerUpload
+                  - ecr:PutImage
+                  - ecr:UploadLayerPart
+                Resource:
+                  - !GetAtt ApiRepository.Arn
+                  - !GetAtt RouterRepository.Arn
+        - PolicyName: deploy-services
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - ecs:DescribeServices
+                  - ecs:DescribeTaskDefinition
+                  - ecs:RegisterTaskDefinition
+                  - ecs:UpdateService
+                Resource: '*'
+              - Effect: Allow
+                # Handing a task definition its execution and task roles is a
+                # privilege-escalation path, so it is limited to this project's
+                # two roles by name rather than left open.
+                Action: iam:PassRole
+                Resource:
+                  - !Sub 'arn:aws:iam::${AWS::AccountId}:role/${ProjectName}-task-execution'
+                  - !Sub 'arn:aws:iam::${AWS::AccountId}:role/${ProjectName}-api-task'
+                  - !Sub 'arn:aws:iam::${AWS::AccountId}:role/${ProjectName}-router-task'
+        - PolicyName: publish-frontend
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: [s3:PutObject, s3:DeleteObject, s3:ListBucket]
+                Resource:
+                  - !Sub 'arn:aws:s3:::${ProjectName}-web-${AWS::AccountId}'
+                  - !Sub 'arn:aws:s3:::${ProjectName}-web-${AWS::AccountId}/*'
+              - Effect: Allow
+                Action: cloudfront:CreateInvalidation
+                Resource: '*'
+
+Outputs:
+  ApiRepositoryUri:
+    Value: !GetAtt ApiRepository.RepositoryUri
+    Export: { Name: !Sub '${AWS::StackName}-ApiRepo' }
+  RouterRepositoryUri:
+    Value: !GetAtt RouterRepository.RepositoryUri
+    Export: { Name: !Sub '${AWS::StackName}-RouterRepo' }
+  ApiSecretsArn:
+    Value: !Ref ApiSecrets
+    Export: { Name: !Sub '${AWS::StackName}-SecretsArn' }
+  DeployRoleArn:
+    Value: !GetAtt DeployRole.Arn
+    Export: { Name: !Sub '${AWS::StackName}-DeployRole' }

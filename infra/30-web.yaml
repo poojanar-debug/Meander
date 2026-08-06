@@ -1,0 +1,229 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >
+  Meander frontend. A private S3 bucket reachable only through CloudFront, and
+  one distribution that serves both the app and /api/* — so the browser makes
+  no cross-origin request and the service worker's scope covers both.
+
+# NOTHING IN infra/ HAS BEEN APPLIED. See infra/README.md.
+
+Parameters:
+  ProjectName: { Type: String, Default: meander }
+  ServicesStack: { Type: String, Default: meander-services }
+  DomainName:
+    Type: String
+    Default: ''
+    Description: >
+      Optional. Empty means the distribution answers on its own
+      dxxxx.cloudfront.net name, which works and is what this account can
+      actually do today: the freshhaul.com certificate in us-east-1 is
+      VALIDATION_TIMED_OUT and there is no Route 53 hosted zone to publish the
+      validation records from.
+  CertificateArn:
+    Type: String
+    Default: ''
+    Description: ACM certificate ARN. Must be in us-east-1 — CloudFront ignores every other region.
+
+Conditions:
+  HasDomain: !And
+    - !Not [!Equals [!Ref DomainName, '']]
+    - !Not [!Equals [!Ref CertificateArn, '']]
+
+Resources:
+
+  WebBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub '${ProjectName}-web-${AWS::AccountId}'
+      # No website hosting, and no public access. A bucket configured as a
+      # website endpoint is public by definition and cannot be fronted by OAC;
+      # this is a plain bucket that only CloudFront's service principal can
+      # read, which is the difference between "not linked" and "not reachable".
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault: { SSEAlgorithm: AES256 }
+      VersioningConfiguration: { Status: Enabled }
+      LifecycleConfiguration:
+        Rules:
+          - Id: expire-old-versions
+            Status: Enabled
+            NoncurrentVersionExpirationInDays: 30
+
+  WebBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref WebBucket
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal: { Service: cloudfront.amazonaws.com }
+            Action: s3:GetObject
+            Resource: !Sub '${WebBucket.Arn}/*'
+            Condition:
+              StringEquals:
+                # Scoped to *this* distribution. Without it, any CloudFront
+                # distribution in any AWS account can read the bucket.
+                AWS:SourceArn: !Sub 'arn:aws:cloudfront::${AWS::AccountId}:distribution/${Distribution}'
+
+  OriginAccessControl:
+    Type: AWS::CloudFront::OriginAccessControl
+    Properties:
+      OriginAccessControlConfig:
+        Name: !Sub '${ProjectName}-s3-oac'
+        OriginAccessControlOriginType: s3
+        SigningBehavior: always
+        SigningProtocol: sigv4
+
+  # Security headers, applied at the edge rather than by the app, because the
+  # app is a static file server here and has nowhere to add them.
+  ResponseHeaders:
+    Type: AWS::CloudFront::ResponseHeadersPolicy
+    Properties:
+      ResponseHeadersPolicyConfig:
+        Name: !Sub '${ProjectName}-security-headers'
+        SecurityHeadersConfig:
+          ContentTypeOptions: { Override: true }
+          FrameOptions: { FrameOption: DENY, Override: true }
+          ReferrerPolicy: { ReferrerPolicy: no-referrer, Override: true }
+          StrictTransportSecurity:
+            AccessControlMaxAgeSec: 31536000
+            IncludeSubdomains: true
+            Override: true
+          ContentSecurityPolicy:
+            Override: true
+            # `self` plus exactly one third party: the tile host. The fonts are
+            # named in the stack and never fetched, precisely so no visitor's
+            # address reaches a font CDN — a `font-src` allowing one would undo
+            # that. `connect-src 'self'` is enough because the API is served
+            # from this same distribution.
+            ContentSecurityPolicy: >-
+              default-src 'self';
+              img-src 'self' data: blob: https://tiles.openfreemap.org;
+              connect-src 'self' https://tiles.openfreemap.org;
+              worker-src 'self' blob:;
+              style-src 'self' 'unsafe-inline';
+              script-src 'self';
+              font-src 'self';
+              frame-ancestors 'none';
+              base-uri 'self';
+              form-action 'none'
+        CustomHeadersConfig:
+          Items:
+            - { Header: Cross-Origin-Opener-Policy, Value: same-origin, Override: true }
+            - { Header: Permissions-Policy, Override: true,
+                Value: 'geolocation=(self), camera=(), microphone=(), interest-cohort=()' }
+
+  # Immutable for the hashed assets, revalidate for everything else. The
+  # service worker precaches by exact filename, so a stale asset served from
+  # the edge under a name the worker also cached is not a risk — the names
+  # change together.
+  AssetCachePolicy:
+    Type: AWS::CloudFront::CachePolicy
+    Properties:
+      CachePolicyConfig:
+        Name: !Sub '${ProjectName}-assets'
+        DefaultTTL: 86400
+        MinTTL: 0
+        MaxTTL: 31536000
+        ParametersInCacheKeyAndForwardedToOrigin:
+          EnableAcceptEncodingBrotli: true
+          EnableAcceptEncodingGzip: true
+          CookiesConfig: { CookieBehavior: none }
+          HeadersConfig: { HeaderBehavior: none }
+          QueryStringsConfig: { QueryStringBehavior: none }
+
+  Distribution:
+    Type: AWS::CloudFront::Distribution
+    Properties:
+      DistributionConfig:
+        Enabled: true
+        Comment: !Sub '${ProjectName} — app and API'
+        DefaultRootObject: index.html
+        HttpVersion: http2and3
+        IPV6Enabled: true
+        # PriceClass_All would put edges everywhere; 200 covers Europe, North
+        # America and Asia including ap-south-1 and Colombo, which is where the
+        # demo data actually is.
+        PriceClass: PriceClass_200
+        Aliases: !If [HasDomain, [!Ref DomainName], !Ref 'AWS::NoValue']
+        ViewerCertificate: !If
+          - HasDomain
+          - AcmCertificateArn: !Ref CertificateArn
+            SslSupportMethod: sni-only
+            MinimumProtocolVersion: TLSv1.2_2021
+          - CloudFrontDefaultCertificate: true
+
+        Origins:
+          - Id: s3
+            DomainName: !GetAtt WebBucket.RegionalDomainName
+            OriginAccessControlId: !GetAtt OriginAccessControl.Id
+            S3OriginConfig: { OriginAccessIdentity: '' }
+          - Id: alb
+            DomainName: { 'Fn::ImportValue': !Sub '${ServicesStack}-AlbDns' }
+            CustomOriginConfig:
+              # https-only once the ALB has a certificate. Left as a parameter
+              # of the services stack rather than duplicated here; if that
+              # listener is HTTP this must be http-only or every request 502s,
+              # which is the loudest possible reminder to finish the TLS setup.
+              OriginProtocolPolicy: https-only
+              OriginSSLProtocols: [TLSv1.2]
+              OriginReadTimeout: 60      # /api/routes streams while enriching
+              OriginKeepaliveTimeout: 30
+
+        DefaultCacheBehavior:
+          TargetOriginId: s3
+          ViewerProtocolPolicy: redirect-to-https
+          AllowedMethods: [GET, HEAD, OPTIONS]
+          CachedMethods: [GET, HEAD]
+          Compress: true
+          CachePolicyId: !Ref AssetCachePolicy
+          ResponseHeadersPolicyId: !Ref ResponseHeaders
+
+        CacheBehaviors:
+          - PathPattern: /api/*
+            TargetOriginId: alb
+            ViewerProtocolPolicy: https-only
+            AllowedMethods: [GET, HEAD, OPTIONS, PUT, POST, PATCH, DELETE]
+            Compress: false   # SSE must not be buffered for compression
+            # CachingDisabled + AllViewerExceptHostHeader, both AWS-managed.
+            # Forwarding the viewer's Host to an ALB that routes on nothing
+            # would be harmless here but breaks the moment a host-based rule is
+            # added, and the API's answers are per-coordinate: caching them at
+            # the edge would serve one person's route to the next.
+            CachePolicyId: 4135ea2d-6df8-44a3-9df3-4b5a84be39ad
+            OriginRequestPolicyId: b689b0a8-53d0-40ab-baf2-68738e2966ac
+          - PathPattern: /sw.js
+            TargetOriginId: s3
+            ViewerProtocolPolicy: redirect-to-https
+            AllowedMethods: [GET, HEAD]
+            Compress: true
+            # CachingDisabled. The worker is the one file that must not be
+            # served stale: an edge-cached sw.js keeps handing out a precache
+            # manifest naming assets the deploy has already replaced, and the
+            # app opens offline into a version that no longer exists.
+            CachePolicyId: 4135ea2d-6df8-44a3-9df3-4b5a84be39ad
+            ResponseHeadersPolicyId: !Ref ResponseHeaders
+
+        CustomErrorResponses:
+          # A single-page app: a deep link is not a missing object. Only 403
+          # and 404 are rewritten, and only for the S3 origin's own failures —
+          # an API 404 travels through untouched because /api/* is a different
+          # behaviour and these apply to the default one.
+          - { ErrorCode: 403, ResponseCode: 200, ResponsePagePath: /index.html, ErrorCachingMinTTL: 0 }
+          - { ErrorCode: 404, ResponseCode: 200, ResponsePagePath: /index.html, ErrorCachingMinTTL: 0 }
+
+Outputs:
+  BucketName:
+    Value: !Ref WebBucket
+    Export: { Name: !Sub '${AWS::StackName}-Bucket' }
+  DistributionId:
+    Value: !Ref Distribution
+    Export: { Name: !Sub '${AWS::StackName}-DistributionId' }
+  SiteUrl:
+    Value: !If [HasDomain, !Sub 'https://${DomainName}', !Sub 'https://${Distribution.DomainName}']
+    Export: { Name: !Sub '${AWS::StackName}-SiteUrl' }

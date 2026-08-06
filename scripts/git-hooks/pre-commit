@@ -1,0 +1,15 @@
+#!/bin/sh
+# Meander pre-commit hook.
+#
+# Install once, per clone:
+#
+#     scripts/install-hooks.sh
+#
+# It refuses one specific commit: a data/cache.db that carries route_cache rows.
+# Those rows are whole /api/routes payloads with real coordinate arrays, and the
+# file is tracked, so committing one publishes location history. See
+# scripts/scrub_cache_db.py for why this cannot be spotted by eye.
+
+set -e
+
+python3 "$(git rev-parse --show-toplevel)/scripts/scrub_cache_db.py" --check

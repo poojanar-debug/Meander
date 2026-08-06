@@ -25,7 +25,24 @@ import pytest
 # misses. Per-test overrides go through the `fixture_mode` fixture instead.
 os.environ["MEANDER_FIXTURES"] = "replay"
 os.environ["MEANDER_GRAPHHOPPER_URL"] = "https://graphhopper.com/api/1/route"
+# Pinned for the same reason and in the same breath as the URL: this flag
+# decides path_details(), path_details() is inside the request body, and the
+# body is what a fixture is keyed on. It is pinned to "0" specifically because
+# that is what the hostname sniff resolved to for the URL above when every
+# committed fixture was recorded — flipping it invalidates all of them at once
+# and the suite fails wholesale on no_fixture rather than on anything that
+# points at the cause. PROGRESS.md logs this as self-hosting defect #6.
+os.environ["MEANDER_GRAPHHOPPER_SELF_HOSTED"] = "0"
 os.environ.pop("MEANDER_PATH_DETAILS", None)
+# Cleared for the same reason, and found the same way. Several tests assert what
+# happens when a credential is *absent* — "fetching imagery without a token
+# fails loudly" is the guard against reporting "this place has no imagery" when
+# the truth is "we never looked". The moment a real MAPILLARY_TOKEN went into
+# .env those tests inverted, and they are precisely the tests protecting the
+# honesty rule. A credential in the environment must never change what the suite
+# asserts; a test that wants one sets it explicitly.
+for _credential in ("MAPILLARY_TOKEN", "ANTHROPIC_API_KEY"):
+    os.environ[_credential] = ""
 os.environ.setdefault("MEANDER_LOG_LEVEL", "WARNING")
 # open_clip otherwise contacts the Hugging Face hub to revalidate the CLIP
 # weights, which the socket guard below correctly refuses. Offline mode makes it
@@ -94,15 +111,26 @@ def tmp_fixture_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator
 
 @pytest.fixture(autouse=True)
 def _clean_process_state() -> Iterator[None]:
-    """Counters and rate-limit buckets are process-wide; reset them per test."""
+    """Counters, rate-limit buckets and shutdown state are process-wide.
+
+    The shutdown flag matters more than it looks: every TestClient that exits
+    runs lifespan's shutdown and leaves it set, so without this the *next*
+    test's stream immediately answers "this server is restarting" and produces
+    no events at all.
+    """
+    from backend import main as main_mod
     from backend.main import limiter
     from backend.metrics import metrics
 
-    metrics.reset()
-    limiter.reset()
+    def _reset() -> None:
+        metrics.reset()
+        limiter.reset()
+        main_mod._shutting_down.clear()
+        main_mod._open_streams = 0
+
+    _reset()
     yield
-    metrics.reset()
-    limiter.reset()
+    _reset()
 
 
 @pytest.fixture

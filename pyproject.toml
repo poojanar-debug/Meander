@@ -11,6 +11,44 @@ markers = [
     "live: needs real network access and a real API key; deselected by default",
 ]
 
+[tool.coverage.run]
+source = ["backend"]
+# Statement coverage, not branch. `branch = true` collides with the subprocess
+# in test_privacy_guard.py: pytest-cov's .pth file auto-instruments the child,
+# the child records statement data, and combining the two fails the whole run
+# with "Can't combine statement coverage data with branch data". That
+# subprocess is the test proving the privacy guard holds in a *fresh*
+# interpreter, which is worth more than the extra precision of branch counting.
+omit = [
+    # The tests are not the subject. Including them inflates the total by
+    # several points — they are almost fully executed by construction — and a
+    # floor computed over them measures nothing.
+    "backend/tests/*",
+    # Developer tooling that never runs in the deployed image, and that is
+    # exercised by being run rather than by unit tests. Excluded openly rather
+    # than left to drag the floor down to a number that permits anything:
+    # record_fixtures.py talks to live upstreams by definition, and
+    # batch_score.py needs torch, a Mapillary token and about twenty minutes.
+    "backend/record_fixtures.py",
+    "backend/batch_score.py",
+]
+
+[tool.coverage.report]
+# A floor, not a target.
+#
+# Deliberately not 100%. The last few percent here are `except ImportError`
+# paths for torch and defensive branches that exist precisely because they
+# should never run — and the usual way to make those green is to delete the
+# guard, which is the opposite of the point.
+fail_under = 85
+show_missing = true
+skip_covered = true
+exclude_also = [
+    "if TYPE_CHECKING:",
+    "raise NotImplementedError",
+    "if __name__ == .__main__.:",
+]
+
 [tool.ruff]
 line-length = 100
 target-version = "py311"

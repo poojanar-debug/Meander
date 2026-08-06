@@ -24,12 +24,38 @@ graphhopper:
     - name: car
       custom_model_files: [car.json]
 
-  # Contraction hierarchies: fast, but incompatible with a custom model. This is
-  # what serves the `fastest` preset and round trips.
-  profiles_ch:
-    - profile: foot
-    - profile: bike
-    - profile: car
+  # Contraction hierarchies: DELIBERATELY NOT PREPARED.
+  #
+  # CH is incompatible with a custom model, so it only ever served the `fastest`
+  # preset — two of Meander's three presets could never use it. Measured on the
+  # demo region set (620 MB with CH, 485 MB without):
+  #
+  #   |                          | with CH | without CH |
+  #   |--------------------------|---------|------------|
+  #   | import time              |    96 s |       58 s |
+  #   | graph on disk            |  620 MB |     485 MB |
+  #   | plain `fastest` route    |  5.1 ms |     9.2 ms |
+  #   | flexible (nature/access) |  9.0 ms |     9.3 ms |
+  #
+  # So CH buys 4 ms on one preset and costs 22% of the graph and 40% of the
+  # import. Graph size is what the memory bill is, and 4 ms is invisible next to
+  # a request whose budget is dominated by Overpass at seconds. GraphHopper
+  # falls back to LM automatically when no CH profile exists — verified, HTTP
+  # 200 — so nothing in the app changes.
+  #
+  # It also removes a whole failure class: "algorithm=round_trip cannot be used
+  # with CH" cannot occur if CH was never prepared. build_request_body() still
+  # sets ch.disable for self-hosted round trips, which is now belt and braces
+  # rather than load-bearing.
+  #
+  # ⚠ Measured on the demo graph only. The `countries` set is 18.5M nodes and
+  # LM-only latency there is **not** measured; if you build countries and find
+  # `fastest` slow, put this block back:
+  #
+  #   profiles_ch:
+  #     - profile: foot
+  #     - profile: bike
+  #     - profile: car
 
   # Landmarks: what makes a *custom model* query fast. Without these, every
   # nature and accessible request falls back to plain Dijkstra over the whole

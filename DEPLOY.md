@@ -1,229 +1,190 @@
 # Deploying Meander
 
-Backend on Render's free tier, frontend on Vercel. Roughly twenty minutes end to end, most of it
-waiting for builds.
+Four CloudFormation stacks on AWS: ECS Fargate for the API and the router,
+CloudFront and S3 for the app, all in one distribution so the browser makes no
+cross-origin request.
 
-Nothing in this repo deploys itself and no step below runs automatically. Every secret is entered
-in a hosting dashboard; none is ever committed.
+> ## This has never been run.
+>
+> Every template validates and `cfn-lint` passes on all four, and **nothing has
+> been deployed**. The commands below are written to be followed without
+> guessing, and none of them has been executed against a real AWS account. The
+> gate table in [`infra/README.md`](infra/README.md) lists all seventeen things
+> that would have to be checked afterwards and marks every one UNVERIFIED.
+>
+> What *has* been verified end to end is the same stack under `docker compose`
+> on a laptop: both images build, both containers reach healthy, and
+> `POST /api/routes` returns three routes with real CLIP scores. That is the
+> strongest claim available without spending money.
+
+The old two-host deployment — Render for the API, Vercel for the frontend — is
+in [`docs/legacy/`](docs/legacy/) with its own notes. It worked and it was
+never deployed either.
 
 ---
 
 ## Before you start
 
-You need:
-
 | | where | free? |
 |---|---|---|
-| GraphHopper API key | https://www.graphhopper.com/ → Dashboard → API keys | yes, 500 credits/day |
+| An AWS account | https://aws.amazon.com | the resources below are **not** free — about $108/month, itemised in [`infra/README.md`](infra/README.md) |
 | Mapillary client token | https://www.mapillary.com/dashboard/developers | yes |
 | Anthropic API key | https://console.anthropic.com/ | **no — costs real money per call** |
-| Render account | https://render.com | yes |
-| Vercel account | https://vercel.com | yes |
+| GraphHopper API key | https://www.graphhopper.com/ | yes, and **not needed** — you are running your own router |
 
-Only the GraphHopper key is required. Without Mapillary, scenery scores fall back to geometry and
-say so. Without Anthropic, `narration` stays `null` and the card reads "Description still being
-written…" — which is why that copy exists.
+**None of the three keys is required to serve a route.** `MAPILLARY_TOKEN` is
+read only by the offline batch scorer, `ANTHROPIC_API_KEY` only by narration,
+and `GRAPHHOPPER_KEY` only if you point at the hosted API instead of your own
+router. `/api/health` reports which are missing. Without Anthropic, `narration`
+stays `null` and the card reads "Description still being written…" — which is
+why that copy exists.
+
+Nothing in this repository deploys itself. Secrets go into Secrets Manager by
+hand; none is ever a CloudFormation parameter, because a parameter value is
+visible in `describe-stacks` for the life of the stack.
 
 ---
 
-## Step 0 · Pre-warm the scenery cache (optional, but do it before the first deploy)
+## Step 0 · The graph, which is the awkward part
 
-The deployed backend has 512 MB and cannot run CLIP. It reads scores from `data/cache.db`, which
-you generate **locally**, commit, and deploy along with the code.
+The router image never imports a graph. An import is 71 s for the demo region
+set and about 31 minutes for three whole countries — either would be an outage
+of that length on **every** task replacement, and ECS would kill the task long
+before the second finished. So the graph is a build artifact.
 
 ```bash
-python3 -m venv .venv && source .venv/bin/activate && pip install -r backend/requirements.txt
+scripts/graphhopper.sh setup --region-set demo   # ~4 min, once. Needs JDK 21.
+scripts/publish_graph.sh --local                 # stages it for the image build
 ```
+
+That gives a 485 MB graph covering bounding boxes around the five demo
+locations. `--region-set countries` gives Sri Lanka, the Netherlands and Great
+Britain entire: 6.6 GB, a 31-minute import and a 20 GB serve heap, which is a
+different `RouterMemory` and a different cost conversation.
+
+CI cannot do this — a GitHub runner would have to import the graph first — so
+the router image is built from a workstation. See
+[`infra/README.md`](infra/README.md) for the alternative, where the container
+fetches a published archive at start and verifies its digest before unpacking.
+
+## Step 0b · Pre-warm the scenery cache
+
+Optional, and do it before the first deploy: `data/cache.db` is baked into the
+API image, so warming it afterwards means rebuilding.
 
 ```bash
-MEANDER_FIXTURES=record python3 -m backend.batch_score --location hyde-park-london --location euston-road-london
+MEANDER_FIXTURES=record python3 -m backend.batch_score
 ```
+
+Needs a Mapillary token and torch locally. It writes CLIP scores for the demo
+locations; anywhere you have not warmed comes back
+`scoring_method: "geometry_only"` and says so in the response. The committed
+cache already holds 146 segments across the five demo locations, so you can
+skip this entirely and still get real scores there.
+
+## Step 1 · The stacks
+
+In order, because each imports from the one before. Full commands with the
+parameter overrides are in [`infra/README.md`](infra/README.md); the shape is:
 
 ```bash
-git add data/cache.db && git commit -m "chore(cache): pre-warm CLIP segment scores"
+REGION=ap-south-1
+ACCOUNT=$(aws sts get-caller-identity --query Account --output text)
+
+aws cloudformation deploy --stack-name meander-platform --template-file infra/00-platform.yaml \
+  --capabilities CAPABILITY_NAMED_IAM --region $REGION
+aws cloudformation deploy --stack-name meander-network  --template-file infra/10-network.yaml \
+  --region $REGION --parameter-overrides CloudFrontPrefixListId=$PL
+# push both images, then
+aws cloudformation deploy --stack-name meander-services --template-file infra/20-services.yaml \
+  --capabilities CAPABILITY_NAMED_IAM --region $REGION --parameter-overrides ...
+aws cloudformation deploy --stack-name meander-web      --template-file infra/30-web.yaml \
+  --region $REGION
 ```
 
-The file does not exist until you run that command — the backend creates it on first boot if it
-is absent, empty of CLIP rows.
-
-Skip this and everything still works — every route just comes back with
-`scoring_method: "geometry_only"` and a lower confidence, which the UI states plainly.
-
----
-
-## Step 0b · Decide which GraphHopper you are deploying against
-
-This determines whether two of your three routes exist at all.
-
-| | hosted free tier | hosted paid | self-hosted |
-|---|---|---|---|
-| `fastest` | ✅ | ✅ | ✅ |
-| round trips | ✅ | ✅ | ✅ |
-| `nature`, `accessible` | ❌ **blocked** | ✅ | ✅ |
-| `smoothness` for the accessibility engine | ❌ | ❌ | ✅ |
-| cost | free, 500 credits/day | from ~€50/month | your own hardware |
-
-The nature and accessible presets steer the router with a `custom_model`, which
-requires flexible mode — a paid feature. On a free package those two come back
-`status: "blocked"` with the reason, which is honest but is not the app you
-probably want to show people.
-
-**Self-hosting is the free way to get all three.** It is not deployable to
-Render's free tier — the graph for Great Britain alone is several GB — so it
-means a VM with disk and a few GB of RAM. `scripts/graphhopper.sh` builds and
-runs it; set `MEANDER_GRAPHHOPPER_URL` on the backend to point at it, and note
-that a self-hosted server needs **no** `GRAPHHOPPER_KEY`, so
-`MEANDER_STRICT_STARTUP=1` will not demand one.
-
-Whichever you pick, `/api/health` tells you which one is live:
-
-```json
-"routing": { "endpoint": "...", "self_hosted": true, "custom_models_available": true }
-```
-
----
-
-## Step 1 · Backend on Render
-
-1. Push this repo to GitHub.
-2. Render dashboard → **New** → **Blueprint** → select the repo. Render reads
-   [`render.yaml`](render.yaml).
-3. It will prompt for the values marked `sync: false`. Enter:
-
-   | key | value |
-   |---|---|
-   | `GRAPHHOPPER_KEY` | your key |
-   | `MAPILLARY_TOKEN` | your token, or leave blank |
-   | `ANTHROPIC_API_KEY` | your key, or leave blank |
-   | `OSM_DEV_TOKEN` | leave blank unless you want barrier reporting |
-   | `MEANDER_ALLOWED_ORIGINS` | **leave blank for now** — you do not know the Vercel URL yet |
-
-4. Deploy. First build takes 2–4 minutes.
-5. Note the service URL, e.g. `https://meander-api.onrender.com`.
-
-Check it:
+Then the secrets, separately:
 
 ```bash
-curl -s https://meander-api.onrender.com/api/health | python3 -m json.tool
+aws secretsmanager put-secret-value --secret-id meander/api --region $REGION \
+  --secret-string '{"MAPILLARY_TOKEN":"…","ANTHROPIC_API_KEY":"…"}'
 ```
 
-You want `"status": "ok"`, `"missing_keys": []`, and `"clip_available": false`. **`clip_available:
-false` is correct and expected** — torch is deliberately absent from the deployed build.
+## Step 2 · There is no CORS step, and that is deliberate
 
-> **`MEANDER_STRICT_STARTUP=1` means a missing key stops the boot** with a message naming the key.
-> That is on purpose: a production instance silently falling back to fixtures would serve made-up
-> routes. If the deploy fails, read the log — it tells you exactly which key is missing.
+The previous deployment's most error-prone moment was closing the CORS/CSP loop
+between two hosts, where the site stayed broken until *both* edits were made
+and the failure mode was a browser console message with an empty server log.
 
-### About the free plan
+One CloudFront distribution serves the app from S3 and `/api/*` from the load
+balancer, so the browser only ever talks to one origin. `MEANDER_ALLOWED_ORIGINS`
+is empty in the task definition because there is no cross-origin request to
+allow, and the CSP names exactly `'self'` plus the tile host.
 
-- **It sleeps after 15 minutes of inactivity.** The next request takes 30–60 seconds to wake it.
-  The frontend shows its loading banner throughout, so it looks slow rather than broken, but it is
-  the first thing testers will notice.
-- **The filesystem is writable but ephemeral.** The cache lives at `data/cache.db` — the file in
-  the repository — so the pre-warmed CLIP segment scores from Step 0 are read on every boot, and
-  the whole-route cache written alongside them is discarded on each deploy. That is the intended
-  behaviour. **Do not set `MEANDER_CACHE_DB` to a path outside the repo**: doing so silently
-  discards the pre-warmed scores and every route quietly drops to `geometry_only`.
-- **512 MB of RAM.** Do not add `torch` to `requirements-deploy.txt`. The instance will OOM at
-  import and the failure is confusing — it looks like a crash loop with no error.
-
----
-
-## Step 2 · Frontend on Vercel
-
-1. Vercel → **Add New** → **Project** → same repo.
-2. Set **Root Directory** to `frontend`. Vercel then reads
-   [`frontend/vercel.json`](frontend/vercel.json) and detects Vite.
-3. Add one environment variable, for **Production** and **Preview**:
-
-   | key | value |
-   |---|---|
-   | `VITE_API_BASE` | `https://meander-api.onrender.com` — your Render URL, no trailing slash |
-
-   Do **not** set `VITE_MOCK_API`. If you set it to `1`, the site runs on fixtures and shows a
-   "Demo data" badge saying so.
-
-4. Deploy. Note the URL, e.g. `https://meander.vercel.app`.
-
-### Then close the CORS loop — the site is broken until you do
-
-Two edits, both required:
-
-**a. Render → your service → Environment → `MEANDER_ALLOWED_ORIGINS`:**
-
-```
-https://meander.vercel.app
-```
-
-Comma-separate if you have several. `http://localhost:5173` is always allowed in addition, so local
-development keeps working. Save; Render redeploys.
-
-**b. `frontend/vercel.json` → the `Content-Security-Policy` header.** Replace
-`https://REPLACE-WITH-YOUR-RENDER-HOST.onrender.com` in `connect-src` with your Render URL, then
-commit and push.
-
-If you skip either, the browser blocks every API call and the UI shows "Could not reach the Meander
-server." The Render logs will be empty, because the request never arrives. Check the browser console
-first — it names which policy blocked it.
-
----
-
-## Step 3 · Verify the deployment
+## Step 3 · Verify
 
 ```bash
-curl -s https://meander-api.onrender.com/api/health | python3 -m json.tool
+SITE=$(aws cloudformation describe-stacks --stack-name meander-web \
+  --query 'Stacks[0].Outputs[?OutputKey==`SiteUrl`].OutputValue' --output text)
+
+curl -s $SITE/api/healthz
+curl -s $SITE/api/health | jq '.routing | {self_hosted, self_hosted_source, path_details}'
+curl -s $SITE/api/health | jq .cache
+curl -s -X POST $SITE/api/routes -H 'content-type: application/json' \
+  -d '{"origin":{"lat":51.507489,"lon":-0.162207},"minutes":35,"mode":"auto",
+       "objectives":["fastest","nature","accessible"]}' \
+  | jq '.routes[] | {id, status, scoring_method, confidence}'
 ```
 
-```bash
-curl -s -X POST https://meander-api.onrender.com/api/routes -H 'Content-Type: application/json' -d '{"origin":{"lat":51.507489,"lon":-0.162207},"minutes":35,"mode":"auto"}' | python3 -m json.tool
-```
+**The one that matters most is the second.** `self_hosted` must be `true`,
+`self_hosted_source` must be `"env"`, and `path_details` must contain
+`"smoothness"`. If `self_hosted_source` says `"sniff"` the hostname heuristic
+has guessed — and it guesses wrong for a Cloud Map name — so `smoothness`
+silently leaves the request, and the accessible model stops excluding surfaces
+recorded as impassable. The app carries on looking perfectly healthy.
 
-Then in the browser, on the deployed site:
+The full list is the gate table in [`infra/README.md`](infra/README.md).
 
-- [ ] Three route cards appear.
-- [ ] Every card shows a `scoring_method` line and a confidence sentence.
-- [ ] No card says "Built from demonstration data" — if one does, the backend is serving synthetic
-      fixtures, which means `MEANDER_FIXTURES` is not `live` or the GraphHopper key is not working.
-- [ ] The time dial refetches, and the previous routes stay on screen while it does.
-- [ ] Tab through the whole page: every control is reachable and has a visible focus ring.
-- [ ] At 375 px wide there is no horizontal scrolling.
+## Watching the bill
 
----
+The two lines worth arguing about, both in [`infra/README.md`](infra/README.md):
+the NAT gateway costs $32/month, more than the API it serves, and the load
+balancer costs $18/month, about as much as everything it balances. At this size
+a single small instance running `docker compose up` would do the same job for
+about a third of the total, and the README says so.
 
-## Watching the quota
-
-`/api/health` reports it:
-
-```json
-"rate_limit": { "daily_ceiling": 120, "served_today": 37 }
-```
-
-GraphHopper's free tier is 500 credits/day and one routed request costs about three. The default
-ceiling of 120 routed requests is ~360 credits, leaving headroom for geocoding and retries. A cache
-hit is refunded and costs nothing.
-
-If you raise `MEANDER_DAILY_ROUTE_CEILING`, raise it knowing that exceeding the GraphHopper quota
-makes every route fail with a 503 for the rest of the day.
-
----
+`meander-api-latency-p95` and the other three alarms go to an SNS topic; set
+`AlarmEmail` when deploying the services stack or they exist and notify nobody.
 
 ## Rolling back
 
-Render and Vercel both keep previous deployments. Roll back from the dashboard; neither the
-frontend nor the backend holds state that a rollback could corrupt — the app is stateless by
-design and the only persistent artefact, `data/cache.db`, is versioned in git with the code.
+Images are tagged with the commit SHA and the ECR repositories are
+IMMUTABLE-tagged, so a rollback is a task definition rather than a rebuild. The
+API service has a deployment circuit breaker with rollback enabled and reverts
+a bad image on its own; the router runs a single task and does not. Commands
+are in [`docs/RUNBOOK.md`](docs/RUNBOOK.md).
 
 ---
 
 ## Things that will look like bugs and are not
 
+The most useful table in this document. Kept from the Render version and
+extended, because most of it was never about Render.
+
 | symptom | cause |
 |---|---|
-| First request after a quiet period takes ~45 s | Render free tier cold start. |
-| `clip_available: false` | Correct. The deployed build has no torch, by design. |
-| `scoring_method: "geometry_only"` | No pre-warmed CLIP scores for that area. Run Step 0 for it. |
-| Every route identical | GraphHopper accepted `custom_model` and ignored it. `ch.disable` must accompany it — this is the classic failure and it is silent. `scripts/verify_selfhosted.py` checks for exactly this. |
-| `nature` and `accessible` blocked, "flexible routing mode" | Free GraphHopper package. Expected — see Step 0b. |
+| `clip_available: false` | Correct. The deployed image has no torch, by design. Scores are read from the pre-warmed cache. |
+| `scoring_method: "geometry_only"` | No pre-warmed CLIP scores for that area. Run Step 0b for it. Everywhere outside the five demo locations, this is expected. |
+| `segments_scored: 0` when you warmed the cache | `MEANDER_CACHE_DB` is set in the task definition. It points the API away from the `data/cache.db` baked into the image and **nothing else looks wrong**. Leave it unset. |
+| Every route identical | GraphHopper accepted `custom_model` and ignored it. `ch.disable` must accompany it — the classic failure, and it is silent. `scripts/verify_selfhosted.py` checks for exactly this. |
+| `nature` and `accessible` blocked, "flexible routing mode" | You are pointed at the hosted GraphHopper free tier, which cannot execute a custom model. Point `MEANDER_GRAPHHOPPER_URL` at your own router. |
+| `path_details` has no `smoothness` | `MEANDER_GRAPHHOPPER_SELF_HOSTED` is not `1`. The accessible model has silently stopped excluding impassable surfaces. This is the most dangerous one on the list. |
 | 429 with "used up its routing allowance" | The daily ceiling. Working as intended. |
+| *Everyone* getting 429 at once | `MEANDER_TRUSTED_PROXY_HOPS` is wrong. Behind CloudFront **and** an ALB it is `2`: the header is `viewer, cloudfront` and the limiter counts from the right. At `1` every request in the world shares one bucket, and the limiter still *works*, which is what makes it hard to spot. |
 | Routes appear but the map is blank | CSP `connect-src`/`img-src` is missing `https://tiles.openfreemap.org`. |
-| "Could not reach the Meander server" | CORS. Step 2's two edits. |
+| The map is blank **and** the app says it is showing a saved copy | Correct. Map tiles are deliberately never cached — a tile cache is a record of where you have been — so an offline route has no map. Everything the routes say is in the list. |
+| A route card says "saved 3 hours ago" | Correct, and the point of Phase 6.5. The service worker served it because the server was unreachable. |
+| Rest stops are `null` rather than `[]` | Overpass timed out. `null` means "we could not look" and `[]` means "we looked and found none" — the difference is deliberate and the UI renders them differently. |
+| `narration` is `null` | No `ANTHROPIC_API_KEY`. The card says "Description still being written…". |
+| The router has no public IP and you cannot curl it | Correct. Its security group's only ingress rule names the API's security group. It is unauthenticated and compute-unbounded; that is the boundary. |
+| The frontend 404s on a deep link | The CloudFront custom error responses rewrite 403/404 to `/index.html`. If they are missing, the SPA cannot handle refreshes. |
+| First offline load after a deploy shows the previous version | The new service worker activates on the next navigation. `sw.js` must not be edge-cached, which is why it has its own CachingDisabled behaviour. |

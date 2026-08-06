@@ -74,12 +74,36 @@ def bearing_deg(a: LatLon, b: LatLon) -> float:
     dlon = math.radians(b.lon - a.lon)
     y = math.sin(dlon) * math.cos(lat2)
     x = math.cos(lat1) * math.sin(lat2) - math.sin(lat1) * math.cos(lat2) * math.cos(dlon)
-    return math.degrees(math.atan2(y, x)) % 360.0
+    bearing = math.degrees(math.atan2(y, x)) % 360.0
+
+    # `% 360.0` alone does not close the interval, and the half-open range in
+    # the docstring is the contract. Python's float modulo takes the sign of
+    # the divisor, so a bearing a hair below zero — atan2 returns -2.8e-14
+    # degrees for a due-north step across the antimeridian — becomes
+    # 360 - 2.8e-14, which is not representable in float64 and rounds to
+    # exactly 360.0.
+    #
+    # Harmless in both current callers: turn_angles_deg takes differences and
+    # enrich.route_heading feeds a cosine, and both are periodic. It stops
+    # being harmless the moment anyone buckets a bearing into compass points,
+    # where int(360.0 / 45) indexes one past the end of an eight-element table.
+    # Found by a property test rather than by a failure.
+    return 0.0 if bearing >= 360.0 else bearing
 
 
 def interpolate(a: LatLon, b: LatLon, t: float) -> LatLon:
-    """Linear interpolation. Adequate at the sub-kilometre scale used here."""
-    return LatLon(a.lat + (b.lat - a.lat) * t, a.lon + (b.lon - a.lon) * t)
+    """Linear interpolation. Adequate at the sub-kilometre scale used here.
+
+    Clamped, because the arithmetic can leave the planet. Interpolating between
+    -89.99999999999999 and 90.0 produces 90.00000000000001 — an overshoot of
+    about a nanometre, and still a latitude `models.py` refuses and a Mapillary
+    bounding box cannot be built from. Found by a property test over the whole
+    globe; no real route goes through a pole, but "no real input does that" is
+    not a reason for a function to return something that is not a coordinate.
+    """
+    lat = a.lat + (b.lat - a.lat) * t
+    lon = a.lon + (b.lon - a.lon) * t
+    return LatLon(min(90.0, max(-90.0, lat)), min(180.0, max(-180.0, lon)))
 
 
 class SamplePoint(NamedTuple):

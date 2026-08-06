@@ -50,3 +50,7 @@ graphhopper/graph-dist/
 # .claude/worktrees/ holds checkouts of this very repository, and committing it
 # would nest the repo inside itself.
 .claude/
+
+# Staged graph for the router image build (see scripts/publish_graph.sh).
+graphhopper/graph-dist/*
+!graphhopper/graph-dist/.gitkeep

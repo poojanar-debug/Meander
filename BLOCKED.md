@@ -1,22 +1,47 @@
 # Blocked
 
-Things this project could not finish, what was tried, and what needs a human.
+Things this run could not finish, what was tried, and what needs a human.
 
-Entries that have since been resolved are kept rather than deleted, marked
-**RESOLVED**, and say what resolved them — the workaround each one describes is
-still load-bearing in the code, and deleting the entry would leave the reason
-for it unexplained.
+**One entry is open — §5, a deliberate deferral with a list.**
 
-**Last verified:** 2026-08-06, against the environment in `.env`.
+| | |
+|---|---|
+| §0 free tier cannot route nature/accessible | **resolved** — self-hosted GraphHopper 11 |
+| §1 no `GRAPHHOPPER_KEY`, fixtures synthetic | **resolved** — a real key exists; live routing works |
+| §2 no `MAPILLARY_TOKEN`, CLIP unvalidated | **resolved** — token supplied; cache pre-warmed, prompt re-ranked |
+| §3 prototype sources missing | **resolved** — worked around, nothing outstanding |
+| §4 two suites asserted things about the machine | **resolved** — TZ and the Mapillary token are now supplied by the harness |
+| §5 the merge took main's frontend entirely | **open** — deliberate; §5 lists what has to come back and when |
 
 ---
 
-## 0 · The GraphHopper free tier cannot route the nature or accessible presets
+## 0 · ~~The GraphHopper free tier cannot route the nature or accessible presets~~ — RESOLVED
+
+**Resolved:** 2026-08-04, by self-hosting, which was option 2 below.
+
+`scripts/graphhopper.sh setup && scripts/graphhopper.sh serve` builds and runs an open-source
+GraphHopper 11 with no flexible-mode restriction. Point `MEANDER_GRAPHHOPPER_URL` at it and both
+presets route for real. Verified by `scripts/verify_selfhosted.py` at four points, one per
+imported region: all three presets answer and their geometries differ.
+
+Self-hosting also bought something the paid plan would not have. The graph is built with
+`smoothness` as an encoded value, so the accessible custom model can now *exclude* ways recorded
+as `IMPASSABLE` rather than only reporting them after the fact. That is one of the five hard
+accessibility constraints, and until now it could never fire from routing data — the hosted API
+does not expose it at any price tier.
+
+The cost is that coverage is now finite: only places inside the imported extracts can be routed.
+`scripts/graphhopper.sh regions` prints what is built in.
+
+The original finding, kept because the capability matrix is still the reference for anyone
+deploying against the hosted API instead:
+
+<details>
+<summary>Original entry</summary>
 
 **Discovered:** 2026-08-04, on the first live request with a real API key.
-**RESOLVED:** 2026-08-04 by self-hosting. Residual constraints below.
 
-**What happened**
+**What happens**
 
 Both presets steer the router with a `custom_model`. A custom model requires
 flexible mode (`"ch.disable": true`), and flexible mode is a paid feature:
@@ -27,214 +52,264 @@ POST /api/1/route   ->  400  "The 'custom_model' parameter is currently not
                               supported for speed mode"
 ```
 
-`fastest` worked and everything downstream of it worked; `nature` and
-`accessible` returned `status: "blocked"` with that reason quoted, rather than
-quietly returning the fastest route a second time under a different name.
-
-**What resolved it**
-
-Option 2 from the list this entry used to end with: a self-hosted GraphHopper.
-The open-source server has no flexible-mode restriction. `scripts/graphhopper.sh`
-builds it, `MEANDER_GRAPHHOPPER_URL` points the app at it, and
-`scripts/verify_selfhosted.py` checks that all three presets return distinct
-geometry at four locations. Self-hosting also exposed the `smoothness` tag,
-which the hosted API never did — one of the five hard accessibility constraints
-could not fire from routing data at all until then. See PROGRESS.md,
-*Self-hosted GraphHopper*, for the six defects that surfaced on the way.
-
-**What is still true, and will bite**
-
-1. **The self-hosted server has to actually be running.** With
-   `MEANDER_GRAPHHOPPER_URL` set and nothing listening, routing fails; unset it
-   and the app falls back to the hosted API, where this entry's original
-   symptom returns exactly as described above. Start it with:
-
-   ```bash
-   scripts/graphhopper.sh serve
-   ```
-
-2. **Only imported regions can be routed.** The graph actually built here is
-   narrower than the `REGIONS` list at the top of `scripts/graphhopper.sh`
-   suggests — the extracts on disk are **Sri Lanka, Greater London and
-   Noord-Holland**, not the whole of Great Britain and the Netherlands. That
-   covers all five demo locations and nothing else; anywhere outside them has
-   no path at any preset. `scripts/graphhopper.sh regions` prints what is
-   currently built in, and is worth trusting over the list in the script.
-
-3. `ch.disable` is conditional on which server is in use, and has to stay that
-   way — `round_trip` requires it self-hosted and is rejected with it hosted.
-   That logic is in `routing.py` and is not cosmetic.
-
----
-
-## 1 · No `GRAPHHOPPER_KEY` in the environment — routing fixtures are synthetic
-
-**Discovered:** Phase A, 2026-08-04.
-**RESOLVED:** a key is present in `.env`, and `MEANDER_FIXTURES=live`.
-
-**What happened**
-
-No key was available when the project was built, so no real GraphHopper response
-could be recorded. `backend/fixtures.py` grew a third provenance, `synthetic`,
-alongside `recorded`: every synthetic fixture carries
-`"_meander_provenance": "synthetic"`, `/api/health` reports the count, and any
-route derived from one is labelled `scoring_method: "placeholder"` and
-`synthetic_upstream: true`. Nothing synthetic was ever presented as a real
-measurement.
-
-**Current state**
+**What the free tier does allow**, established by probing it directly:
 
 | | |
 |---|---|
-| `GRAPHHOPPER_KEY` | set |
-| `MEANDER_FIXTURES` | `live` |
-| `MEANDER_BUDGET_*` | raised to 100,000 — the development guard rails are no longer the binding limit |
-| `fixtures/graphhopper/` | 53 fixtures — **18 synthetic, 35 recorded** against the self-hosted server |
+| profiles | `car`, `bike`, `foot` only — `hike` is rejected |
+| point-to-point routing | works |
+| **round trips** (`algorithm=round_trip`) | **works**, as long as `ch.disable` is not also sent |
+| **path details** (`surface`, `road_class`, `road_environment`) | **works** — so the accessibility engine, geometry scoring and confidence are all unaffected |
+| `custom_model` | rejected |
 
-**What is still true**
+**How it behaves now**
 
-The eighteen synthetic fixtures are still in the tree. They are correct to keep
-— they are what the offline test suite runs against, and they are why the suite
-never opens a socket — but it means a replayed request that lands on one is
-still demonstration data, still labelled as such, and still must not be
-followed. That labelling is not vestigial; the UI's demo ribbon keys on it.
+`fastest` works everywhere, and so does everything downstream of it: real
+accessibility assessment, blockers, rest stops, air quality, shade, best
+departure. `nature` and `accessible` return `status: "blocked"` with the reason
+quoted above, rather than quietly returning the fastest route a second time
+under a different name.
 
-**Every GraphHopper fixture is keyed on a hash of the request body**, so adding
-a field to that body invalidates all of them at once. Turning on turn
-instructions did exactly that and orphaned 68 fixtures in one commit; see
-PROGRESS.md, redesign phase 7. Anyone changing `_base_body` in `routing.py`
-should expect to re-record.
+**What you need to do — pick one**
 
-To replace them with recordings:
+1. **A paid GraphHopper plan** enables flexible mode, and both presets start
+   working with no code change.
+2. **Self-host GraphHopper.** The open-source server has no such restriction;
+   point `GRAPHHOPPER_URL` in `backend/config.py` at it.
+3. **Accept two of three.** The app is honest about it and still does the thing
+   it exists for on the fastest route — it will still tell you about the steps,
+   the cobbles and the gradients on the way.
+
+A fourth option not yet built: approximate the nature preset on the free tier by
+routing through a green waypoint found via Overpass, which needs no custom
+model. That is a real feature rather than a config change, so it is not done.
+
+</details>
+
+---
+
+## 1 · ~~No `GRAPHHOPPER_KEY` in the environment — routing fixtures are synthetic~~ — RESOLVED
+
+**Resolved:** 2026-08-04. A real key is now configured in `.env`, and with
+`MEANDER_FIXTURES=live` the app routes any location inside the imported graph.
+An uncached three-objective round trip near Hyde Park returned three real
+routes in 14.0 s across 8 GraphHopper requests.
+
+**The committed fixtures are still synthetic**, and that is deliberate rather
+than unfinished. They are what makes the keyless demo work offline, they are
+labelled `synthetic` in their envelope, and every route derived from one is
+forced to `scoring_method: "placeholder"` with `synthetic_upstream: true`. A
+recorded fixture would silently drop that labelling, so re-recording is a
+decision about what the demo should claim, not a bug to fix.
+
+⚠ Before re-recording, read the fixture-signature note at the end of this file.
+
+<details>
+<summary>Original entry</summary>
+
+**Discovered:** Phase A, 2026-08-04
+
+**What I tried**
+
+```
+curl "https://graphhopper.com/api/1/route?point=6.9271,79.8612&point=6.9497,79.8500&profile=foot&key=NOKEY"
+-> HTTP 401
+```
+
+Checked the process environment for `GRAPHHOPPER_KEY`, `MAPILLARY_TOKEN` and `ANTHROPIC_API_KEY`.
+None are set, and there is no `.env` anywhere on the machine to source one from.
+
+**Consequence**
+
+No real GraphHopper response can be recorded, so `fixtures/graphhopper/*.json` cannot be populated
+from the live service during this run.
+
+**How it was worked around**
+
+`backend/fixtures.py` supports a third fixture provenance, `synthetic`, alongside `recorded`. Every
+synthetic fixture carries `"_meander_provenance": "synthetic"` in its envelope, `/api/health`
+reports the count, and any route derived from one is labelled `scoring_method: "placeholder"` in
+the API response. Nothing synthetic is ever presented as a real measurement.
+
+The synthetic GraphHopper fixtures are hand-built from the documented response schema with
+plausible Colombo/London geometry, so the parsing, geometry, scoring and accessibility paths are
+all exercised end to end.
+
+**What you need to do**
+
+1. Get a free key at https://www.graphhopper.com/ (500 credits/day).
+2. `echo 'GRAPHHOPPER_KEY=...' >> .env`
+3. Re-record the fixtures against the live service:
 
 ```bash
 MEANDER_FIXTURES=record python3 -m backend.record_fixtures --service graphhopper
 ```
 
+That command replaces every synthetic GraphHopper fixture with a recorded one and stays inside the
+80-call budget. Recorded fixtures drop the `placeholder` label automatically.
+
+</details>
+
 ---
 
-## 2 · Mapillary token absent — CLIP scoring cannot be validated against real imagery
+## 2 · ~~Mapillary token absent — CLIP scoring cannot be validated against real imagery~~ — RESOLVED
 
-**Discovered:** Phase A, 2026-08-04.
-**PARTIALLY RESOLVED:** the token is now present. The measurement it was blocking
-has still not been made.
+**Resolved:** 2026-08-06, by a token from the project owner. This was the last open blocker.
 
-**What is now unblocked**
+`data/cache.db` now ships **146 pre-warmed segment scores** across all five test locations, and
+`POST /api/routes` returns `scoring_method: "clip"` for the first time in the project's history.
+27 of the 146 are recorded with a NULL score — points where Mapillary had fewer than two usable
+frames — which is deliberately distinct from a low score, and they are what stops
+"we could not look" being read as "there is nothing there".
 
-`MAPILLARY_TOKEN` is set in `.env`, so imagery can be fetched and
-`scripts/compare_prompts.py` can be run against real street photography.
+**What real imagery changed, and it was not what Phase G expected**
 
-**What is still blocked, and it is the part that mattered**
+The prompt-variant ranking largely inverted. On generated reference images four of seven pairs
+scored the asphalt texture higher, including the spec's own `v1_extreme`; on real imagery **all
+seven separate in the right direction** on the London pairs. PROGRESS.md's Phase G entry had
+already warned this was possible, and it was right to.
 
-`data/cache.db` **contains no tables at all** — it is a 4 KB empty file that the
-app creates its schema in on first connect. There are no CLIP rows anywhere, so:
+Across three real pairs only `v2_plain` and `v1_extreme` hold everywhere. `v3_nature` — the
+variant Phase G chose — and `v5_street`, which separates widest in London, **both invert on the
+Colombo pair**, scoring the city fort greener than the park. `ACTIVE_PROMPT_VARIANT` is now
+`v2_plain`; the full table and the reasoning are in `backend/scoring.py` beside the constant.
 
-- **every route still scores `geometry_only`**, never `clip`. The CLIP path is
-  unit-tested but has never produced a number that reached a user.
-- `ACTIVE_PROMPT_VARIANT` in `backend/scoring.py` is still `v3_nature`, chosen
-  against **procedurally generated reference images** — a foliage texture against
-  an asphalt texture — not against real street photography. Four of the seven
-  pairs tried, including the one originally specified, ranked an asphalt image as
-  *more* scenic than a foliage one. That is a warning about how brittle
-  zero-shot aesthetic scoring is, and it has still not been re-checked.
-- the Phase G acceptance criterion — does CLIP rank Hyde Park above Euston Road —
-  remains unmeasured.
+**Two defects this uncovered, both fixed and both with tests**
 
-**What you need to do**
+- Mapillary answers a *dense* bounding box with HTTP 500 and "reduce the amount of data",
+  regardless of `limit`. Density tracks how photographed a place is, so it fails precisely on the
+  busy roads the scorer most needs — Euston Road failed every time, Hyde Park never did. The box
+  now halves and retries down to a floor.
+- `route_nature` judged its "greener than fastest" bar with `score_geometry` called *without* the
+  CLIP term, while the card showed the score *with* it — CLIP is weight 0.45, the largest term.
+  Harmless while the cache was empty and wrong the moment it was not: the first warmed run served
+  a Nature route scoring 0.4806 against a fastest route at 0.4854, and passed the floor.
 
-1. Rank the prompt variants on real imagery:
+**What is still worth being sceptical about**
+
+- **n is small.** 4 to 6 images per location, and only 2 at Viharamahadevi — which is the single
+  point deciding the one pair that separates the candidates, and the only non-European pair.
+- **`v2_plain` measures aesthetic appeal, not greenery**, while the score it feeds is presented as
+  a nature score. The two correlate on this sample; a photogenic stone street would score well
+  without a tree in it. A construct mismatch, not a bug, and the reason every response still
+  carries `scoring_method`.
+- Regions nobody has pre-warmed still return `geometry_only`, and say so.
+
+To re-run either step:
 
 ```bash
-MEANDER_FIXTURES=record python3 -m scripts.compare_prompts --location
+MEANDER_FIXTURES=record python3 -m scripts.compare_prompts --green hyde-park-london --grim euston-road-london
+MEANDER_FIXTURES=record python3 -m backend.batch_score
 ```
-
-2. If a different variant wins, set `ACTIVE_PROMPT_VARIANT` in
-   `backend/scoring.py` to it, then pre-warm the cache and commit the result:
-
-```bash
-MEANDER_FIXTURES=record python3 -m backend.batch_score --location hyde-park-london --location euston-road-london
-```
-
-Note that this needs the **full** `backend/requirements.txt`, with torch. The
-deploy image deliberately has neither torch nor open-clip-torch and reads the
-committed `cache.db` instead — see the README's architecture split.
 
 ---
 
-## 3 · One backend test fails on a machine that has a Mapillary token
+## 3 · ~~Prototype sources referenced by HANDOFF.md were not present~~ — RESOLVED
 
-**Discovered:** 2026-08-06, taking a baseline before the frontend redesign.
-**RESOLVED:** 2026-08-06, taking a baseline before the iOS work, by option 1
-below. `test_fetching_imagery_without_a_token_fails_loudly` now swaps
-`backend.scoring.settings` for a fresh `Settings(mapillary_token=None)` — the
-idiom `test_fixtures.py` already used to inject a GraphHopper key — so the
-absent token comes from the test rather than from the machine. A second test,
-`test_a_token_in_the_environment_does_not_change_that_verdict`, sets the
-variable and asserts the verdict is unchanged, which is the actual regression.
+Worked around completely; nothing is outstanding. Kept for the record.
 
-**395 passed with a token in `.env`, 395 with it unset.**
+**Discovered:** Phase A, 2026-08-04
 
-Two tests on the frontend had the same shape and were fixed in the same
-baseline: `sun.test.js` carried a comment reading *"the suite runs under
-TZ=UTC"* and nothing set `TZ`. It was true by accident — GitHub's runners are
-UTC, and `.github/workflows/ci.yml` sets it for that job — so on a machine in
-Asia/Colombo `canStateLocalTime` inverted both expectations. `vite.config.js`
-now forces `TZ=UTC` for the test run and the comment is an assertion.
+`HANDOFF.md` names `Waypoint.dc.html` and `mock-api.js` as the source of truth for frontend
+behaviour. Neither file exists on this machine (searched `~/Downloads` to depth 3).
 
-**The original entry follows, because the reasoning is still why the code looks
-like this.**
+**How it was worked around** — the frontend and `src/api/mock.js` were built from the HANDOFF
+specification itself, which describes the state model, the streaming shape, the six objectives,
+the dash table, the colour tokens and the required blocked-accessible fixture in enough detail to
+reimplement faithfully. The mock emits four progress events over ~2.2 s, one route every ~420 ms,
+then a narration pass at +700 ms, and includes the blocked-accessible fixture with
+`confidence: 0.41` and two blockers, exactly as specified.
 
-**It does not fail in CI**, and that distinction matters more than it looks.
-`.env` is gitignored, so a CI runner has no `MAPILLARY_TOKEN` and the suite is
-**394 passed, 0 failed** — verified in a clean torch-free virtualenv with no
-keys, which is exactly what the runner builds. It fails only for a developer who
-has a token in `.env`, which is most people who have done step 1 of #2 above.
-
-`backend/tests/test_scoring.py::test_fetching_imagery_without_a_token_fails_loudly`
-asserts that requesting imagery with no `MAPILLARY_TOKEN` raises
-`ScoringUnavailable` naming the missing variable. A token is now present in
-`.env` (see #2), so the call gets past that guard and dies further down on a
-missing fixture instead:
-
-```
-Regex: 'MAPILLARY_TOKEN'
-Input: 'No fixture for mapillary request 451de727c24f885a …'
-```
-
-Unsetting the variable makes it pass, which confirms the cause. **The test is
-right and the environment changed under it.**
-
-```
-with a token in .env :  1 failed, 393 passed
-without one (CI)     :    394 passed
-```
-
-**What was decided** — option 1, with one correction to it. `monkeypatch.delenv`
-would not have worked: `Settings` is a frozen dataclass resolved once at import,
-so the module under test had already read the variable and clearing it changes
-nothing. Replacing the module-level `settings` object is what actually reaches
-it.
-
-Option 2 was rejected. Neutralising the token for the whole suite would hide
-the variable from every test, including any future one that ought to exercise
-the token-present path. `MEANDER_GRAPHHOPPER_URL` is forced in `conftest.py`
-because it changes the *request signature* every fixture is keyed on, which is
-a property of the harness; a credential is not.
+**What you need to do** — if the original prototype turns up, diff `frontend/src/api/mock.js`
+against it; the contract shape should match.
 
 ---
 
-## 4 · Prototype sources referenced by HANDOFF.md were not present
+## Before you re-record any fixture
 
-**Discovered:** Phase A, 2026-08-04.
-**SUPERSEDED:** 2026-08-06 by `docs/DESIGN-HANDOFF.md`.
+A fixture is keyed on a **hash of the outgoing request body**. `path_details()`,
+`_base_body()`, the two custom models and the round-trip parameters are all
+inside that hash. Change any one of them and every committed GraphHopper fixture
+misses at once, so the offline test suite — the whole safety net — fails
+wholesale with `no_fixture` 503s rather than with anything that points at the
+cause.
 
-`HANDOFF.md` named `Waypoint.dc.html` and `mock-api.js` as the source of truth
-for frontend behaviour. Neither file existed on this machine (searched
-`~/Downloads` to depth 3). The frontend and `src/api/mock.js` were built from
-the HANDOFF specification itself, which described the state model, the streaming
-shape, the six objectives, the dash table, the colour tokens and the required
-blocked-accessible fixture in enough detail to reimplement faithfully.
+This has already cost this project a debugging session; PROGRESS.md records it
+as self-hosting defect #6. `backend/tests/conftest.py` pins
+`MEANDER_GRAPHHOPPER_URL` and `MEANDER_GRAPHHOPPER_SELF_HOSTED` for exactly this
+reason — those two decide `path_details()`, and therefore the signature.
 
-This no longer needs resolving: `docs/DESIGN-HANDOFF.md` is now the frontend
-specification, it is in the repo, and it supersedes the missing prototype. If
-the original ever turns up it is of historical interest only.
+If you change what the app sends GraphHopper, re-record in the **same commit**
+and confirm the suite passes offline before pushing.
+
+---
+
+# The iOS run
+
+Everything above predates the decision to ship Meander as a native app. New
+findings go here rather than into a resolved section, so the numbering above
+keeps meaning what it meant.
+
+## 4 · Two suites asserted things about the machine they ran on — RESOLVED
+
+**Discovered:** 2026-08-06, taking the baseline before the iOS work.
+**RESOLVED:** the same day, in the two commits before the reconciliation merge.
+
+Both were green in CI and red on a developer's laptop, which is the worst
+possible split — CI cannot reproduce it and the developer cannot trust it.
+
+**`sun.test.js`** carried a comment reading *"the suite runs under TZ=UTC"* and
+nothing set `TZ`. It was true by accident: GitHub's runners are UTC, and
+`.github/workflows/ci.yml` set it for that job only. `canStateLocalTime`
+compares a longitude's solar offset against the *viewer's* timezone, so on a
+machine in Asia/Colombo both expectations inverted — London refused, Colombo
+accepted — with nothing in the output naming the clock. `vite.config.js` now
+forces `TZ=UTC` for the test run, and the comment is an assertion.
+
+**`test_fetching_imagery_without_a_token_fails_loudly`** was this file's own §3
+on the redesign branch. It asserted that fetching imagery with no
+`MAPILLARY_TOKEN` raises `ScoringUnavailable` naming the variable, and only did
+so on a machine that happened not to have one. The fix that entry proposed —
+`monkeypatch.delenv` — **does not work**, and that is worth recording: `Settings`
+is a frozen dataclass resolved once at import, so the module under test has
+already read the variable and clearing it changes nothing. Replacing the
+module-level `settings` is what reaches it, which is the idiom
+`test_fixtures.py` already used to inject a GraphHopper key.
+
+> ⚠ **The two branches numbered this file differently.** On the redesign branch
+> the entry above was **§3** and prototype sources were §4; on `feat/launch`
+> there was no test-failure entry at all and prototype sources were §3. This
+> file follows `feat/launch`'s numbering, because that is the branch whose
+> claims match the merged tree. A reference to "BLOCKED.md #3" written before
+> 2026-08-06 may mean either.
+
+## 5 · The reconciliation merge took main's frontend entirely
+
+**Status:** open, and deliberate. Not a defect — a deferral with a list.
+
+`feat/ios` merged `feat/launch` for its backend, infrastructure, containers,
+scripts and documentation, and resolved `frontend/` to main's tree
+byte-for-byte. Thirty-seven files from the launch frontend were dropped in that
+merge rather than landed unused.
+
+These are the ones the iOS work actually needs back, and each has to be **wired
+into this frontend**, not copied next to it:
+
+| what | why iOS needs it | phase |
+|---|---|---|
+| `env(safe-area-inset-*)` in `styles.css` | this frontend has none at all; the notch and home indicator are unhandled | 5 |
+| `lib/permalink.js` | deep links, so a shared Meander link opens the app | 4.6 |
+| `lib/export.js` | GPX/GeoJSON through the native share sheet | 4.3 |
+| `lib/offline.js`, `lib/offlineStore.js` | saved routes, re-based on Preferences — service workers do not register under `capacitor://localhost` | 4.4 |
+| `lib/units.js` | miles and a 12-hour clock from the locale | — |
+| `public/` icons + `manifest.webmanifest` | the icon set Phase 7 extends | 7 |
+| `scripts/gate.mjs` | the Phase 5 layout gate, 14 checks | 5 |
+
+**`scripts/pwa-gate.mjs` is deliberately not on that list.** It drives headless
+Chrome with the server stopped and asserts a service worker serves the shell.
+There is no service worker on iOS, so it would have nothing to assert about —
+and a gate that cannot fail is worse than no gate, because it reads as coverage.
+It needs rewriting against the native store or replacing with an on-device
+check.
+
+The CI jobs that graded the dropped code went with it. They come back with it.

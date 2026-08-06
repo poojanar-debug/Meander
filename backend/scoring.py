@@ -43,6 +43,14 @@ CLIP_PRETRAINED = "laion2b_s34b_b79k"
 # the limit and about 400 m across at the equator.
 MAPILLARY_BBOX_HALF_DEG = 0.002
 
+# Staying under the size limit is not enough. Mapillary also refuses a box that
+# is *dense*, with a 500 telling you to ask for less — and density means "how
+# photographed is this place", so the refusal lands on exactly the busy roads
+# this scorer most needs to look at. fetch_images_near halves the box and
+# retries; this is the floor, about 28 m half-width, past which "imagery near
+# this point" would stop being a claim about the point.
+MAPILLARY_BBOX_MIN_HALF_DEG = 0.00025
+
 # One request and a handful of image downloads per sample point, so these two
 # constants are what actually govern how much of the budget a batch run spends.
 SAMPLE_SPACING_M = 150.0
@@ -87,7 +95,35 @@ PROMPT_VARIANTS: dict[str, tuple[str, str]] = {
     ),
 }
 
-ACTIVE_PROMPT_VARIANT = "v3_nature"
+# Chosen on **real Mapillary imagery**, which reversed most of what the
+# generated-texture comparison in Phase G concluded. Separation (green - grim),
+# three pairs, 2026-08-06:
+#
+#   pair                              v1     v2     v3     v4     v5     v6     v7
+#   Hyde Park / Euston Rd          +.105  +.657  +.107  +.556  +.647  +.100  +.431
+#   Vondelpark / Euston Rd         +.091  +.217  +.612  +.279  +.757  +.119  +.335
+#   Viharamahadevi / Colombo Fort  +.038  +.262  -.141  -.133  -.339  -.022   .000
+#
+# Only **v2_plain** and v1_extreme point the right way on all three. v1_extreme
+# is correct but barely moves (+.038 to +.105); a score that hardly changes
+# between a park and an arterial road cannot rank anything. v2_plain has three
+# to six times the range and never inverts.
+#
+# The previous default, v3_nature, and the widest-separating London variant,
+# v5_street, **both invert on the Colombo pair** — they call the city fort
+# greener than the park. An inverted score is not a weak score, it is a wrong
+# one, and it is disqualifying however well the name fits.
+#
+# ⚠ Two reasons to still be sceptical, both recorded rather than resolved:
+#   * n is small — 4 to 6 images per location, and only 2 for Viharamahadevi,
+#     which is the single point deciding the one pair that separates the
+#     candidates. That pair is also the only non-European one.
+#   * "beautiful"/"ugly" measures **aesthetic appeal, not greenery**, and this
+#     score is presented as a nature score. It correlates here, but a
+#     photogenic stone street would score well without a tree in it. That is a
+#     construct mismatch, not a bug, and it is why every response still carries
+#     `scoring_method`.
+ACTIVE_PROMPT_VARIANT = "v2_plain"
 
 
 class ScoringUnavailable(RuntimeError):
@@ -195,32 +231,76 @@ def bbox_for(point: LatLon, half_deg: float = MAPILLARY_BBOX_HALF_DEG) -> str:
     )
 
 
+def _asked_for_too_much(response: httpx.Response) -> bool:
+    """Is this the "your bounding box covers too many images" 500?
+
+    Mapillary answers a bbox it considers too dense with **HTTP 500** and
+    ``{"error": {"code": 1, "message": "Please reduce the amount of data you're
+    asking for, then retry your request"}}`` — not a 400, and not a rate limit.
+    Matched on the message as well as the code because a bare ``code: 1`` is
+    Facebook's generic "unknown error" and means nothing on its own.
+    """
+    if response.status_code != 500:
+        return False
+    try:
+        error = response.json().get("error") or {}
+    except ValueError:
+        return False
+    return "reduce the amount of data" in str(error.get("message", "")).lower()
+
+
 async def fetch_images_near(point: LatLon, limit: int = IMAGES_PER_POINT
                             ) -> list[MapillaryImage]:
-    """Image metadata for one small bounding box around a sample point."""
+    """Image metadata for one small bounding box around a sample point.
+
+    **The box narrows on demand, and the reason is the interesting part.**
+    ``limit`` bounds the rows returned, not the rows scanned, so Mapillary
+    refuses a dense bbox outright however small a limit you ask for. Density
+    tracks how photographed a place is — which means the failure lands exactly
+    on busy arterial roads, which are exactly the "grim" half of every
+    comparison this scorer exists to make. Euston Road failed at the default
+    0.002° box on every attempt while Hyde Park, 2 km away, answered first time.
+
+    So a refusal halves the box and retries rather than giving up. Narrowing is
+    not a degradation here: a tighter box returns imagery *closer* to the sample
+    point, which is what was wanted in the first place. It stops at
+    ``MAPILLARY_BBOX_MIN_HALF_DEG`` — about 28 m — below which "near this point"
+    stops being a meaningful claim, and a still-failing box raises as before.
+    """
     if not settings.mapillary_token:
         raise ScoringUnavailable("MAPILLARY_TOKEN is not set; see BLOCKED.md #2.")
 
-    try:
-        response = await fetch(
-            "GET",
-            MAPILLARY_URL,
-            params={
-                "access_token": settings.mapillary_token,
-                "fields": "id,thumb_1024_url,computed_geometry",
-                "bbox": bbox_for(point),
-                "limit": limit,
-            },
-            headers={"Accept": "application/json"},
-            cost=1,
-            service="mapillary",
-        )
-    except (FixtureMissing, BudgetExhausted) as exc:
-        raise ScoringUnavailable(str(exc)) from exc
-    except httpx.HTTPError as exc:
-        raise ScoringUnavailable(f"Mapillary unreachable: {type(exc).__name__}") from exc
+    half_deg = MAPILLARY_BBOX_HALF_DEG
+    while True:
+        try:
+            response = await fetch(
+                "GET",
+                MAPILLARY_URL,
+                params={
+                    "access_token": settings.mapillary_token,
+                    "fields": "id,thumb_1024_url,computed_geometry",
+                    "bbox": bbox_for(point, half_deg),
+                    "limit": limit,
+                },
+                headers={"Accept": "application/json"},
+                cost=1,
+                service="mapillary",
+            )
+        except (FixtureMissing, BudgetExhausted) as exc:
+            raise ScoringUnavailable(str(exc)) from exc
+        except httpx.HTTPError as exc:
+            raise ScoringUnavailable(f"Mapillary unreachable: {type(exc).__name__}") from exc
 
-    if response.status_code >= 400:
+        if response.status_code < 400:
+            break
+
+        # Each attempt is charged to the budget, which is right: a narrowed
+        # retry is a second request and pretending otherwise would let one
+        # dense point spend several calls off the books.
+        if _asked_for_too_much(response) and half_deg / 2 >= MAPILLARY_BBOX_MIN_HALF_DEG:
+            half_deg /= 2
+            continue
+
         raise ScoringUnavailable(f"Mapillary returned {response.status_code}")
 
     try:
