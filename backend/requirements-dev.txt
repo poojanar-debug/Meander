@@ -1,0 +1,25 @@
+# The test environment: everything the deployed service needs, plus the test
+# tooling — and **no torch**.
+#
+# requirements.txt is the full local environment and pulls torch, open-clip and
+# their dependency tree, which is about 2.5 GB. That is the right thing on a
+# workstation that runs `backend.batch_score`, and the wrong thing in CI: two
+# tests skip without torch, and the other 574 do not care. Downloading 2.5 GB
+# on every run to skip two tests is minutes of wall clock and a lot of bandwidth
+# for nothing.
+#
+# It is also the closer match to production, which has no torch either — so a
+# module-level torch import that would kill the deployed instance fails here
+# too, rather than passing locally and being caught only by the one test that
+# greps the source for it.
+#
+#   CI and the deploy gate   requirements-dev.txt   (this file)
+#   the running service      requirements-deploy.txt
+#   a workstation scoring    requirements.txt
+#   imagery with CLIP
+
+-r requirements-deploy.txt
+
+pytest==8.3.4
+pytest-asyncio==0.25.2
+ruff==0.9.2

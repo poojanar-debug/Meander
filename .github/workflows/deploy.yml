@@ -1,0 +1,148 @@
+name: deploy
+
+# Manual only, and that is deliberate. Every deploy replaces ECS tasks and
+# invalidates a CloudFront distribution; a push-triggered deploy on a project
+# with one maintainer buys nothing and makes "I pushed a typo" an outage.
+# The quality gates in ci.yml run on every push — this only ships.
+on:
+  workflow_dispatch:
+    inputs:
+      deploy_router:
+        description: >
+          Rebuild and deploy GraphHopper. Off by default: the image carries the
+          baked graph and only changes when the graph does, and pushing 1.2 GB
+          on every API change wastes minutes and ECR storage.
+        type: boolean
+        default: false
+
+concurrency:
+  group: deploy
+  cancel-in-progress: false   # never interrupt a deploy half-way
+
+permissions:
+  contents: read
+  id-token: write             # the OIDC token; there is no stored AWS key
+
+env:
+  AWS_REGION: ap-south-1
+  PROJECT: meander
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # The gates, again, on the exact commit being shipped. ci.yml has run
+      # them already on this SHA; repeating them here costs two minutes and
+      # removes the "which commit was that green run against?" question.
+      - uses: actions/setup-python@v5
+        with: { python-version: '3.13' }
+      - name: Backend tests and lint
+        # requirements-dev.txt, not requirements.txt: no torch. Two tests skip
+        # without it and 574 do not care, and this is the closer match to
+        # production, which has no torch either.
+        run: |
+          python -m pip install -r backend/requirements-dev.txt
+          python -m pytest backend/tests
+          python -m ruff check backend/ scripts/
+
+      - uses: actions/setup-node@v4
+        with: { node-version: '22', cache: npm, cache-dependency-path: frontend/package-lock.json }
+      - name: Build the frontend
+        working-directory: frontend
+        # `npm run build` runs check:palette, check:permalink and check:offline
+        # first; a failure in any of them fails the deploy before anything ships.
+        run: npm ci && npm run build
+
+      - name: Assume the deploy role
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::${{ secrets.AWS_ACCOUNT_ID }}:role/${{ env.PROJECT }}-github-deploy
+          aws-region: ${{ env.AWS_REGION }}
+
+      - uses: aws-actions/amazon-ecr-login@v2
+        id: ecr
+
+      - name: Build and push the API image
+        env:
+          REGISTRY: ${{ steps.ecr.outputs.registry }}
+        run: |
+          set -euo pipefail
+          # The commit SHA, never :latest. The ECR repositories are
+          # IMMUTABLE-tagged, so a tag always names the same bytes and a
+          # rollback is a tag, not a rebuild.
+          TAG="$REGISTRY/$PROJECT/api:${GITHUB_SHA}"
+          docker buildx build --platform=linux/arm64 --provenance=false \
+            -t "$TAG" --push .
+          echo "API_IMAGE=$TAG" >> "$GITHUB_ENV"
+
+      - name: Build and push the router image
+        if: inputs.deploy_router
+        env:
+          REGISTRY: ${{ steps.ecr.outputs.registry }}
+        run: |
+          set -euo pipefail
+          # GRAPH_SOURCE=none: CI has no graph and must not try to build one.
+          # An import is 71 s for the demo set and ~31 minutes for countries,
+          # and neither belongs in a deploy. The container fetches from
+          # GRAPH_S3_URI at start, or a graph is baked in from a workstation
+          # that already has one — see infra/README.md.
+          TAG="$REGISTRY/$PROJECT/graphhopper:${GITHUB_SHA}"
+          docker buildx build --platform=linux/arm64 --provenance=false \
+            --build-arg GRAPH_SOURCE=none \
+            -f graphhopper/Dockerfile -t "$TAG" --push .
+          echo "ROUTER_IMAGE=$TAG" >> "$GITHUB_ENV"
+
+      - name: Roll the API service
+        run: |
+          set -euo pipefail
+          FAMILY="$PROJECT-api"
+          aws ecs describe-task-definition --task-definition "$FAMILY" \
+            --query 'taskDefinition' > td.json
+          # Replace the image and strip the read-only fields the register call
+          # refuses. jq rather than sed: this is JSON, and a regex over a task
+          # definition is a way to ship a subtly malformed one.
+          jq --arg img "$API_IMAGE" '
+            .containerDefinitions[0].image = $img
+            | del(.taskDefinitionArn, .revision, .status, .requiresAttributes,
+                  .compatibilities, .registeredAt, .registeredBy)
+          ' td.json > new-td.json
+          REV=$(aws ecs register-task-definition --cli-input-json file://new-td.json \
+                  --query 'taskDefinition.taskDefinitionArn' --output text)
+          aws ecs update-service --cluster "$PROJECT" --service "$FAMILY" \
+            --task-definition "$REV" >/dev/null
+          # Blocks until the deployment settles. The service has a circuit
+          # breaker with rollback enabled, so a failing image reverts itself —
+          # but without this wait the job goes green before that is known.
+          aws ecs wait services-stable --cluster "$PROJECT" --services "$FAMILY"
+
+      - name: Publish the frontend
+        run: |
+          set -euo pipefail
+          BUCKET="$PROJECT-web-${{ secrets.AWS_ACCOUNT_ID }}"
+          # Hashed assets first, with a long immutable max-age, and only then
+          # the entry points. The other order serves an index.html naming
+          # assets that are not uploaded yet — a blank page for whoever loads
+          # the site during the sync.
+          aws s3 sync frontend/dist/ "s3://$BUCKET/" \
+            --exclude 'index.html' --exclude 'sw.js' --exclude '*.webmanifest' \
+            --cache-control 'public, max-age=31536000, immutable' --delete
+          aws s3 sync frontend/dist/ "s3://$BUCKET/" \
+            --exclude '*' --include 'index.html' --include 'sw.js' --include '*.webmanifest' \
+            --cache-control 'public, max-age=0, must-revalidate'
+          aws cloudfront create-invalidation \
+            --distribution-id ${{ secrets.CLOUDFRONT_DISTRIBUTION_ID }} \
+            --paths '/index.html' '/sw.js' '/manifest.webmanifest' >/dev/null
+
+      - name: Prove it is actually serving
+        run: |
+          set -euo pipefail
+          SITE="${{ secrets.SITE_URL }}"
+          curl -fsS "$SITE/api/healthz" | tee /dev/stderr | grep -q '"status":"ok"'
+          # Not just 200. This asserts the deployed instance is configured the
+          # way the task definition claims: without self_hosted the accessible
+          # preset silently stops excluding impassable surfaces, and nothing
+          # else in the response would tell you.
+          curl -fsS "$SITE/api/health" | jq -e '.routing.self_hosted == true' >/dev/null
+          curl -fsS "$SITE/api/health" | jq -e '.routing.self_hosted_source == "env"' >/dev/null
