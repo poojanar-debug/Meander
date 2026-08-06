@@ -1,13 +1,14 @@
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react'
 
 import { buildRouteRequest, fetchRoutes } from './api/client.js'
-import Controls from './components/Controls.jsx'
+import FirstRun from './components/FirstRun.jsx'
 import About from './components/About.jsx'
 import MapView from './components/MapView.jsx'
 import RouteList from './components/RouteList.jsx'
 import Ribbon from './components/Ribbon.jsx'
 import StatusBanner from './components/StatusBanner.jsx'
 import Topbar from './components/Topbar.jsx'
+import TripBar from './components/TripBar.jsx'
 import { announceRoutes, announceSelection, effectiveMode } from './lib/format.js'
 import { applyTheme, initialTheme, readStoredTheme, storeTheme, systemTheme } from './lib/theme.js'
 
@@ -308,6 +309,12 @@ export default function App() {
 
   const hasRoutes = state.routes.length > 0
 
+  // The first-run card replaces panel and stage entirely (§7). Gating on
+  // `origin` rather than on `routes` means the map is never created until there
+  // is somewhere to draw — and once created it is never unmounted, which is the
+  // single-MapLibre-instance rule the old build already held to.
+  const firstRun = !state.origin && state.phase !== 'locating' && !hasRoutes
+
   // The About disclosure lives at the foot of a panel that scrolls, so the
   // topbar button has to open it *and* bring it into view. Opening alone would
   // look like nothing happened.
@@ -334,9 +341,20 @@ export default function App() {
 
       <Ribbon routes={state.routes} />
 
+      {firstRun ? (
+        <FirstRun
+          minutes={state.minutes}
+          origin={state.origin}
+          locating={state.phase === 'locating'}
+          geoDenied={state.geoDenied}
+          onMinutes={(value) => dispatch({ type: 'minutes', value })}
+          onOrigin={(value) => dispatch({ type: 'origin', value })}
+          onLocate={onLocate}
+        />
+      ) : (
       <div className="layout">
         <main className="panel">
-          <Controls
+          <TripBar
             minutes={state.minutes}
             mode={state.mode}
             effectiveMode={mode}
@@ -393,6 +411,7 @@ export default function App() {
           )}
         </div>
       </div>
+      )}
     </div>
   )
 }

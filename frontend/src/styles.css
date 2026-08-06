@@ -423,18 +423,190 @@ h3 {
   line-height: 1;
 }
 
-/* -------------------------------------------------------------- controls */
+/* -------------------------------------------------------------- trip bar */
 
-.controls {
-  background: var(--raised);
-  border: 1px solid var(--rule);
-  border-radius: var(--r-md);
-  padding: 18px;
+.tripbar {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  flex: none;
   display: flex;
   flex-direction: column;
-  gap: var(--s5);
-  position: sticky;
-  top: var(--s4);
+  gap: var(--s2);
+  padding-bottom: var(--s2);
+  background: var(--paper);
+}
+
+/* minmax(0, 1fr) for the same reason the stage column needs it: a plain `1fr`
+   takes its minimum from min-content, and "Viharamahadevi Park, Colombo, Sri
+   Lanka" is very wide min-content. The segment then refuses to shrink, the
+   ellipsis on .seg__v never applies, and the grid overflows the panel. */
+.tripbar__grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: var(--s2);
+}
+
+.seg {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  min-height: var(--target);
+  padding: var(--s2) var(--s3);
+  border: 1px solid var(--rule);
+  border-radius: var(--r-md);
+  background: var(--raised);
+  color: var(--ink);
+  font: inherit;
+  text-align: start;
+  cursor: pointer;
+}
+.seg:hover {
+  border-color: var(--rule-strong);
+  background: var(--sunken);
+}
+.seg[aria-expanded='true'] {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent);
+}
+.seg__dot {
+  flex: none;
+  color: var(--brand);
+}
+/* Without min-width:0 a long place name refuses to shrink and blows the grid
+   out past the panel — the ellipsis below never gets a chance to apply. */
+.seg__text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  overflow: hidden;
+}
+.seg__k {
+  font-size: var(--t-micro);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--ink-2);
+}
+.seg__v {
+  font-size: var(--t-body);
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* A default the user has not chosen should not look like a decision they made. */
+.seg__v--placeholder {
+  font-weight: 400;
+  color: var(--ink-2);
+}
+
+.drawer {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s3);
+  padding: var(--s4);
+  border: 1px solid var(--accent);
+  border-radius: var(--r-md);
+  background: var(--raised);
+}
+.drawer[hidden] {
+  display: none;
+}
+
+/* preset pills */
+
+.presets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s2);
+}
+.preset {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 36px;
+  padding: var(--s2) var(--s4);
+  border: 1px solid var(--rule-strong);
+  border-radius: var(--r-pill);
+  background: var(--raised);
+  color: var(--ink);
+  font: inherit;
+  font-size: var(--t-small);
+  cursor: pointer;
+}
+.preset:hover {
+  border-color: var(--accent);
+  background: var(--sunken);
+}
+.preset[aria-pressed='true'] {
+  background: var(--brand-tint);
+  border-color: var(--accent);
+  box-shadow: inset 0 0 0 1px var(--accent);
+  font-weight: 600;
+}
+
+/* -------------------------------------------------------------- first run */
+
+.firstrun {
+  display: grid;
+  place-items: center;
+  padding: var(--s6) var(--s4);
+  min-height: 100%;
+}
+.firstrun__card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s3);
+  width: 100%;
+  max-width: 460px;
+  padding: var(--s8) var(--s6);
+  background: var(--raised);
+  border: 1px solid var(--rule);
+  border-radius: var(--r-lg);
+  box-shadow: var(--shadow-2);
+}
+.firstrun__headline {
+  font-size: var(--t-display);
+  line-height: 1.1;
+  margin: 0;
+}
+.firstrun__lede {
+  color: var(--ink-2);
+  margin: 0;
+}
+.firstrun__locate {
+  min-height: 52px;
+  width: 100%;
+}
+.firstrun__or {
+  display: flex;
+  align-items: center;
+  gap: var(--s3);
+  color: var(--ink-2);
+  font-size: var(--t-small);
+  margin: 0;
+}
+.firstrun__or::before,
+.firstrun__or::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: var(--rule);
+}
+.firstrun__time {
+  margin-top: var(--s2);
+}
+.firstrun__slider {
+  margin-top: var(--s3);
+}
+.firstrun__privacy {
+  display: flex;
+  gap: var(--s2);
+  color: var(--ink-2);
+  font-size: var(--t-small);
+  margin: 0;
+  padding-top: var(--s3);
+  border-top: 1px solid var(--rule);
 }
 
 .field {
@@ -546,9 +718,15 @@ select {
 
 /* time dial */
 
+.dial__readout {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  margin: 0;
+}
 .dial__value {
   font-family: var(--font-display);
-  font-size: 2.5rem;
+  font-size: 2.25rem;
   line-height: 1;
   font-variant-numeric: tabular-nums;
 }
@@ -556,7 +734,6 @@ select {
   font-family: var(--font-body);
   font-size: 1rem;
   color: var(--ink-2);
-  margin-inline-start: 6px;
 }
 .dial__mode {
   color: var(--ink-2);
@@ -617,6 +794,13 @@ fieldset.chips legend {
   border-color: var(--accent);
   box-shadow: inset 0 0 0 1px var(--accent);
   font-weight: 600;
+}
+/* Selection is fill + border + weight + this glyph. The glyph exists only when
+   pressed; a permanent check that merely changed colour would make selection a
+   colour-only signal. */
+.chip__check {
+  color: var(--ok-ink);
+  font-weight: 700;
 }
 .chip__swatch {
   width: 20px;
@@ -961,7 +1145,9 @@ fieldset.chips legend {
     overflow-y: visible;
     border-inline-end: 0;
   }
-  .controls {
+  /* The panel no longer scrolls independently here, so a sticky trip bar would
+     stick to the top of the *document* and cover the map. */
+  .tripbar {
     position: static;
   }
   .route-list {
@@ -976,12 +1162,22 @@ fieldset.chips legend {
   }
 }
 
+/* Two segments side by side stop fitting a place name here. */
+@media (max-width: 379px) {
+  .tripbar__grid {
+    grid-template-columns: 1fr;
+  }
+}
+
 @media (max-width: 420px) {
   .panel {
     padding: var(--s3);
   }
   .dial__ticks {
     font-size: 0.6875rem;
+  }
+  .firstrun__card {
+    padding: var(--s6) var(--s4);
   }
 }
 
