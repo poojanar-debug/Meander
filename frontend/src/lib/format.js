@@ -21,6 +21,22 @@ export function fmtDur(minutes) {
   return rest === 0 ? `${hours} hr` : `${hours} hr ${rest} min`
 }
 
+/**
+ * `fmtDur` split so the metric can take the display face and the unit can trail
+ * in the body face at a smaller size (§4.6). Splitting the formatted string with
+ * a regex instead loses the minutes from "1 hr 25 min", which is exactly the
+ * kind of quiet wrongness a route duration must not have.
+ */
+export function durationParts(minutes) {
+  if (minutes == null || Number.isNaN(minutes)) return { value: '—', unit: '' }
+  const total = Math.round(minutes)
+  if (total < 60) return { value: String(total), unit: 'min' }
+  const hours = Math.floor(total / 60)
+  const rest = total % 60
+  if (rest === 0) return { value: String(hours), unit: 'hr' }
+  return { value: `${hours} hr ${rest}`, unit: 'min' }
+}
+
 /** Spelled out for the live region, where "hr" is read as "hour" inconsistently. */
 export function fmtDurSpoken(minutes) {
   if (minutes == null || Number.isNaN(minutes)) return 'unknown duration'
@@ -81,6 +97,51 @@ export function confidenceSentence(confidence, scoringMethod, serverNote) {
     }
   }
   return { text: `Accessibility data covers ${pct}% of this route.`, severity: 'ok' }
+}
+
+/**
+ * The four-segment verification meter. Implements §4.7.
+ *
+ * This is a **summary**, not a statement. `confidenceSentence()` above remains
+ * the source of truth and still renders verbatim in the detail panel; the meter
+ * exists so three routes can be compared at a glance, which a paragraph of
+ * prose per route cannot do.
+ *
+ * `tone: 'warn'` covers everything below 0.60, and the caller pairs it with a
+ * ⚠ glyph and a weight change — the colour is never the only signal that a
+ * route's accessibility data is thin.
+ */
+export function verificationTier(confidence, scoringMethod) {
+  if (scoringMethod === 'placeholder') {
+    return { filled: 0, word: 'Not measured', tone: 'warn' }
+  }
+  const c = typeof confidence === 'number' ? confidence : 0
+  if (c < 0.3) return { filled: 1, word: 'Barely verified', tone: 'warn' }
+  if (c < 0.6) return { filled: 2, word: 'Partly verified', tone: 'warn' }
+  if (c < 0.8) return { filled: 3, word: 'Mostly verified', tone: 'ok' }
+  return { filled: 4, word: 'Well verified', tone: 'ok' }
+}
+
+/**
+ * Rest stops for the rail sub-row.
+ *
+ * `null` and `[]` are different answers and must not render alike: `null` means
+ * Overpass could not be reached, `[]` means it was reached and there is nothing
+ * there. Saying "no rest stops" when the truth is "we could not look" is the
+ * same class of mistake as calling an untagged path accessible.
+ */
+export function restStopSummary(restStops) {
+  if (restStops == null) return 'rest stops not checked'
+  if (restStops.length === 0) return 'no rest stops'
+  return `${restStops.length} rest stop${restStops.length === 1 ? '' : 's'}`
+}
+
+const COUNT_WORDS = ['no', 'One', 'Two', 'Three', 'Four', 'Five', 'Six']
+
+/** "Three ways back" — the results head (§3). */
+export function waysBack(count) {
+  const word = COUNT_WORDS[count] ?? String(count)
+  return `${word} way${count === 1 ? '' : 's'} back`
 }
 
 export const SCORING_METHOD_LABEL = {
