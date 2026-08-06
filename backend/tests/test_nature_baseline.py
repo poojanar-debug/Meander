@@ -196,3 +196,92 @@ async def _no_enrichment(geometries, depart_at=None):
     from backend.enrich import EnrichContext
 
     return EnrichContext()
+
+
+# ---------------------------------------------------------------------------
+# The floor must be measured on the score the user is shown
+# ---------------------------------------------------------------------------
+#
+# Latent for the whole project and only reachable once data/cache.db held CLIP
+# rows. `greenness()` called score_geometry *without* clip_score, so the
+# candidate was judged on a number that omitted the largest term in the score
+# (WEIGHT_CLIP is 0.45) and then rendered with one that included it. The floor
+# and the card disagreed, and the card is what a person reads.
+#
+# Found by pre-warming the cache and looking: Hyde Park returned a nature route
+# at 0.4806 against a fastest route at 0.4854 — passing a floor it visibly
+# failed.
+
+
+@pytest.fixture
+def clip_dominated_scoring(monkeypatch: pytest.MonkeyPatch):
+    """A world where CLIP and the geometry proxy disagree about which is greener.
+
+    9-point routes: geometry says grim, CLIP says lush.
+    12-point routes: geometry says lush, CLIP says grim.
+
+    Any judgement that ignores clip_score therefore reaches the opposite
+    conclusion from one that uses it, which is exactly the bug.
+    """
+    from backend import geometry as geometry_mod
+    from backend import scoring as scoring_mod
+
+    def fake_score(points, elevations=None, details=None, clip_score=None):
+        geometry_only = 0.9 if len(points) == 12 else 0.1
+        return type("S", (), {
+            "nature": geometry_only if clip_score is None else clip_score,
+            "air": None,
+        })()
+
+    def fake_clip(points, cache=None):
+        return scoring_mod.ClipTerm(0.1 if len(points) == 12 else 0.9, 1.0, 4, 4)
+
+    monkeypatch.setattr(geometry_mod, "score_geometry", fake_score)
+    monkeypatch.setattr(scoring_mod, "clip_term_for_route", fake_clip)
+
+
+@pytest.mark.asyncio
+async def test_the_greenness_floor_uses_the_same_score_the_card_shows(
+    clip_dominated_scoring, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A candidate greener only by the geometry proxy must not pass the floor.
+
+    The candidate here scores 0.9 on geometry alone and 0.1 once CLIP is
+    counted; the baseline is the other way round. Judged on the geometry proxy
+    it sails through and ships labelled Nature with no note. Judged on the
+    number that reaches the card, it is plainly *less* green than the fastest
+    route and has to say so.
+    """
+    monkeypatch.setenv("MEANDER_GRAPHHOPPER_SELF_HOSTED", "0")
+
+    async def fake_post(body, mode, preset):
+        return _stub(preset, 30.0, green=True)      # 12 points: clip says 0.1
+
+    monkeypatch.setattr(routing, "_post_route", fake_post)
+
+    fastest = _stub("fastest", 30.0, green=False)   # 9 points: clip says 0.9
+    result = await routing.route_nature(ORIGIN, None, 30, "foot", fastest)
+
+    assert result.preset_note is not None, (
+        "a route the card will show as less green than fastest was accepted "
+        "silently — the floor is being applied to a different number"
+    )
+    assert "greener" in result.preset_note
+
+
+@pytest.mark.asyncio
+async def test_a_candidate_greener_on_the_shown_score_still_passes(
+    clip_dominated_scoring, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The mirror image, so the fix is not just "always add a note"."""
+    monkeypatch.setenv("MEANDER_GRAPHHOPPER_SELF_HOSTED", "0")
+
+    async def fake_post(body, mode, preset):
+        return _stub(preset, 30.0, green=False)     # 9 points: clip says 0.9
+
+    monkeypatch.setattr(routing, "_post_route", fake_post)
+
+    fastest = _stub("fastest", 30.0, green=True)    # 12 points: clip says 0.1
+    result = await routing.route_nature(ORIGIN, None, 30, "foot", fastest)
+
+    assert result.preset_note is None

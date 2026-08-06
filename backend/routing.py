@@ -677,9 +677,37 @@ async def route_nature(
     ``preset_note`` explaining which promise it missed.
     """
     from .geometry import score_geometry
+    from .scoring import clip_term_for_route
 
     def greenness(route: RawRoute) -> float:
-        return score_geometry(route.points, route.elevations or None, route.details).nature
+        """**The same number the card will show.** Not a proxy for it.
+
+        This used to call ``score_geometry`` without the CLIP term, and it was
+        wrong in a way nothing could detect until now: CLIP carries weight 0.45,
+        the largest single term in the nature score, so a route was *chosen* on
+        a measure that excluded the dominant component and then *displayed* with
+        one that included it. The "greener than the fastest route" bar — the one
+        this function exists to enforce, and which the docstring above calls not
+        optional — was being applied to a different number from the one a reader
+        sees on the card.
+
+        It stayed invisible for the whole project because ``data/cache.db``
+        shipped with zero CLIP rows, so ``clip_score`` was always None and the
+        two measures were arithmetically identical. Pre-warming the cache is
+        what made them able to disagree, and the first warmed run disagreed
+        straight away: at Hyde Park the nature route showed 0.4806 against the
+        fastest route's 0.4854 while still passing the floor.
+
+        The lookup is a cache read — no torch, no network — and the request path
+        already does exactly this once per route in ``main.py``.
+        """
+        clip = clip_term_for_route(route.points)
+        return score_geometry(
+            route.points,
+            route.elevations or None,
+            route.details,
+            clip_score=clip.score,
+        ).nature
 
     cap = fastest.duration_min * NATURE_DURATION_CAP if fastest else None
     floor = greenness(fastest) if fastest else None
