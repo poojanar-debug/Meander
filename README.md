@@ -30,18 +30,38 @@ negotiable; that is not.
 
 ## Status
 
-All eleven build phases are done and tagged (`phase-a` … `phase-k`). 367 tests pass offline, the
-frontend has no WCAG 2.1 AA violations in an automated pass, and the deploy build boots with torch
-absent.
+Eleven build phases (`phase-a` … `phase-k`) plus an eight-phase frontend redesign
+(`redesign-phase-1` … `redesign-phase-8`) against
+[docs/DESIGN-HANDOFF.md](docs/DESIGN-HANDOFF.md). 393 backend tests and 45 frontend tests pass
+offline, the frontend has no WCAG 2.1 AA violations in an automated pass at light desktop, dark
+desktop and 390 px, and the deploy build boots with torch absent.
 
-**It has never produced a real route.** There was no GraphHopper API key available when it was
-built, so the routing fixtures are hand-made — every route says so, in the response and on the
-card. Add a key and re-record to change that. [BLOCKED.md](BLOCKED.md) has the three things that
-need a human and the exact command for each; [PROGRESS.md](PROGRESS.md) is the full build log,
-including the hostile self-audit and what a reviewer should still be sceptical about.
+One backend test fails, for an environmental reason rather than a regression — see
+[BLOCKED.md](BLOCKED.md) #3.
+
+**It does produce real routes now**, against a self-hosted GraphHopper covering Sri Lanka, Greater
+London and Noord-Holland. Eighteen hand-made fixtures remain for the offline test suite, and any
+route derived from one still says so in the response, on the card, and in a banner across the top
+of the app. [BLOCKED.md](BLOCKED.md) records what is resolved and what still needs a human — the
+short version is that **no route has ever been scored by CLIP**, because `data/cache.db` has never
+been pre-warmed. [PROGRESS.md](PROGRESS.md) is the full build log, including the hostile self-audit
+and what a reviewer should still be sceptical about.
 
 Nothing here is deployed. [DEPLOY.md](DEPLOY.md) is written to be followed without asking
 questions.
+
+### What the redesign added
+
+- A dark-green design system with a full dark theme, and no hard-coded colour outside two `:root`
+  blocks.
+- A **comparison rail** of uniform rows in place of three stacked data dumps, with the detail panel
+  showing only the selected route.
+- A **trip bar** of four labelled segments in place of nine form fields, and a first-run card that
+  asks three questions rather than nine.
+- **When to go** — the best departure window the API had always returned and the UI had always
+  ignored, plus sunrise and sunset computed in the browser.
+- **Turn-by-turn directions**, with a barrier rendered inside the step you would meet it on.
+- **Live follow mode**, in which the position never leaves the browser.
 
 ---
 
