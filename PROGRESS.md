@@ -1918,3 +1918,67 @@ broken, and two of those three would have run.
   coverage.
 - **The graph was not built.** `scripts/graphhopper.sh setup` needs a JDK 21 and
   this machine has Java 1.8.
+
+## iOS phase 2 — A native origin, and a defect found by reading · 2026-08-06
+
+Small phase, entirely server-side, deliberately landed before any shell exists —
+debugging CORS through a WKWebView console is a bad way to spend a day.
+
+`DEPLOY.md` said *"there is no CORS step, and that is deliberate."* True of the
+website: one CloudFront distribution serves the SPA and proxies `/api/*`, so the
+browser is same-origin. Not true of an app that serves its assets from
+`capacitor://localhost` and calls the distribution over HTTPS.
+
+**The defect underneath it was not the one the brief predicted, and it was
+worse.** `infra/20-services.yaml` shipped `MEANDER_ALLOWED_ORIGINS` as `''` with
+a comment explaining there was nothing to allow. But `config.py:322` reads
+`_env_flag("MEANDER_ALLOW_LOCAL_ORIGINS", not origins)` — the default is *on
+whenever nothing is configured*. So the deployed allowlist was never empty. It
+was `('http://localhost:5173', 'http://127.0.0.1:5173')`. **Production
+allowlisted the Vite dev server**, and no log line, health field or template
+comment said so.
+
+Setting `CorsOrigins` closes it — but as a side effect of the list becoming
+non-empty, which is exactly the shape of thing a later tidy-up deletes. Hence a
+test that names the behaviour rather than a comment that describes it.
+
+### Two things checked rather than assumed
+
+`_resolve_origins` does no scheme parsing at all — it splits on commas and
+strips — so `capacitor://localhost` survives intact. Worth confirming: an Origin
+is matched as an opaque string, and anything that normalises it produces a value
+that never matches and a failure that reads as the allowlist being ignored.
+
+Starlette's `CORSMiddleware` accepting a non-`http(s)` scheme was also checked
+by making real requests through a probe app built from the real app's middleware
+kwargs. Reloading `backend.main` would have been the obvious approach and the
+wrong one — it hands every other test a different `limiter` and `metrics` than
+`conftest` resets.
+
+### Verified in a browser, cross-origin
+
+The whole point of the phase, so it was exercised rather than reasoned about.
+The frontend was pointed at the API with `VITE_API_BASE` so the browser made a
+genuinely cross-origin request, and the API was started with an explicit
+allowlist:
+
+- the configured origin got `access-control-allow-origin` back;
+- `http://localhost:5173` **did not** — the defect above, closed and visible;
+- three real routes streamed and rendered in the redesign frontend, unmodified,
+  with `scoring_method: "clip"` and verification meters reading 70%, 77% and 71%;
+- the accessible route came back with one barrier and *"cannot be completed"*;
+- no CORS error appeared in the console at any point.
+
+`/readyz` returned 503 with the router stopped, which is the documented
+behaviour and had never actually been observed before.
+
+### One thing this run did to itself
+
+Requesting a route wrote a row to `route_cache` in `data/cache.db` — real
+coordinates, in the file that gets baked into the API image. That is finding #5
+of the brief happening in miniature, within an hour of reading it. `make scrub`
+removed it and restored the committed bytes, and `scripts/install-hooks.sh` has
+now been run on this machine, which is not automatic on clone and is the only
+thing that would catch it at commit time.
+
+**Live API calls this phase: zero.** 632 -> 640 backend tests.
