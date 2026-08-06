@@ -1,0 +1,76 @@
+{
+  "_meander_provenance": "recorded",
+  "_meander_recorded_at": "2026-08-06T06:24:43.038789+00:00",
+  "_meander_note": "Written by backend/fixtures.py. Secrets are redacted and excluded from the request signature.",
+  "request": {
+    "method": "GET",
+    "url": "https://graph.mapillary.com/images",
+    "params": {
+      "access_token": "<redacted>",
+      "fields": "id,thumb_1024_url,computed_geometry",
+      "bbox": "-0.162163,51.499578,-0.158163,51.503578",
+      "limit": 4
+    },
+    "json": null,
+    "data": {},
+    "content": null,
+    "headers": {
+      "Accept": "application/json"
+    }
+  },
+  "response": {
+    "status": 200,
+    "headers": {
+      "content-type": "application/json; charset=UTF-8",
+      "date": "Thu, 06 Aug 2026 06:24:42 GMT"
+    },
+    "json": {
+      "data": [
+        {
+          "id": "1326002661677762",
+          "thumb_1024_url": "https://scontent.fcmb1-2.fna.fbcdn.net/m1/v/t6/An8JGdLdaYq_ssd3SmI8Kp8JQZmxrdpnbnuIsFnsPxxicgk1eU3Mx_cMCgkYF5bm14vdRmKN_ETccAZ_We3HqBu8-nvScj6EaVchJp7rSO40tBTfDrH2BQPUgah3buazA0nAoJL7kVa1wOtbrlo__ew?stp=s1024x512&edm=AOnQwmMEAAAA&_nc_gid=1j0wyZM72mD9iWtSk7aXqA&_nc_oc=AdrTLp5slUL1kzFTkDXKArdHpPeIjBCTNOH0d4trId60EpqXOVMpKaC2g0amGcsC9Rc&ccb=10-6&oh=00_AQEaVl2t9tFE3q8V3W7UrnF5mj1iQvUHZoMScG2nkJSYgg&oe=6A9B9248&_nc_sid=201bca",
+          "computed_geometry": {
+            "type": "Point",
+            "coordinates": [
+              -0.15894863572808,
+              51.501033175321
+            ]
+          }
+        },
+        {
+          "id": "1327419221536855",
+          "thumb_1024_url": "https://scontent.fcmb1-2.fna.fbcdn.net/m1/v/t6/An_XqjtjKFYEu7f1FXAj6ataw0q7JRV2itc3ULtC6wDd2g5orQogCEEX9Q-EZQqNWT0aOcLsDxLfQF-JiiHfkQM3tcispWNAfYwpkrGU5wBmZv-MycKGywBs26WvG9Ww-hU5ipaSkOLhG_zIrMpZiB8?stp=s1024x512&edm=AOnQwmMEAAAA&_nc_gid=1j0wyZM72mD9iWtSk7aXqA&_nc_oc=AdpQydzpbrvVC_azYB9DyZp351QkadqueATo-0Ju8fR2WFnqPotCHKwDCBeAIaauwLc&ccb=10-5&oh=00_AQG6ELgxlgsrroG_5S-vPnu3A6PNpu3rP-r47qCB6IW1nw&oe=6A9BA461&_nc_sid=201bca",
+          "computed_geometry": {
+            "type": "Point",
+            "coordinates": [
+              -0.15881320209713,
+              51.500524283537
+            ]
+          }
+        },
+        {
+          "id": "1650827915440283",
+          "thumb_1024_url": "https://scontent.fcmb1-2.fna.fbcdn.net/m1/v/t6/An9TwugrO3vzDQmcJ8qmpna_YwrUm-XmCazhDLs3sVXadnOuQnpk2_OzWkRhy7gQC8NFxHzTCzOZQKVqMG2XfphReGoVPkKBqKHrPAHNfhFfHdA3K6eyvufYwlVSra-3ZyQMWCOQOojcjonC1Jbisg?stp=s1024x512&edm=AOnQwmMEAAAA&_nc_gid=1j0wyZM72mD9iWtSk7aXqA&_nc_oc=AdpMgPtAMsXo0lTw-8yPAiXMausjaPfiXeBxLiXyt-qeIdz0tfDArf3AuSTpEKAj6zI&ccb=10-6&oh=00_AQH1qGV088bqvcc_xFMOvtlC4uwwOkm3G4cCPyPTqaS0eA&oe=6A9B84E5&_nc_sid=201bca",
+          "computed_geometry": {
+            "type": "Point",
+            "coordinates": [
+              -0.15886614537209,
+              51.500731441871
+            ]
+          }
+        },
+        {
+          "id": "1646254189127806",
+          "thumb_1024_url": "https://scontent.fcmb1-2.fna.fbcdn.net/m1/v/t6/An_j3eHbbM-TidTEi4UeLa4ndFyH12S6rQ_KXfuCXRFoHLHzSrPEWYe_iWfBBBo_jJ3OSicJDfZqAhNWU3fJg6YTIDIlzjzxbsG92irnG5UxQBuff9zgggjscjmF4qesLq93wTX0JH6ltRY1bS7rXg?stp=s1024x768&edm=AOnQwmMEAAAA&_nc_gid=1j0wyZM72mD9iWtSk7aXqA&_nc_oc=AdoNat1X1VmHP1Lnvi_WfuxfZ4G_6JX2tHzzmUjwKlpj91yotQA-0ALQV-7oExzYY6I&ccb=10-5&oh=00_AQGeSAYChq5rFIBOjZO-3WWot6qjFrGLC1ZOfZLPgnmqsw&oe=6A9BAAAB&_nc_sid=201bca",
+          "computed_geometry": {
+            "type": "Point",
+            "coordinates": [
+              -0.15902892907968,
+              51.501136967744
+            ]
+          }
+        }
+      ]
+    }
+  }
+}

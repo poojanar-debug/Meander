@@ -1,0 +1,54 @@
+{
+  "_meander_provenance": "recorded",
+  "_meander_recorded_at": "2026-08-06T06:31:04.535645+00:00",
+  "_meander_note": "Written by backend/fixtures.py. Secrets are redacted and excluded from the request signature.",
+  "request": {
+    "method": "GET",
+    "url": "https://graph.mapillary.com/images",
+    "params": {
+      "access_token": "<redacted>",
+      "fields": "id,thumb_1024_url,computed_geometry",
+      "bbox": "4.868086,52.350850,4.872086,52.354850",
+      "limit": 4
+    },
+    "json": null,
+    "data": {},
+    "content": null,
+    "headers": {
+      "Accept": "application/json"
+    }
+  },
+  "response": {
+    "status": 200,
+    "headers": {
+      "content-type": "application/json; charset=UTF-8",
+      "date": "Thu, 06 Aug 2026 06:31:04 GMT"
+    },
+    "json": {
+      "data": [
+        {
+          "id": "914509642703306",
+          "thumb_1024_url": "https://scontent.fcmb1-2.fna.fbcdn.net/m1/v/t6/An-qVt2tLzaR57y2x7mivK510J3Nz1JCrAWkWLnEdYCQDkPBEQz5yER-sArmp4Chbe6TWRpHe9KlAJ02qT1iBfxMyfEp8l6q6MWFULi8SL7F0DBwum1ndCA1grvzxxQNTLDD84u1Vh_YHV5C9D13Aw?stp=s1024x768&edm=AOnQwmMEAAAA&_nc_gid=Wnrmp0PMoBoYoza58Rb80Q&_nc_oc=AdoguimqLGab6AB69aUvmAZRvOyHSHEH_dzdbckmetW8f6815syWGUj2NswheNlLNLU&ccb=10-5&oh=00_AQEIsEkcbox4tykncrpCzAA0gtUwSSz1R1utsy2BOIJ02g&oe=6A9B82C7&_nc_sid=201bca",
+          "computed_geometry": {
+            "type": "Point",
+            "coordinates": [
+              4.8717342875898,
+              52.350917682052
+            ]
+          }
+        },
+        {
+          "id": "1983864895101856",
+          "thumb_1024_url": "https://scontent.fcmb1-2.fna.fbcdn.net/m1/v/t6/An-DnOM1dngHLn73a6A7wWdX6tJ9IVTdmXee6sxomRhxc4qA9yxCPLFXllpoWYDUSxBYyOFV71GAXcBEPv537Cn9pDOlXQ3E5WjVJ-5Ms1eFre1LMfFA8v9AjFeTFvgojjHFuNrIZryN8g2c1q2zSP4?stp=s1024x512&edm=AOnQwmMEAAAA&_nc_gid=Wnrmp0PMoBoYoza58Rb80Q&_nc_oc=AdpXI7RXY_fkYqDf-6smK1tMDVXOztM3abwc0ExVeaMeekLZn_am_eEw-amxfqCpy-Y&ccb=10-5&oh=00_AQFL0zGfMjNU3WawXqUYSu-Dr0uRMjT69O-L7ewAzKmNMg&oe=6A9BA3E0&_nc_sid=201bca",
+          "computed_geometry": {
+            "type": "Point",
+            "coordinates": [
+              4.8720306943565,
+              52.354334957652
+            ]
+          }
+        }
+      ]
+    }
+  }
+}

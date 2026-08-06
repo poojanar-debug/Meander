@@ -2,11 +2,13 @@
 
 Things this run could not finish, what was tried, and what needs a human.
 
+**Nothing is open.**
+
 | | |
 |---|---|
 | §0 free tier cannot route nature/accessible | **resolved** — self-hosted GraphHopper 11 |
 | §1 no `GRAPHHOPPER_KEY`, fixtures synthetic | **resolved** — a real key exists; live routing works |
-| §2 no `MAPILLARY_TOKEN`, CLIP unvalidated | **open** |
+| §2 no `MAPILLARY_TOKEN`, CLIP unvalidated | **resolved** — token supplied; cache pre-warmed, prompt re-ranked |
 | §3 prototype sources missing | **resolved** — worked around, nothing outstanding |
 
 ---
@@ -148,54 +150,54 @@ That command replaces every synthetic GraphHopper fixture with a recorded one an
 
 ---
 
-## 2 · Mapillary token absent — CLIP scoring cannot be validated against real imagery
+## 2 · ~~Mapillary token absent — CLIP scoring cannot be validated against real imagery~~ — RESOLVED
 
-**Status: OPEN.** This is the one still-unresolved gap, and it is the reason
-every route this project has ever produced — synthetic or real — reports
-`scoring_method: "geometry_only"` or `"placeholder"`, never `"clip"`.
+**Resolved:** 2026-08-06, by a token from the project owner. This was the last open blocker.
 
-**Discovered:** Phase A, 2026-08-04
+`data/cache.db` now ships **146 pre-warmed segment scores** across all five test locations, and
+`POST /api/routes` returns `scoring_method: "clip"` for the first time in the project's history.
+27 of the 146 are recorded with a NULL score — points where Mapillary had fewer than two usable
+frames — which is deliberately distinct from a low score, and they are what stops
+"we could not look" being read as "there is nothing there".
 
-Same cause as (1): `MAPILLARY_TOKEN` is unset, so no street-level imagery can be fetched and the
-CLIP prompt-variant comparison has nothing real to rank.
+**What real imagery changed, and it was not what Phase G expected**
 
-**How it was worked around**
+The prompt-variant ranking largely inverted. On generated reference images four of seven pairs
+scored the asphalt texture higher, including the spec's own `v1_extreme`; on real imagery **all
+seven separate in the right direction** on the London pairs. PROGRESS.md's Phase G entry had
+already warned this was possible, and it was right to.
 
-`backend/scoring.py`, `backend/batch_score.py` and `scripts/compare_prompts.py` are complete and
-unit-tested: the bounding-box sizing, the contrastive softmax, the cache read/write, the
-`scoring_method` transition to `clip`, and the rule that a point with too little imagery is
-recorded as *no score* rather than a low one. `scripts/compare_prompts.py` falls back to
-procedurally generated reference images — a foliage texture against an asphalt texture — which
-verifies the model loads and the prompt polarity is right, but says nothing reliable about how a
-prompt pair behaves on real street photography.
+Across three real pairs only `v2_plain` and `v1_extreme` hold everywhere. `v3_nature` — the
+variant Phase G chose — and `v5_street`, which separates widest in London, **both invert on the
+Colombo pair**, scoring the city fort greener than the park. `ACTIVE_PROMPT_VARIANT` is now
+`v2_plain`; the full table and the reasoning are in `backend/scoring.py` beside the constant.
 
-**So the following is still unmeasured:**
+**Two defects this uncovered, both fixed and both with tests**
 
-- which prompt variant actually performs best on real imagery
-- whether CLIP ranks Hyde Park above Euston Road, which is the Phase G acceptance criterion
-- any real `scoring_method: "clip"` route, since `data/cache.db` ships empty of CLIP rows
+- Mapillary answers a *dense* bounding box with HTTP 500 and "reduce the amount of data",
+  regardless of `limit`. Density tracks how photographed a place is, so it fails precisely on the
+  busy roads the scorer most needs — Euston Road failed every time, Hyde Park never did. The box
+  now halves and retries down to a floor.
+- `route_nature` judged its "greener than fastest" bar with `score_geometry` called *without* the
+  CLIP term, while the card showed the score *with* it — CLIP is weight 0.45, the largest term.
+  Harmless while the cache was empty and wrong the moment it was not: the first warmed run served
+  a Nature route scoring 0.4806 against a fastest route at 0.4854, and passed the floor.
 
-Re-confirmed 2026-08-04 against a live self-hosted run: `segment_scores` holds **0 rows**, so all
-three routes came back `geometry_only`. The committed `data/cache.db` is a 4 KB file whose schema
-is created on first open; every environment therefore starts from zero. Nothing about self-hosting
-changed this — the two are unrelated subsystems, and it is easy to assume otherwise now that the
-routes are real.
+**What is still worth being sceptical about**
 
-**What you need to do**
+- **n is small.** 4 to 6 images per location, and only 2 at Viharamahadevi — which is the single
+  point deciding the one pair that separates the candidates, and the only non-European pair.
+- **`v2_plain` measures aesthetic appeal, not greenery**, while the score it feeds is presented as
+  a nature score. The two correlate on this sample; a photogenic stone street would score well
+  without a tree in it. A construct mismatch, not a bug, and the reason every response still
+  carries `scoring_method`.
+- Regions nobody has pre-warmed still return `geometry_only`, and say so.
 
-1. Create a client token at https://www.mapillary.com/dashboard/developers
-2. `echo 'MAPILLARY_TOKEN=...' >> .env`
-3. Rank the prompt variants on real imagery:
+To re-run either step:
 
 ```bash
-MEANDER_FIXTURES=record python3 -m scripts.compare_prompts --location
-```
-
-4. If a different variant wins, set `ACTIVE_PROMPT_VARIANT` in `backend/scoring.py` to it, then
-   pre-warm the cache and commit the result:
-
-```bash
-MEANDER_FIXTURES=record python3 -m backend.batch_score --location hyde-park-london --location euston-road-london
+MEANDER_FIXTURES=record python3 -m scripts.compare_prompts --green hyde-park-london --grim euston-road-london
+MEANDER_FIXTURES=record python3 -m backend.batch_score
 ```
 
 ---
