@@ -3,12 +3,43 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-    <meta name="color-scheme" content="light" />
+    <meta name="color-scheme" content="light dark" />
     <meta
       name="description"
       content="Meander finds three routes from where you are and how long you have: the fastest, the greenest, and one that holds to real accessibility constraints."
     />
     <title>Meander — routes for the time you have</title>
+    <!--
+      Resolve the theme before first paint.
+
+      React cannot do this: the bundle parses, mounts and commits an effect
+      well after the browser has painted, so a dark-mode visitor gets a full
+      frame of cream-coloured page first. Inline and synchronous in <head> is
+      the only place that runs early enough.
+
+      Inline rather than a module import for the same reason, and it makes no
+      network request of any kind — it reads one localStorage key and one media
+      query. Duplicated in src/lib/theme.js, which owns the logic once the app
+      is running; the two must agree on the key name.
+    -->
+    <script>
+      ;(function () {
+        try {
+          var stored = window.localStorage.getItem('meander:theme')
+        } catch (e) {
+          // Private mode throws on access, not just on write.
+          var stored = null
+        }
+        var theme =
+          stored === 'light' || stored === 'dark'
+            ? stored
+            : window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches
+              ? 'dark'
+              : 'light'
+        document.documentElement.dataset.theme = theme
+        document.documentElement.style.colorScheme = theme
+      })()
+    </script>
   </head>
   <body>
     <div id="root"></div>

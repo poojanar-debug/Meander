@@ -231,6 +231,62 @@ def _details(points: list[LatLon], preset: str, rng: random.Random,
     }
 
 
+# GraphHopper's `sign` vocabulary, and the phrasing it pairs with each one. Kept
+# small and plausible rather than exhaustive: these fixtures exist to exercise
+# the parsing and rendering path, not to describe a real walk.
+_SYNTHETIC_TURNS = (
+    (0, "Continue"),
+    (2, "Turn right"),
+    (-2, "Turn left"),
+    (7, "Keep right"),
+    (-7, "Keep left"),
+)
+
+
+def _instructions(points: list[LatLon], distance_m: float, time_ms: int,
+                  rng: random.Random) -> list[dict[str, Any]]:
+    """A plausible turn list spanning the whole point array.
+
+    Synthetic, and stamped as such by the envelope like everything else here.
+    It exists so the step list, the map highlight and follow mode all have a
+    shape to run against offline — without it those paths were never exercised
+    by the test suite at all.
+
+    The intervals tile the point array end to end with no gaps and no overlaps,
+    because that is the property the frontend relies on when it maps a step back
+    onto a stretch of the drawn line.
+    """
+    n = len(points)
+    if n < 2:
+        return []
+    count = max(2, min(8, n // 6))
+    edges = sorted(rng.sample(range(1, n - 1), count - 1)) if count > 1 and n > 3 else []
+    bounds = [0, *edges, n - 1]
+
+    out: list[dict[str, Any]] = []
+    for i in range(len(bounds) - 1):
+        start, end = bounds[i], bounds[i + 1]
+        share = (end - start) / max(n - 1, 1)
+        sign, text = _SYNTHETIC_TURNS[i % len(_SYNTHETIC_TURNS)] if i else (0, "Continue")
+        street = rng.choice(("Green Path", "Canal Walk", "Market Street", "Station Road", ""))
+        out.append({
+            "distance": round(distance_m * share, 3),
+            "heading": round(rng.uniform(0, 360), 1),
+            "sign": sign,
+            "interval": [start, end],
+            "text": f"{text} onto {street}" if street else text,
+            "time": int(time_ms * share),
+            "street_name": street,
+        })
+    # GraphHopper always closes with an arrival instruction of zero length.
+    out.append({
+        "distance": 0.0, "heading": 0.0, "sign": 4,
+        "interval": [n - 1, n - 1], "text": "Arrive at destination",
+        "time": 0, "street_name": "",
+    })
+    return out
+
+
 def _synth_payload(body: dict[str, Any], preset: str, scenario: Scenario) -> dict[str, Any]:
     rng = random.Random(_seed_for(scenario, preset))
     origin = LatLon(body["points"][0][1], body["points"][0][0])
@@ -276,6 +332,7 @@ def _synth_payload(body: dict[str, Any], preset: str, scenario: Scenario) -> dic
                 "ascend": round(max(elevations) - elevations[0], 1),
                 "descend": round(max(elevations) - elevations[-1], 1),
                 "details": _details(points, preset, rng, known_bad=preset in scenario.known_bad),
+                "instructions": _instructions(points, distance_m, time_ms, rng),
                 "legs": [],
                 "snapped_waypoints": {
                     "type": "LineString",

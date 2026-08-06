@@ -1,8 +1,7 @@
 import maplibregl from 'maplibre-gl'
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 
-import { styleFor } from '../lib/dash.js'
-import { fmtDist } from '../lib/format.js'
+import { routeColor, styleFor, swatchBackground } from '../lib/dash.js'
 
 const STYLE_URL = 'https://tiles.openfreemap.org/styles/positron'
 const INITIAL_CENTER = [79.8521, 6.921]
@@ -37,14 +36,98 @@ function markerElement(className, text, label) {
   return el
 }
 
+/** Read a design token. MapLibre paints to a canvas and cannot resolve
+ *  `var(--map-water)`, so every colour has to be handed over as a literal. */
+function token(name) {
+  return getComputedStyle(document.documentElement).getPropertyValue(name).trim()
+}
+
+/**
+ * Recolour the basemap to the §2.4 palette.
+ *
+ * OpenFreeMap ships no dark style, so rather than a second tile source the
+ * existing style's layers are repainted in place — the option §2.4 offers first.
+ * Layers are matched by id and source-layer rather than by a hard-coded list,
+ * because the upstream style is not ours and its layer names change without
+ * notice; a missing match must degrade to "that layer keeps its own colour",
+ * never to a thrown error that takes the map down.
+ */
+function applyMapPalette(map) {
+  const land = token('--map-land')
+  const park = token('--map-park')
+  const water = token('--map-water')
+  const road = token('--map-road')
+  const ink = token('--ink')
+  const halo = token('--map-land')
+
+  let layers
+  try {
+    layers = map.getStyle()?.layers ?? []
+  } catch {
+    return
+  }
+
+  for (const layer of layers) {
+    const id = layer.id.toLowerCase()
+    const source = (layer['source-layer'] ?? '').toLowerCase()
+    const set = (prop, value) => {
+      try {
+        map.setPaintProperty(layer.id, prop, value)
+      } catch {
+        // The layer does not carry that paint property. Not an error.
+      }
+    }
+
+    if (layer.type === 'background') {
+      set('background-color', land)
+    } else if (id.includes('water') || source.includes('water')) {
+      if (layer.type === 'fill') set('fill-color', water)
+      if (layer.type === 'line') set('line-color', water)
+    } else if (
+      id.includes('park') ||
+      id.includes('wood') ||
+      id.includes('grass') ||
+      id.includes('forest') ||
+      id.includes('landcover') ||
+      id.includes('green')
+    ) {
+      if (layer.type === 'fill') set('fill-color', park)
+    } else if (id.includes('building')) {
+      if (layer.type === 'fill') set('fill-color', land)
+    } else if (
+      id.includes('road') ||
+      id.includes('street') ||
+      id.includes('highway') ||
+      id.includes('bridge') ||
+      id.includes('tunnel') ||
+      source.includes('transportation')
+    ) {
+      if (layer.type === 'line') set('line-color', road)
+    } else if (id.includes('landuse') || id.includes('landcover')) {
+      if (layer.type === 'fill') set('fill-color', land)
+    }
+
+    if (layer.type === 'symbol') {
+      set('text-color', ink)
+      set('text-halo-color', halo)
+    }
+  }
+}
+
 /**
  * The map is an enhancement, never the only way to read a result.
  *
- * Everything drawn here is also written out in the route list, and the app is
- * tested with this component hidden. Markers carry real `aria-label`s, but they
- * are a convenience — the list is the accessibility story.
+ * Everything drawn here is also written out in the route rail, and the app is
+ * tested with this component removed from the DOM entirely. Markers carry real
+ * `aria-label`s, but they are a convenience — the rail is the accessibility
+ * story.
+ *
+ * Three things in here were bug fixes rather than choices, and are marked as
+ * such below: the deferred creation that survives StrictMode, the load deadline
+ * that only runs while the page is visible, and the `jump`-instead-of-`fly`
+ * guard for a hidden tab. None of them should be tidied away.
  */
-export default function MapView({ routes, selected, origin, dest, onSelect }) {
+export default function MapView({ routes, selected, origin, dest, theme, highlight, onSelect }) {
   const containerRef = useRef(null)
   const mapRef = useRef(null)
   const markersRef = useRef([])
@@ -83,6 +166,7 @@ export default function MapView({ routes, selected, origin, dest, onSelect }) {
     let deadline
     let observer
     let onVisibility
+    let readyPoll
 
     const pending = setTimeout(() => {
       if (cancelled || !containerRef.current) return
@@ -95,7 +179,7 @@ export default function MapView({ routes, selected, origin, dest, onSelect }) {
           attributionControl: { compact: true },
         })
       } catch (err) {
-        // WebGL unavailable, or the style host is blocked. The route list still
+        // WebGL unavailable, or the style host is blocked. The route rail still
         // carries the whole answer, so this degrades rather than breaking.
         console.warn('Meander: map could not start —', err)
         setFailed(true)
@@ -131,12 +215,44 @@ export default function MapView({ routes, selected, origin, dest, onSelect }) {
       }
       document.addEventListener('visibilitychange', onVisibility)
 
-      map.on('load', () => {
+      // `load` is not enough on its own, and relying on it alone cost an
+      // afternoon. The basemap style is third party and can change without
+      // notice: with the current OpenFreeMap positron, tiles render and
+      // `areTilesLoaded()` is true, but `isStyleLoaded()` stays false forever
+      // and `load` never fires — so every route layer was waiting on an event
+      // that was never coming, and the map drew streets and nothing else.
+      //
+      // `idle` is the signal that actually means "rendering has settled and you
+      // may add layers", and it fires whether or not the style ever declares
+      // itself loaded. Both are wired, and readiness is idempotent, so
+      // whichever arrives first wins and the second is a no-op.
+      const markReady = () => {
+        if (settled) return
         settled = true
         clearTimeout(deadline)
+        clearInterval(readyPoll)
+        applyMapPalette(map)
         setReady(true)
         setFailed(false)
-      })
+      }
+      map.on('load', markReady)
+      map.on('idle', markReady)
+      // Last resort, and the one that actually fires against the current
+      // upstream style: poll until the style object exists and will accept a
+      // source. `getStyle()` returning layers is the real precondition for
+      // addSource/addLayer — `isStyleLoaded()` is a stricter claim that this
+      // basemap never makes.
+      readyPoll = setInterval(() => {
+        if (settled) {
+          clearInterval(readyPoll)
+          return
+        }
+        try {
+          if (map.getStyle()?.layers?.length) markReady()
+        } catch {
+          // Style not constructed yet. Try again on the next tick.
+        }
+      }, 250)
       map.on('error', (event) => {
         if (event?.error?.status === 404 || event?.error?.message?.includes('style')) {
           settled = true
@@ -144,11 +260,11 @@ export default function MapView({ routes, selected, origin, dest, onSelect }) {
           setFailed(true)
         }
       })
-      map.addControl(new maplibregl.NavigationControl({ showCompass: false }), 'top-right')
       mapRef.current = map
+      if (import.meta.env.DEV) window.__meanderMap = map
 
-      // The container is sized by a CSS clamp and by the 860px breakpoint, so
-      // it changes height without the window necessarily changing size — a
+      // The container is sized by the layout grid and by the 900px breakpoint,
+      // so it changes height without the window necessarily changing size — a
       // phone rotating, or a desktop crossing the breakpoint. MapLibre's own
       // trackResize did not pick that up here: the canvas kept its initial
       // height and left a band of empty container below it.
@@ -160,6 +276,7 @@ export default function MapView({ routes, selected, origin, dest, onSelect }) {
       cancelled = true
       clearTimeout(pending)
       clearTimeout(deadline)
+      clearInterval(readyPoll)
       if (onVisibility) document.removeEventListener('visibilitychange', onVisibility)
       observer?.disconnect()
       markersRef.current.forEach((m) => m.remove())
@@ -169,6 +286,14 @@ export default function MapView({ routes, selected, origin, dest, onSelect }) {
       setReady(false)
     }
   }, [])
+
+  // --- theme ---------------------------------------------------------------
+
+  useEffect(() => {
+    const map = mapRef.current
+    if (!map || !ready) return
+    applyMapPalette(map)
+  }, [theme, ready])
 
   // --- route layers --------------------------------------------------------
 
@@ -180,6 +305,10 @@ export default function MapView({ routes, selected, origin, dest, onSelect }) {
       if (map.getLayer(`line-${id}`)) map.removeLayer(`line-${id}`)
       if (map.getLayer(`case-${id}`)) map.removeLayer(`case-${id}`)
       if (map.getSource(`route-${id}`)) map.removeSource(`route-${id}`)
+    }
+    for (const id of ['highlight', 'rest-stops']) {
+      if (map.getLayer(id)) map.removeLayer(id)
+      if (map.getSource(id)) map.removeSource(id)
     }
 
     const drawable = routes.filter((r) => r.geometry?.length > 1)
@@ -196,7 +325,7 @@ export default function MapView({ routes, selected, origin, dest, onSelect }) {
       })
     }
 
-    // Cases first for every route, then lines, so one route's halo can never
+    // Cases first for every route, then lines, so one route's casing can never
     // paint over another route's line.
     for (const route of drawable) {
       map.addLayer({
@@ -204,15 +333,15 @@ export default function MapView({ routes, selected, origin, dest, onSelect }) {
         type: 'line',
         source: `route-${route.id}`,
         layout: { 'line-cap': 'round', 'line-join': 'round' },
-        paint: { 'line-color': '#ffffff', 'line-width': 7 },
+        paint: { 'line-color': token('--raised'), 'line-width': 7 },
       })
     }
     for (const route of drawable) {
       const style = styleFor(route.id)
       const paint = {
-        'line-color': style.color,
-        'line-width': 3.5,
-        'line-opacity': 0.4,
+        'line-color': routeColor(route.id, theme),
+        'line-width': 5,
+        'line-opacity': 0.45,
       }
       const isSolid = style.dash.length === 2 && style.dash[1] === 0
       if (!isSolid) paint['line-dasharray'] = style.dash
@@ -233,7 +362,40 @@ export default function MapView({ routes, selected, origin, dest, onSelect }) {
         map.getCanvas().style.cursor = ''
       })
     }
-  }, [routes, ready])
+
+    // The stretch of line belonging to the step under the cursor (§6.4). Added
+    // before the rest stops so their circles stay on top of it.
+    map.addSource('highlight', {
+      type: 'geojson',
+      data: { type: 'Feature', geometry: { type: 'LineString', coordinates: [] } },
+    })
+    map.addLayer({
+      id: 'highlight',
+      type: 'line',
+      source: 'highlight',
+      layout: { 'line-cap': 'round', 'line-join': 'round' },
+      paint: { 'line-color': token('--accent'), 'line-width': 11, 'line-opacity': 0.55 },
+    })
+
+    // Rest stops for the selected route only (§4.10). A circle layer rather
+    // than DOM markers: there can be a dozen of them, and they need to sit
+    // under the barrier markers rather than competing with them.
+    map.addSource('rest-stops', {
+      type: 'geojson',
+      data: { type: 'FeatureCollection', features: [] },
+    })
+    map.addLayer({
+      id: 'rest-stops',
+      type: 'circle',
+      source: 'rest-stops',
+      paint: {
+        'circle-radius': 4.5,
+        'circle-color': token('--raised'),
+        'circle-stroke-width': 3,
+        'circle-stroke-color': ['get', 'colour'],
+      },
+    })
+  }, [routes, ready, theme])
 
   // --- selection emphasis (paint properties only, never re-adding layers) ---
 
@@ -243,19 +405,58 @@ export default function MapView({ routes, selected, origin, dest, onSelect }) {
 
     for (const id of layerIdsRef.current) {
       const isSelected = id === selected
+      // The casing is --raised at line-width + 6, so the selected line stays
+      // legible where it crosses a park or open water (§2.4).
       if (map.getLayer(`case-${id}`)) {
+        map.setPaintProperty(`case-${id}`, 'line-color', token('--raised'))
         map.setPaintProperty(`case-${id}`, 'line-width', isSelected ? 13 : 7)
+        map.setPaintProperty(`case-${id}`, 'line-opacity', isSelected ? 1 : 0.45)
       }
       if (map.getLayer(`line-${id}`)) {
-        map.setPaintProperty(`line-${id}`, 'line-width', isSelected ? 7 : 3.5)
-        map.setPaintProperty(`line-${id}`, 'line-opacity', isSelected ? 1 : 0.4)
+        map.setPaintProperty(`line-${id}`, 'line-width', isSelected ? 7 : 5)
+        map.setPaintProperty(`line-${id}`, 'line-opacity', isSelected ? 1 : 0.45)
       }
     }
-  }, [selected, routes, ready])
+
+    const chosen = routes.find((r) => r.id === selected)
+    const source = map.getSource('rest-stops')
+    if (source) {
+      source.setData({
+        type: 'FeatureCollection',
+        features: (chosen?.rest_stops ?? []).map((stop) => ({
+          type: 'Feature',
+          properties: { colour: routeColor(chosen.id, theme) },
+          geometry: { type: 'Point', coordinates: [stop.lon, stop.lat] },
+        })),
+      })
+    }
+  }, [selected, routes, ready, theme])
+
+  // --- step highlight ------------------------------------------------------
+
+  useEffect(() => {
+    const map = mapRef.current
+    if (!map || !ready) return
+    const source = map.getSource('highlight')
+    if (!source) return
+
+    const route = routes.find((r) => r.id === selected)
+    const span =
+      highlight && route?.geometry?.length > 1
+        ? route.geometry.slice(highlight[0], highlight[1] + 1)
+        : []
+    source.setData({
+      type: 'Feature',
+      geometry: { type: 'LineString', coordinates: span.length > 1 ? span : [] },
+    })
+    if (map.getLayer('highlight')) {
+      map.setPaintProperty('highlight', 'line-color', token('--accent'))
+    }
+  }, [highlight, selected, routes, ready, theme])
 
   // --- viewport ------------------------------------------------------------
 
-  useEffect(() => {
+  const fit = useCallback(() => {
     const map = mapRef.current
     if (!map || !ready) return
 
@@ -273,11 +474,13 @@ export default function MapView({ routes, selected, origin, dest, onSelect }) {
     // centre with the routes off-screen.
     const instant = prefersReducedMotion() || document.hidden
     map.fitBounds(boundsOf(coordinates), {
-      padding: narrow ? 40 : 70,
-      duration: instant ? 0 : 600,
+      padding: narrow ? 40 : 60,
+      duration: instant ? 0 : 500,
       maxZoom: 16,
     })
-  }, [selected, routes, ready])
+  }, [routes, selected, ready])
+
+  useEffect(fit, [fit])
 
   // --- markers -------------------------------------------------------------
 
@@ -294,34 +497,29 @@ export default function MapView({ routes, selected, origin, dest, onSelect }) {
     }
 
     if (origin) {
-      add([origin.lon, origin.lat], markerElement('', 'A', `Start: ${origin.name ?? 'your location'}`))
+      add(
+        [origin.lon, origin.lat],
+        markerElement('', 'A', `Start: ${origin.name ?? 'your location'}`),
+      )
     }
     if (dest) {
-      add([dest.lon, dest.lat], markerElement('', 'B', `Destination: ${dest.name ?? 'chosen point'}`))
+      add(
+        [dest.lon, dest.lat],
+        markerElement('', 'B', `Destination: ${dest.name ?? 'chosen point'}`),
+      )
     }
 
-    const chosen = routes.find((r) => r.id === selected)
-    if (chosen) {
-      for (const stop of chosen.rest_stops ?? []) {
-        add(
-          [stop.lon, stop.lat],
-          markerElement(
-            'marker--rest',
-            '·',
-            `Rest stop: ${stop.type}, ${fmtDist(stop.at_m)} along the ${chosen.label} route`,
-          ),
-        )
-      }
-    }
-
+    // Barriers stay DOM markers rather than a circle layer: they carry a glyph
+    // and an aria-label, and they are the one thing on this map that a user
+    // must not miss.
     for (const route of routes) {
-      if (route.status !== 'blocked') continue
+      if (route.status === 'ok') continue
       for (const blocker of route.blockers ?? []) {
         add(
           [blocker.lon, blocker.lat],
           markerElement(
             'marker--blocker',
-            '!',
+            '✕',
             `Barrier on the ${route.label} route — ${blocker.type}: ${blocker.description}`,
           ),
         )
@@ -329,21 +527,88 @@ export default function MapView({ routes, selected, origin, dest, onSelect }) {
     }
   }, [routes, selected, origin, dest, ready])
 
+  // --- controls ------------------------------------------------------------
+
+  const zoom = (delta) => {
+    const map = mapRef.current
+    if (!map) return
+    map.easeTo({ zoom: map.getZoom() + delta, duration: prefersReducedMotion() ? 0 : 200 })
+  }
+
+  const drawn = routes.filter((r) => r.geometry?.length > 1)
+  const chosen = routes.find((r) => r.id === selected)
+  const summary = drawn.length
+    ? `Map showing ${drawn.length} route${drawn.length === 1 ? '' : 's'}: ${drawn
+        .map((r) => `${r.label} as a ${styleFor(r.id).pattern} line`)
+        .join(', ')}.${chosen ? ` ${chosen.label} is selected.` : ''} Every route is described in full in the list beside this map.`
+    : 'Map of the area. No routes are drawn yet.'
+
   return (
+    // §4.10 asks for role="img" on the container. It cannot go here, and this
+    // is not a shortcut: role="img" declares the element a single graphic whose
+    // contents are not exposed, so nesting the zoom buttons inside it is
+    // `nested-interactive` — a serious WCAG 4.1.2 failure, which axe caught.
+    // It cannot go on .map__canvas either, because MapLibre injects its own
+    // attribution button in there. The summary therefore reaches assistive
+    // technology through the labelled region plus the visually-hidden
+    // description below, which conveys the same sentence without lying about
+    // what the element is.
     <section className="map" aria-label="Map of the suggested routes">
       <div className="map__canvas" ref={containerRef} />
+
       {failed && (
         <div className="map__fallback">
           <p>
-            The map could not load. Every route is described in full in the list below — nothing
-            is missing from it.
+            The map could not load. Every route is described in full in the list beside it —
+            nothing is missing from it.
           </p>
         </div>
       )}
-      <p className="visually-hidden">
-        This map is a visual summary. The same information, in words, is in the route list that
-        follows it.
-      </p>
+
+      {/* Legend, bottom-left. Hidden below 900px, where the rail is the legend. */}
+      {drawn.length > 0 && (
+        <div className="legend" aria-hidden="true">
+          {drawn.map((route) => {
+            const style = styleFor(route.id)
+            return (
+              <p
+                key={route.id}
+                className={route.id === selected ? 'legend__row is-selected' : 'legend__row'}
+              >
+                {/* One property, not `background` plus `backgroundImage`.
+                    Setting both — even with one undefined — makes React warn
+                    about mixing shorthand and longhand, and swatchBackground
+                    already returns whichever of the two this route needs. */}
+                <span
+                  className="legend__line"
+                  style={{ background: swatchBackground(route.id, theme) }}
+                />
+                {route.label} <span className="legend__pattern">{style.pattern}</span>
+              </p>
+            )
+          })}
+        </div>
+      )}
+
+      {/* Last in the DOM inside the stage, and the stage is after the panel, so
+          a keyboard user reaching the routes never traverses zoom buttons
+          first (§9). */}
+      <div className="map__controls">
+        <button type="button" className="map__ctrl" onClick={() => zoom(1)}>
+          <span aria-hidden="true">+</span>
+          <span className="visually-hidden">Zoom in</span>
+        </button>
+        <button type="button" className="map__ctrl" onClick={() => zoom(-1)}>
+          <span aria-hidden="true">−</span>
+          <span className="visually-hidden">Zoom out</span>
+        </button>
+        <button type="button" className="map__ctrl" onClick={fit}>
+          <span aria-hidden="true">⌖</span>
+          <span className="visually-hidden">Recentre on the selected route</span>
+        </button>
+      </div>
+
+      <p className="visually-hidden">{summary}</p>
     </section>
   )
 }

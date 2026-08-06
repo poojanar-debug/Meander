@@ -1,0 +1,151 @@
+name: ci
+
+# There was no CI on `main` at all, so nothing checked this pull request. This
+# is the smallest workflow that makes the project's own claims verifiable
+# rather than asserted — the standard CONTRIBUTING.md sets for everything else
+# here.
+#
+# A larger version of this file exists on the `feat/launch` branch, with jobs
+# for the service worker, the headless-browser gates and the CloudFormation
+# templates. None of those things exist on this branch, so none of them are
+# checked here; when that branch lands, its file supersedes this one.
+
+# `push` is scoped to main rather than to '**', and that is the whole of the
+# de-duplication. With `push: ['**']` alongside `pull_request`, every commit on
+# a branch with an open PR ran the whole suite twice — verified on 6ad38c8,
+# which produced one `push` run and one `pull_request` run of five jobs each.
+# The concurrency group did not collapse them because the two events carry
+# different refs: `refs/heads/<branch>` against `refs/pull/<n>/merge`.
+#
+# Scoping to main also tests the better commit. A `pull_request` run builds the
+# branch already merged into its base, which is the thing that will actually
+# land; a `push` run builds the branch head in isolation and can pass while the
+# merge is broken.
+#
+# The trade is that a branch with no open PR gets no CI. That is the usual
+# arrangement, and CONTRIBUTING.md already asks for the suite to be run before
+# every commit.
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# Keyed on the PR number where there is one, so all of a pull request's runs
+# share a group and a new push cancels the run still in flight. Falling back to
+# the ref keeps pushes to main grouped per branch.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+
+  backend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: '3.13' }
+
+      # requirements-dev.txt, not requirements.txt. The latter pulls 2.5 GB of
+      # torch so that two CLIP tests can un-skip, and it is the *further*
+      # environment from production, which has no torch either. Testing against
+      # the deploy set means the suite exercises the same import graph the
+      # deployed service has.
+      - run: python -m pip install -r backend/requirements-dev.txt
+
+      - name: Lint
+        run: python -m ruff check backend/ scripts/
+
+      # No .env exists in CI — it is gitignored — so no API key is present and
+      # every upstream call is served from a committed fixture. That is the
+      # condition the suite is designed for, and it is why the token-absence
+      # test passes here while failing on a developer's machine that has one
+      # (BLOCKED.md #3).
+      - name: Tests
+        run: python -m pytest backend/tests
+
+  suite-opens-no-sockets:
+    # conftest.py blocks sockets and a meta-test proves the guard is active, so
+    # this is a second line of defence: if the guard were ever removed, the
+    # suite would still pass on a machine with a network and would silently
+    # start depending on it. Running with no network at all makes that
+    # impossible to miss.
+    #
+    # The interpreter is resolved before sudo, because sudo's PATH is not the
+    # runner's and a bare `python` would be a different one without the
+    # dependencies installed.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: '3.13' }
+      - run: python -m pip install -r backend/requirements-dev.txt
+      - run: sudo unshare -n "$(command -v python)" -m pytest backend/tests -q
+
+  deploy-image-is-torch-free:
+    # The guarantee the whole 512 MB deployment rests on, checked against the
+    # real requirements file rather than by reading it. Adding torch to
+    # requirements-deploy.txt would OOM the instance at import time.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: '3.13' }
+      - run: python -m pip install -r backend/requirements-deploy.txt
+      - name: torch, open_clip and torchvision must all be absent
+        run: |
+          python - <<'PY'
+          import importlib.util as u
+          absent = {m: u.find_spec(m) is None for m in ("torch", "open_clip", "torchvision")}
+          print(absent)
+          assert all(absent.values()), f"a deploy dependency pulled in {absent}"
+          import backend.main   # must import cleanly with none of them present
+          print("backend.main imports without torch")
+          PY
+
+  frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: '22', cache: npm, cache-dependency-path: frontend/package-lock.json }
+      - run: npm ci
+        working-directory: frontend
+
+      # TZ is pinned because the solar tests assert against UTC instants. A
+      # runner in another zone would not make them wrong, but it would make a
+      # failure read as a maths bug rather than as a clock difference.
+      - name: Tests
+        run: npm test
+        working-directory: frontend
+        env:
+          TZ: UTC
+
+      - run: npm run build
+        working-directory: frontend
+
+  no-hard-coded-colour:
+    # DESIGN-HANDOFF §2 requires every colour to be declared once, in the two
+    # :root blocks. That is a checkable property, so it is checked rather than
+    # trusted — a stray hex in a component rule is exactly the kind of thing
+    # that survives review and then breaks dark mode.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: No hex outside the token blocks
+        run: |
+          set -euo pipefail
+          offenders=$(awk '
+            /^:root \{|^\[data-theme=.dark.\] \{/ { inblock = 1 }
+            inblock && /^\}/ { inblock = 0; next }
+            !inblock && /#[0-9a-fA-F]{3,8}\b/ { print FILENAME ":" NR ": " $0 }
+          ' frontend/src/styles.css)
+          if [ -n "$offenders" ]; then
+            echo "$offenders" >&2
+            echo "Hard-coded colour outside the :root blocks. Add a token instead." >&2
+            exit 1
+          fi
+          echo "every colour is declared in the token blocks"

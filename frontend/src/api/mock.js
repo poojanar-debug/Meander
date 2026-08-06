@@ -63,10 +63,68 @@ function loop(origin, radiusM, lobes, points = 60) {
   return out
 }
 
+/** Great-circle length of a [lon, lat] polyline, in metres. */
+function lengthOf(geometry) {
+  const R = 6371000
+  const rad = Math.PI / 180
+  let total = 0
+  for (let i = 1; i < geometry.length; i += 1) {
+    const [lon1, lat1] = geometry[i - 1]
+    const [lon2, lat2] = geometry[i]
+    const dLat = (lat2 - lat1) * rad
+    const dLon = (lon2 - lon1) * rad
+    const h =
+      Math.sin(dLat / 2) ** 2 +
+      Math.sin(dLon / 2) ** 2 * Math.cos(lat1 * rad) * Math.cos(lat2 * rad)
+    total += 2 * R * Math.asin(Math.min(1, Math.sqrt(h)))
+  }
+  return total
+}
+
 function pointAt(geometry, fraction) {
   const idx = Math.min(geometry.length - 1, Math.floor(geometry.length * fraction))
   const [lon, lat] = geometry[idx]
   return { lat, lon }
+}
+
+/**
+ * A plausible turn list spanning the whole geometry.
+ *
+ * The real backend passes GraphHopper's instruction array straight through;
+ * this mirrors its shape so the step list, the map highlight and the in-step
+ * barrier placement can all be exercised with no backend at all. The intervals
+ * tile the point array end to end with no gaps and no overlaps, which is the
+ * property the frontend relies on to map a step back onto a stretch of line.
+ */
+function steps(geometry, distanceM, durationMin, streets) {
+  const n = geometry.length
+  if (n < 2) return []
+  const count = Math.max(2, Math.min(streets.length, Math.floor(n / 5)))
+  const out = []
+  for (let i = 0; i < count; i += 1) {
+    const start = Math.floor((i * (n - 1)) / count)
+    const end = Math.floor(((i + 1) * (n - 1)) / count)
+    const share = (end - start) / (n - 1)
+    const turn = i === 0 ? 'Continue' : ['Turn left', 'Turn right', 'Keep left', 'Bear right'][i % 4]
+    const street = streets[i % streets.length]
+    out.push({
+      text: `${turn} onto ${street}`,
+      distance_m: Math.round(distanceM * share),
+      duration_min: Number((durationMin * share).toFixed(2)),
+      street_name: street,
+      sign: i === 0 ? 0 : 2,
+      interval: [start, end],
+    })
+  }
+  out.push({
+    text: 'Arrive at your destination',
+    distance_m: 0,
+    duration_min: 0,
+    street_name: null,
+    sign: 4,
+    interval: [n - 1, n - 1],
+  })
+  return out
 }
 
 function buildRoutes(req) {
@@ -86,18 +144,32 @@ function buildRoutes(req) {
     ? loop(origin, 380 * scale, 0)
     : polyline(origin, 22, 2100 * scale, -0.09)
 
+  // Distances are measured from the drawn geometry rather than declared
+  // separately. When they disagreed, the rail said 1.4 km and follow mode's
+  // progress said 2.6 km for the same walk — real routing data never does that,
+  // so the mock should not either.
+  const fastestM = Math.round(lengthOf(fastestGeom))
+  const natureM = Math.round(lengthOf(natureGeom))
+  const accessibleM = Math.round(lengthOf(accessibleGeom))
+
   const fastest = {
     id: 'fastest',
     label: 'Fastest',
     status: 'ok',
     geometry: fastestGeom,
     duration_min: Math.round(18 * scale),
-    distance_m: Math.round(1450 * scale),
+    distance_m: fastestM,
     mode,
     scores: { nature: 0.31, air: 0.62, shade: 0.2 },
     scoring_method: 'clip',
     confidence: 0.88,
     rest_stops: [{ ...pointAt(fastestGeom, 0.12), type: 'bench', at_m: 180 }],
+    steps: steps(fastestGeom, fastestM, 18 * scale, [
+      'Galle Road',
+      'Chatham Street',
+      'York Street',
+      'Main Street',
+    ]),
     blockers: [],
     narration: null,
     synthetic_upstream: false,
@@ -111,7 +183,7 @@ function buildRoutes(req) {
     status: 'ok',
     geometry: natureGeom,
     duration_min: Math.round(26 * scale),
-    distance_m: Math.round(2080 * scale),
+    distance_m: natureM,
     mode,
     scores: { nature: 0.79, air: 0.71, shade: 0.58 },
     scoring_method: 'clip',
@@ -121,7 +193,23 @@ function buildRoutes(req) {
       { ...pointAt(natureGeom, 0.46), type: 'drinking water', at_m: 910 },
       { ...pointAt(natureGeom, 0.78), type: 'bench', at_m: 1580 },
     ],
-    blockers: [],
+    steps: steps(natureGeom, natureM, 26 * scale, [
+      'Green Path',
+      'Lake Walk',
+      'Park Lane',
+      'Cinnamon Gardens',
+    ]),
+    // A barrier on a route that is still walkable. The backend reports
+    // accessibility findings on every preset, not only `accessible` — someone
+    // on foot may well take a route with a kerb on it and should still be told
+    // it is there. This is what follow mode's 200 m proximity alert is for.
+    blockers: [
+      {
+        type: 'kerb',
+        ...pointAt(natureGeom, 0.55),
+        description: 'Dropped kerb missing where the path crosses the service road.',
+      },
+    ],
     narration: null,
     synthetic_upstream: false,
     confidence_note: 'Accessibility data covers 72% of this route.',
@@ -136,12 +224,26 @@ function buildRoutes(req) {
     status: 'blocked',
     geometry: accessibleGeom,
     duration_min: Math.round(22 * scale),
-    distance_m: Math.round(1720 * scale),
+    distance_m: accessibleM,
     mode,
-    scores: { nature: 0.44, air: 0.65, shade: 0.31 },
+    // `shade: null` is deliberate and is the only fixture that exercises it.
+    // A null score means "we did not measure this"; a 0 means "we measured it
+    // and it is zero". They are different statements and the UI must never
+    // render them alike — null gets a hatched track and the words "not
+    // measured", 0 gets a real, empty bar. Without a null anywhere in the mock
+    // that branch was never seen.
+    scores: { nature: 0.44, air: 0.65, shade: null },
     scoring_method: 'geometry_only',
     confidence: 0.41,
     rest_stops: [{ ...pointAt(accessibleGeom, 0.3), type: 'bench', at_m: 520 }],
+    // Both blockers below fall inside one of these steps, which is what
+    // exercises the in-step barrier placement — the point of the feature.
+    steps: steps(accessibleGeom, accessibleM, 22 * scale, [
+      'Canal Walk',
+      'Green Path',
+      'Station Road',
+      'Beach Drive',
+    ]),
     blockers: [
       {
         type: 'steps',

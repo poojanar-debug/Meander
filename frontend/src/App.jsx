@@ -1,12 +1,24 @@
-import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState } from 'react'
 
 import { buildRouteRequest, fetchRoutes } from './api/client.js'
-import Controls from './components/Controls.jsx'
-import Header from './components/Header.jsx'
+import FirstRun from './components/FirstRun.jsx'
+import About from './components/About.jsx'
+import DaylightGuard from './components/DaylightGuard.jsx'
+import DepartureStrip from './components/DepartureStrip.jsx'
+import FollowMode from './components/FollowMode.jsx'
 import MapView from './components/MapView.jsx'
-import RouteList from './components/RouteList.jsx'
+import RouteDetail from './components/RouteDetail.jsx'
+import RouteRail from './components/RouteRail.jsx'
+import StepList from './components/StepList.jsx'
+import Ribbon from './components/Ribbon.jsx'
 import StatusBanner from './components/StatusBanner.jsx'
+import Topbar from './components/Topbar.jsx'
+import TripBar from './components/TripBar.jsx'
 import { announceRoutes, announceSelection, effectiveMode } from './lib/format.js'
+import { applyTheme, initialTheme, readStoredTheme, storeTheme, systemTheme } from './lib/theme.js'
+
+const prefersReducedMotion = () =>
+  window.matchMedia?.('(prefers-reduced-motion: reduce)').matches === true
 
 const MIN_MINUTES = 20
 const MAX_MINUTES = 360
@@ -18,6 +30,7 @@ const DEBOUNCE = {
   objectives: 120,
   place: 0,
   retry: 0,
+  departure: 200,
 }
 
 const initialState = {
@@ -33,11 +46,26 @@ const initialState = {
   cache: null,
   reason: null,
   bestDeparture: null,
+  // When the user has picked a departure hour. Null means "now", which is
+  // what the backend assumes when depart_at is absent.
+  departAt: null,
   error: null,
   geoDenied: false,
+  // The id of the route being followed, or null. Deliberately outside
+  // withRefetch: entering follow mode must never re-request anything.
+  follow: null,
+  // A display preference, not an input to the route request. It deliberately
+  // does not live in `withRefetch`.
+  theme: 'light',
   // Bumped by anything that should trigger a refetch; the effect keys on it.
   nonce: 0,
   debounceMs: 0,
+}
+
+/** Resolved at mount rather than at module load, so the read is not a side
+ *  effect of importing this file. */
+function init(state) {
+  return { ...state, theme: initialTheme() }
 }
 
 function withRefetch(state, patch, debounceMs) {
@@ -75,6 +103,9 @@ function reducer(state, action) {
 
     case 'retry':
       return withRefetch(state, {}, DEBOUNCE.retry)
+
+    case 'departAt':
+      return withRefetch(state, { departAt: action.value }, DEBOUNCE.departure)
 
     case 'locating':
       return { ...state, phase: 'locating', geoDenied: false }
@@ -132,16 +163,31 @@ function reducer(state, action) {
     case 'select':
       return { ...state, selected: action.value }
 
+    // Not routed through withRefetch: changing the theme must never re-request
+    // routes. It is a paint change and nothing else.
+    case 'theme':
+      return { ...state, theme: action.value }
+
+    // Follow mode reads geometry the app already has. It does not fetch, and it
+    // must not run through the nonce effect.
+    case 'follow':
+      return { ...state, follow: action.value }
+
     default:
       return state
   }
 }
 
 export default function App() {
-  const [state, dispatch] = useReducer(reducer, initialState)
+  const [state, dispatch] = useReducer(reducer, initialState, init)
   const [announcement, setAnnouncement] = useState('')
+  // Which stretch of the selected route the map should emphasise, from the step
+  // under the cursor. Local state, not reducer state: it changes on every
+  // mousemove across a list and has no business triggering the fetch effect.
+  const [highlight, setHighlight] = useState(null)
   const abortRef = useRef(null)
   const announceTimer = useRef(null)
+  const aboutRef = useRef(null)
 
   const mode = useMemo(
     () => effectiveMode(state.mode, state.minutes),
@@ -177,6 +223,7 @@ export default function App() {
             minutes: state.minutes,
             mode: state.mode,
             objectives: state.objectives,
+            departAt: state.departAt,
           }),
           {
             signal: controller.signal,
@@ -211,6 +258,40 @@ export default function App() {
   }, [state.nonce])
 
   useEffect(() => () => abortRef.current?.abort(), [])
+
+  // --- theme ---------------------------------------------------------------
+
+  // index.html already painted the right theme before React existed; this keeps
+  // the DOM in step once the user starts toggling.
+  //
+  // useLayoutEffect, not useEffect, and that is load-bearing. React runs every
+  // child's passive effect before the parent's, so MapView's theme effect ran
+  // *before* this one had flipped `data-theme` — it read the outgoing palette
+  // out of getComputedStyle and repainted the basemap in the colours we were
+  // leaving. Layout effects all run before any passive effect, so this now
+  // lands first and the map reads the palette it is switching to.
+  useLayoutEffect(() => {
+    applyTheme(state.theme)
+  }, [state.theme])
+
+  // Follow the system only while the user has expressed no view of their own.
+  // Someone who has explicitly chosen light should stay in light when their
+  // laptop flips to dark at sunset.
+  useEffect(() => {
+    if (readStoredTheme()) return undefined
+    const query = window.matchMedia?.('(prefers-color-scheme: dark)')
+    if (!query) return undefined
+    const onChange = () => {
+      if (!readStoredTheme()) dispatch({ type: 'theme', value: systemTheme() })
+    }
+    query.addEventListener('change', onChange)
+    return () => query.removeEventListener('change', onChange)
+  }, [])
+
+  const onTheme = useCallback((value) => {
+    storeTheme(value)
+    dispatch({ type: 'theme', value })
+  }, [])
 
   // --- handlers ------------------------------------------------------------
 
@@ -259,6 +340,27 @@ export default function App() {
   )
 
   const hasRoutes = state.routes.length > 0
+  const selectedRoute = state.routes.find((r) => r.id === state.selected) ?? null
+  const followRoute = state.follow
+    ? (state.routes.find((r) => r.id === state.follow) ?? null)
+    : null
+
+  // The first-run card replaces panel and stage entirely (§7). Gating on
+  // `origin` rather than on `routes` means the map is never created until there
+  // is somewhere to draw — and once created it is never unmounted, which is the
+  // single-MapLibre-instance rule the old build already held to.
+  const firstRun = !state.origin && state.phase !== 'locating' && !hasRoutes
+
+  // The About disclosure lives at the foot of a panel that scrolls, so the
+  // topbar button has to open it *and* bring it into view. Opening alone would
+  // look like nothing happened.
+  const onAbout = useCallback(() => {
+    const details = aboutRef.current
+    if (!details) return
+    details.open = true
+    details.scrollIntoView({ behavior: prefersReducedMotion() ? 'auto' : 'smooth', block: 'end' })
+    details.querySelector('summary')?.focus()
+  }, [])
 
   return (
     <div className="app">
@@ -271,74 +373,119 @@ export default function App() {
         {announcement}
       </p>
 
-      <Header />
+      <Topbar theme={state.theme} onTheme={onTheme} onAbout={onAbout} />
 
-      <main className="app__main">
-        <Controls
+      <Ribbon routes={state.routes} />
+
+      {firstRun ? (
+        <FirstRun
           minutes={state.minutes}
-          mode={state.mode}
-          effectiveMode={mode}
-          objectives={state.objectives}
           origin={state.origin}
-          dest={state.dest}
           locating={state.phase === 'locating'}
           geoDenied={state.geoDenied}
           onMinutes={(value) => dispatch({ type: 'minutes', value })}
-          onMode={(value) => dispatch({ type: 'mode', value })}
-          onToggleObjective={onToggleObjective}
           onOrigin={(value) => dispatch({ type: 'origin', value })}
-          onDest={(value) => dispatch({ type: 'dest', value })}
           onLocate={onLocate}
         />
-
-        <div className="app__results" id="results">
-          <StatusBanner
-            phase={state.phase}
-            progress={state.progress}
-            error={state.error}
-            routes={state.routes}
-            onRetry={() => dispatch({ type: 'retry' })}
-            onMoreTime={() =>
-              dispatch({ type: 'minutes', value: Math.min(MAX_MINUTES, state.minutes + 30) })
-            }
+      ) : (
+      <div className="layout">
+        <main className="panel">
+          <TripBar
+            minutes={state.minutes}
+            mode={state.mode}
+            effectiveMode={mode}
+            objectives={state.objectives}
+            theme={state.theme}
+            origin={state.origin}
+            dest={state.dest}
+            locating={state.phase === 'locating'}
+            geoDenied={state.geoDenied}
+            onMinutes={(value) => dispatch({ type: 'minutes', value })}
+            onMode={(value) => dispatch({ type: 'mode', value })}
+            onToggleObjective={onToggleObjective}
+            onOrigin={(value) => dispatch({ type: 'origin', value })}
+            onDest={(value) => dispatch({ type: 'dest', value })}
+            onLocate={onLocate}
           />
 
-          {state.reason && <p className="field__hint">{state.reason}</p>}
+          <DepartureStrip
+            bestDeparture={state.bestDeparture}
+            reason={state.reason}
+            origin={state.origin}
+            departAt={state.departAt}
+            onDepartAt={(value) => dispatch({ type: 'departAt', value })}
+          />
 
+          <div id="results">
+            <StatusBanner
+              phase={state.phase}
+              progress={state.progress}
+              error={state.error}
+              routes={state.routes}
+              onRetry={() => dispatch({ type: 'retry' })}
+              onMoreTime={() =>
+                dispatch({ type: 'minutes', value: Math.min(MAX_MINUTES, state.minutes + 30) })
+              }
+            />
+
+            {state.reason && !state.bestDeparture && (
+              <p className="field__hint">{state.reason}</p>
+            )}
+
+            <RouteRail
+              routes={state.routes}
+              selected={state.selected}
+              theme={state.theme}
+              loading={state.phase === 'loading'}
+              expected={state.objectives.length}
+              onSelect={onSelect}
+            />
+
+            <RouteDetail
+              route={selectedRoute}
+              theme={state.theme}
+              stepList={<StepList route={selectedRoute} onHighlight={setHighlight} />}
+              onStart={(id) => dispatch({ type: 'follow', value: id })}
+            >
+              <DaylightGuard
+                route={selectedRoute}
+                origin={state.origin}
+                departAt={state.departAt}
+                onMinutes={(value) => dispatch({ type: 'minutes', value })}
+                onDepartAt={(value) => dispatch({ type: 'departAt', value })}
+              />
+            </RouteDetail>
+          </div>
+
+          <div className="panel__spacer" aria-hidden="true" />
+
+          <About ref={aboutRef} cache={state.cache} />
+        </main>
+
+        <div className="stage">
           {hasRoutes && (
             <MapView
               routes={state.routes}
               selected={state.selected}
               origin={state.origin}
               dest={state.dest}
+              theme={state.theme}
+              highlight={highlight}
               onSelect={onSelect}
             />
           )}
 
-          <RouteList routes={state.routes} selected={state.selected} onSelect={onSelect} />
-
-          {state.cache && (
-            <p className="field__hint">
-              {state.cache.segments_scored.toLocaleString()} map segments scored,{' '}
-              {Math.round((state.cache.hit_rate ?? 0) * 100)}% served from cache.
-            </p>
+          {/* The sheet is not a modal: the map underneath stays reachable. */}
+          {followRoute && (
+            <FollowMode
+              route={followRoute}
+              onExit={() => dispatch({ type: 'follow', value: null })}
+              onAnnounce={announce}
+            />
           )}
         </div>
-      </main>
-
-      <footer className="footer">
-        <p>
-          Map data © <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>{' '}
-          contributors · tiles by <a href="https://openfreemap.org/">OpenFreeMap</a> · imagery
-          from <a href="https://www.mapillary.com/">Mapillary</a> (CC BY-SA) · weather and air
-          quality from <a href="https://open-meteo.com/">Open-Meteo</a>.
-        </p>
-        <p>
-          Accessibility answers are only as good as OpenStreetMap tagging where you are. Every
-          route says how much of it was actually verified. Where it says the data is unverified,
-          it means it.
-        </p>
-      </footer>
+      </div>
+      )}
     </div>
   )
 }

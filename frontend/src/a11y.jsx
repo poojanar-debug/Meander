@@ -43,10 +43,19 @@ async function setOrigin() {
   return true
 }
 
+// `.card` is the pre-redesign row, `button.route` the rail row that replaces it
+// in phase 4. Matching both means this harness keeps working across the change
+// rather than silently auditing an empty page — which would pass.
+//
+// `button.route` and not `.route`: the loading skeletons carry the same class
+// on a <div>, so the looser selector was satisfied by three placeholders and
+// the audit ran against a half-streamed result.
+const ROW_SELECTOR = 'button.route, .card'
+
 async function waitForRoutes() {
   for (let i = 0; i < 120; i += 1) {
     await sleep(250)
-    if (document.querySelectorAll('.card').length >= 3) return true
+    if (document.querySelectorAll(ROW_SELECTOR).length >= 3) return true
   }
   return false
 }
@@ -82,7 +91,7 @@ async function run() {
 
   window.__axeResults = {
     routesRendered: ready,
-    cards: document.querySelectorAll('.card').length,
+    rows: document.querySelectorAll(ROW_SELECTOR).length,
     rulesPassed: everything.passes.length,
     violations: summarise(conformance.violations),
     bestPracticeViolations: summarise(

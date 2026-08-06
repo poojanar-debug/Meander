@@ -285,6 +285,54 @@ async def test_parsed_route_carries_path_details_for_the_accessibility_engine() 
 
 
 @pytest.mark.asyncio
+async def test_parsed_route_carries_turn_instructions() -> None:
+    """The step list is only as honest as what the router actually said."""
+    route = await route_fastest(COLOMBO, VIHARA, 25, "foot")
+
+    assert route.steps, "the router returned instructions and they must survive parsing"
+    first = route.steps[0]
+    assert first.text and isinstance(first.text, str)
+    assert first.distance_m >= 0
+    assert first.duration_min >= 0
+    # The interval indexes into the point array, which is what lets the frontend
+    # highlight the matching stretch of line and place a barrier inside the step
+    # a walker would meet it on.
+    assert len(first.interval) == 2
+    assert 0 <= first.interval[0] <= first.interval[1] < len(route.points)
+
+
+def test_no_instructions_is_an_empty_list_not_an_invention() -> None:
+    """A router that describes no turns must not have turns made up for it.
+
+    This is the same rule as an untagged path being UNKNOWN rather than
+    accessible: absence of data is not permission to fill it in.
+    """
+    from backend.routing import _parse_instructions
+
+    assert _parse_instructions(None) == []
+    assert _parse_instructions([]) == []
+    assert _parse_instructions("not a list") == []
+    # Entries with no usable text are dropped rather than rendered blank.
+    assert _parse_instructions([{"distance": 10}, {"text": "   "}]) == []
+
+
+def test_malformed_instruction_entries_degrade_rather_than_raise() -> None:
+    from backend.routing import _parse_instructions
+
+    steps = _parse_instructions(
+        [
+            {"text": "Turn left", "distance": "nope", "time": None, "interval": "bad"},
+            {"text": "Continue", "distance": 120.5, "time": 90000, "interval": [3, 9]},
+        ]
+    )
+    assert len(steps) == 2
+    assert steps[0].interval == (0, 0)
+    assert steps[1].interval == (3, 9)
+    assert steps[1].distance_m == 120.5
+    assert steps[1].duration_min == pytest.approx(1.5)
+
+
+@pytest.mark.asyncio
 async def test_parsed_route_carries_elevation() -> None:
     route = await route_fastest(COLOMBO, VIHARA, 25, "foot")
 

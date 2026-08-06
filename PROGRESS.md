@@ -891,3 +891,355 @@ route available near you, but noticeably shorter than the time you asked for"*
 rather than silently handing over an 18-minute walk.
 
 **Live API calls:** GraphHopper hosted 0 (self-hosted is unmetered), Nominatim 3.
+
+---
+
+## Redesign phase 2 — Layout shell · 2026-08-06
+
+**Done**
+
+- The §3 two-column grid: 56px sticky topbar, full-width ribbon, then
+  `panel minmax(360px,420px)` + `stage minmax(0,1fr)`. The panel scrolls; the
+  map does not.
+- `Header.jsx` → `Topbar.jsx`. The header paragraph became a one-line tagline.
+- The entire footer became the §4.9 `<details>` at the foot of the panel, with
+  every sentence it used to carry, in the handoff's order.
+- `Ribbon.jsx` — the §4.2 demo-data warning.
+
+**Verified**
+
+- 0px horizontal overflow at 320, 390 and 1280.
+- The map fills the stage exactly — an 860×627 map in an 860×627 column.
+- Topbar measures 56px; panel `overflow-y` computes to `auto`.
+
+**Decisions**
+
+- **`minmax(0, 1fr)` and not `1fr`,** as the handoff insists. A plain `1fr`
+  resolves its minimum to min-content, the map's SVG reports a min-content width
+  wider than its column, and the grid ends up ~12px past the viewport with a
+  horizontal scrollbar. This is not theoretical — the same trap caught the trip
+  bar in phase 3, where a long place name refused to shrink and the ellipsis
+  never applied.
+- **No profile button in the topbar**, though §4.1 specifies one. The sheet it
+  opens is §6.5, which is deferred. A control that opens nothing reads as broken
+  rather than as unbuilt. The place for it is recorded in a comment.
+- Collapsing the footer is not deleting it. The OpenStreetMap tagging caveat
+  leads the disclosure because it is the sentence a reader most needs and least
+  expects, and it is the reason the project exists.
+
+**Deviations:** none.
+
+---
+
+## Redesign phase 3 — Trip bar · 2026-08-06
+
+**Done**
+
+- `Controls.jsx` → `TripBar.jsx` + `TripDrawer.jsx` + `ObjectiveChips.jsx`
+  (§4.3–4.5). Four segments, each showing its current value, each opening one
+  inline drawer; opening one closes the others.
+- `TimeDial.jsx` gained the §4.4 readout and the four preset pills. The native
+  `<input type="range">` and its `aria-valuetext` are unchanged.
+- `FirstRun.jsx` — the §7 empty state.
+- The a11y harness now matches `.route, .card` so it survives phase 4's rename.
+
+**Verified**
+
+- **The fetch model is byte-for-byte unchanged.** Diffed `App.jsx` against the
+  pre-redesign commit filtering for `DEBOUNCE`, `nonce`, `withRefetch`, `abort`
+  and every refetching action: the only hits are two added comments.
+- One drawer open at a time, `aria-expanded` and `hidden` agreeing, checked in
+  the browser rather than by inspection.
+- axe-core WCAG 2.0/2.1 A+AA: **0 violations, 0 best-practice violations.**
+
+**Decisions**
+
+- **Drawers render inline, not as an overlay.** An overlay would float over the
+  map, and below 900px — where the map sits *above* the panel — it would cover
+  the answer the user is adjusting.
+- **`hidden` rather than unmounting.** A half-typed place name survives closing
+  the drawer, and `aria-controls` always points at an element that exists.
+- **Presets dispatch the same `minutes` action the slider does.** No second code
+  path, so no second debounce to keep in step.
+- The first-run gate keys on `origin`, not on `routes`. MapLibre is therefore
+  not constructed until there is somewhere to draw, and once constructed it is
+  never unmounted — which is the one-instance rule the StrictMode fix depends on.
+
+**Deviations**
+
+- §7 is built here rather than in phase 2. It shares the preset pills with
+  §4.4, and building it alongside them avoided writing the component twice.
+
+**Found while working**
+
+Two best-practice regressions, both from the topbar rewrite and both caught by
+running axe rather than by reading the diff: the wordmark had become a `<span>`,
+leaving the page with no `<h1>`, and the ribbon sat outside every landmark.
+Fixed in the same phase.
+
+16 `color-contrast` checks report *incomplete* — axe cannot measure them. All
+are inside the old `.card` and all are on pairings §2 pre-verifies. Phase 4
+deletes that component; re-checked there rather than carried forward.
+
+**Live API calls:** none.
+
+---
+
+## Redesign phase 4 — Rail and detail · 2026-08-06
+
+The core change. `RouteList` + `RouteCard` → `RouteRail` + `RouteRow` +
+`RouteDetail`, plus `VerificationMeter` and `verificationTier()` (§4.6–4.8).
+
+**Done**
+
+- Uniform-height comparison rows for every route; full detail for the selected
+  route only.
+- The four-segment verification meter, with the server's confidence sentence
+  still rendering verbatim in the detail panel underneath it.
+- `verificationTier()`, `restStopSummary()`, `durationParts()`, `waysBack()` in
+  `lib/format.js`.
+
+**Verified**
+
+- Every row is a single `<button>` with **zero** `p`/`ul`/`ol`/`dl`/`div`
+  descendants, checked in the browser rather than by reading the JSX.
+- All three rows exactly **159px**; all nine score tracks at the same **117px**
+  offset within their row.
+- A `null` score and a `0` score render differently.
+- axe-core: 0 violations, 0 best-practice, 41 rules passed.
+
+**Decisions**
+
+- **The accessible name is the visible content, not an `aria-label`.** An
+  aria-label would have produced the tidy four-fact name §9 describes and
+  silently discarded the three score percentages — the numbers the rail exists
+  to let people compare. The visible text is instead written so that reading it
+  in order makes sense, with visually-hidden connectives where the terse visual
+  form would not.
+- **Uniform height needed a fix worth writing down.** "not measured" is ~78px at
+  `--t-micro`; a score column is 114px at the panel's widest and ~98px at its
+  narrowest, so it cannot share a line with its label. It wraps, and a wrapped
+  head made that row taller than the others — destroying the alignment the
+  component exists for. Shrinking the type was tried and fails at 360px. The fix
+  reserves the second line across the **whole rail** rather than on the row that
+  needs it (`.rail:has(.score__none) .score__head { min-height: 3em }`), so
+  every row grows together. With nothing unmeasured, nothing matches and the
+  head stays the single tight row §4.6 specifies.
+- **No `Share` or `Save` action**, though §4.8 lists them. `Save` is §6.8, which
+  is deferred. `Share` has no specification anywhere, and the app holds no state
+  in the URL, so a share link would point at the app's front door and say
+  nothing about the route. Same reasoning as the topbar profile button: a
+  control that does nothing reads as broken.
+
+**Found while working**
+
+The mock had no `null` score anywhere, so the branch that distinguishes "not
+measured" from "zero" had never once been rendered. The Accessible fixture now
+carries `shade: null`. Separately, the a11y harness was matching `.route`, which
+the loading skeletons also carry — three placeholders satisfied it and the audit
+ran against a half-streamed result. It now matches `button.route`.
+
+---
+
+## Redesign phase 5 — Map · 2026-08-06
+
+**Done**
+
+- Basemap recoloured to the §2.4 palette in place, per theme.
+- `--raised` casing at line-width + 6 under the selected line; unselected routes
+  at 5px / 0.45 opacity.
+- Rest stops as a circle layer on the selected route; barriers as ✕ markers.
+- Bottom-left legend, hidden below 900px.
+- 44px controls, last in the tab order.
+
+**Verified**
+
+- Light: background `#e9e5d8`, water `#c6dae4`, park `#cfe0c9`.
+  Dark: `#16221b`, `#152a33`, `#1d3527`. Route lines and casings switch with them.
+- axe-core: **0 violations, 0 best-practice** at light desktop, dark desktop and
+  390px. 0px horizontal overflow at 390px.
+
+**Two bugs found by running it, not by reading it**
+
+1. **The map drew streets and nothing else.** Route layers were gated on
+   MapLibre's `load` event, and with the current upstream positron style that
+   event never fires — `areTilesLoaded()` is true and tiles paint, but
+   `isStyleLoaded()` stays false forever. Every route layer was waiting on
+   something that was never coming. `load` and `idle` are both wired now, plus a
+   250 ms poll on `getStyle().layers.length`, which is the real precondition for
+   `addSource`. Readiness is idempotent so whichever arrives first wins.
+2. **The map repainted in the palette it was leaving.** React runs every child's
+   passive effect before the parent's, so MapView read `--map-land` and friends
+   out of `getComputedStyle` *before* App had written the new `data-theme`.
+   Applying the theme in a `useLayoutEffect` fixes the ordering, because all
+   layout effects run before any passive effect.
+
+**Deviations**
+
+- **`role="img"` is not on the map container**, though §4.10 asks for it. It
+  declares an element a single graphic whose contents are not exposed, so
+  nesting the zoom buttons inside it is `nested-interactive` — a serious WCAG
+  4.1.2 failure, which axe caught. It cannot move to the canvas wrapper either,
+  because MapLibre injects its own attribution button there. The summary reaches
+  assistive technology through a labelled region plus a visually-hidden
+  description carrying the same sentence.
+
+**Live API calls:** none — OpenFreeMap basemap tiles only, which the app already
+loaded before this work.
+
+---
+
+## Redesign phase 6 — When to go · 2026-08-06
+
+Best departure and the daylight window, built together because they share the
+strip (§6.2, §6.3).
+
+**Done**
+
+- `DepartureStrip.jsx` — the headline, the daylight line, and six hour chips.
+  `payload.best_departure` has been in the API response since the backend was
+  written and the UI ignored it.
+- `lib/sun.js` — NOAA short-form solar position, computed in the browser. No
+  network call: asking a service what time it gets dark would mean sending it
+  the user's coordinates.
+- `DaylightGuard.jsx` — at most one warning and at most one action.
+- `vitest` added as a devDependency; 23 tests for the solar maths.
+
+**Two bugs the tests found**
+
+1. **A route crossing midnight produced no warning at all.** The first version
+   asked `end > sunset-of-the-day-the-end-falls-on`; for a walk from 23:30 to
+   00:30 that end lands on a day whose sunset is eighteen hours in its *future*,
+   so a walk entirely in darkness passed silently. Replaced with "how light is
+   it at this moment", which handles midnight without special-casing it.
+2. **The longitude correction had both signs inverted** — worth 5.3 hours at
+   Colombo, and *every one of the twenty-two tests still passed*. A longitude
+   error moves sunrise and sunset by the same amount, so day length stays
+   correct and only absolute times are wrong; the equator test compared lengths,
+   and London is at 0.13 E where the error is fifteen seconds. It took a real
+   route reporting "Daylight today: 16:44 – 05:08" to show it. There is now a
+   test at a far longitude, asserting a *property* — the midpoint of sunrise and
+   sunset is solar noon — rather than an almanac figure taken on trust.
+
+**Decisions**
+
+- **The daylight layer goes quiet when the viewer's timezone and the route's
+  longitude disagree.** Sun times are absolute instants and correct anywhere,
+  but `Intl` formats in the viewer's timezone, so a Colombo route read from
+  California shows Californian clock times for a Sri Lankan sunset. A place's
+  civil timezone cannot be derived from coordinates without a tz database;
+  solar offset can, and three hours of slack admits the genuinely wide zones
+  while excluding the other side of the world. Sentence and moon glyphs go
+  together — half a signal is worse than none.
+- The shorten action disappears once sunset has passed. Offering to finish
+  before a sunset that has been and gone is nonsense.
+
+---
+
+## Redesign phase 7 — Turn-by-turn steps · 2026-08-06
+
+**Done**
+
+- `routing.py` requests instructions and parses them; `models.py` gained a
+  `Step` model and a `steps` field; `main.py` passes them through.
+- `StepList.jsx` — a `<details>` in the detail panel, instructions written as
+  sentences, barriers rendered **inside the step** they fall on, and a map
+  `highlight` layer on hover or focus.
+
+**Deviations**
+
+- **`models.py` was touched, which the scope said not to.** There was no way
+  around it: `Route` is a Pydantic model, so a field that does not exist there
+  cannot reach the response however `routing.py` parses it. One `Step` model and
+  one field. `accessibility.py` is untouched and nothing here goes near the
+  §6.5 request-model work `models.py` was being kept clear for.
+- **No `Share` or `Save` action in the detail panel**, though §4.8 lists them.
+  Save is §6.8, deferred. Share has no specification and the app holds no state
+  in the URL, so a share link would point at the front door.
+
+**The fixture problem, which is the part worth reading**
+
+Turning on `instructions` changed the request body, and fixtures are keyed on a
+hash of that body — so **68 fixtures became unreachable in one commit** and the
+offline suite started missing every one. This is the same coupling recorded
+above as self-hosting defect 6. Resolved by starting the self-hosted server and
+re-recording (16 real recordings with real instruction arrays), teaching
+`make_synthetic_fixtures.py` to emit instructions, and deleting the orphans.
+
+Two more bugs found by the new tests: a non-numeric `distance` threw and took
+the whole route with it, and the end-to-end assertion revealed that the
+COLOMBO→VIHARA scenario runs on a synthetic fixture that had no instructions at
+all — so the feature would have shipped with no offline test data despite a
+correct parser.
+
+---
+
+## Redesign phase 8 — Live follow mode · 2026-08-06
+
+**Done**
+
+- `lib/follow.js` — projection onto the line, progress, next turn, next rest
+  stop, barrier proximity, sustained off-route. 22 tests.
+- `FollowMode.jsx` — bottom sheet, barrier alert, off-route banner, wake lock,
+  one-tap exit.
+
+**Verified**
+
+- **The privacy claim was measured, not asserted.** Ten positions were fed
+  through follow mode with `fetch`, `XMLHttpRequest` and `sendBeacon` all
+  instrumented: **zero outbound requests of any kind**, and nothing carrying a
+  coordinate.
+- Barrier alert fires at 145 m on a walkable route with a recorded kerb,
+  `role="alert"`, naming type and description.
+- Off-route does **not** fire on a single distant reading, and does fire after a
+  continuous run past 15 s.
+- Exit is first in the DOM, first in the tab order, and takes focus on entry.
+- `Start this route` is disabled on a blocked route with the reason on
+  `aria-describedby`, and absent entirely when the router gave no instructions.
+
+**Decisions**
+
+- **Positions project onto the segment, not onto the nearest vertex.** On a long
+  straight stretch the nearest vertex can be 200 m away while the walker stands
+  exactly on the line; snapping would declare them lost. There is a test for it.
+- **Off-route needs a continuous run.** City GPS bounces off buildings by tens
+  of metres, and a 40 m threshold tested against one sample fires constantly on
+  a good walk and trains people to ignore it.
+- `barriersWithin` takes no notice of a route's status. Someone who read the
+  warning and chose to walk it anyway is the person who most needs telling when
+  the steps are 200 m ahead.
+
+**Two mock corrections found while testing**
+
+Route distances are now measured from the drawn geometry — they had been
+declared separately, so the rail said 1.4 km while follow mode said 2.6 km for
+the same walk. And the Nature route carries a recorded kerb, because without it
+nothing in the demo exercised the proximity alert: the only route with barriers
+was the one that cannot be started.
+
+---
+
+## Redesign — definition of done · 2026-08-06
+
+| Check | Result |
+|---|---|
+| Every §2 token declared once; no hard-coded hex outside the `:root` blocks | pass — `awk` check returns nothing |
+| Light and dark both ship; theme persists; defaults to `prefers-color-scheme` | pass |
+| axe-core 0 violations at light desktop, dark desktop, 390px | pass — 0 violations **and** 0 best-practice at all three, 42 rules passed |
+| Full keyboard pass in the §9 order with a visible focus ring | pass — skip link → topbar → trip bar → departure → rail → detail → about → map → **map controls last**; 3px ring |
+| No horizontal overflow at 320 / 390 / 768 / 1024 / 1440 / 1920 | pass — 0px at every width |
+| Fully usable with the map element removed from the DOM | pass — all three rows readable, selection, detail, scores, confidence sentence, rest stops and steps all work with `.map` deleted |
+| Greyscale: all three routes distinguishable | pass — solid / dashed / dotted, each named in words |
+| A `null` score and a `0` score render differently | pass — hatched track + "not measured" versus a real empty bar |
+| Backend tests | **394 passed, 0 failed** under CI conditions — verified in a clean torch-free virtualenv with no keys. On a machine with a `MAPILLARY_TOKEN` in `.env` one test fails; see BLOCKED.md #3 |
+| New tests cover instruction pass-through and the solar maths incl. polar day/night | pass — 5 backend, 45 frontend |
+| `prefers-reduced-motion` removes the animations | pass — the global rule collapses every transition to 0.001 ms |
+| No new runtime third-party requests | pass — vitest is a devDependency; the only runtime hosts are the ones the app already used |
+| Nothing new sent to the server; the live position never leaves the browser, and the UI says so | pass — measured at zero requests |
+| Sunrise/sunset renders nothing rather than guessing when it cannot be computed | pass |
+
+**Not built, as instructed:** §6.1 streaming choreography, §6.5 accessibility
+profile, §6.6 barrier detail popover, §6.8 saved places.
+
+**Live API calls this phase:** GraphHopper 16, all against the self-hosted
+server and therefore unmetered.

@@ -1,0 +1,15 @@
+# What CI and a contributor need to run the checks — and nothing more.
+#
+# This is requirements-deploy.txt plus the test tooling, deliberately NOT
+# requirements.txt. That file pulls 2.5 GB of torch so that two CLIP tests can
+# un-skip, and it is the *further* environment from production, which has no
+# torch either. Testing against the deploy set means the suite exercises the
+# same import graph the deployed service has.
+#
+# Install the full requirements.txt when you are working on scoring itself.
+
+-r requirements-deploy.txt
+
+pytest==8.3.4
+pytest-asyncio==0.25.2
+ruff==0.9.2
