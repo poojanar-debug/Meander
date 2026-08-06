@@ -8,10 +8,12 @@
   "scripts": {
     "dev": "vite",
     "dev:mock": "VITE_MOCK_API=1 vite",
-    "build": "npm run check:palette && npm run check:permalink && vite build",
+    "build": "npm run check:palette && npm run check:permalink && npm run check:offline && vite build",
     "preview": "vite preview",
     "check:palette": "node scripts/check-palette.mjs",
-    "check:permalink": "node scripts/check-permalink.mjs"
+    "check:permalink": "node scripts/check-permalink.mjs",
+    "check:offline": "node scripts/check-offline.mjs",
+    "icons": "node scripts/make-icons.mjs"
   },
   "dependencies": {
     "maplibre-gl": "^5.6.1",
