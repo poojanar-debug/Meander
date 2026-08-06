@@ -46,11 +46,20 @@ const fromJulian = (julian) => new Date((julian + 0.5 - J1970) * 86400000)
  */
 function crossing(date, lat, lon, altitude) {
   // Mean solar time, in whole days since 2000, corrected for longitude. The
-  // handoff's east-positive longitude is west-negative here, which is the
-  // convention the NOAA formulation uses.
+  // formulation counts longitude positive *west*, which is the opposite of the
+  // east-positive coordinates the rest of the app uses.
+  //
+  // Both signs below were inverted in the first version of this file, and the
+  // tests did not catch it: a longitude error shifts sunrise and sunset by the
+  // same amount, so day *length* stays right and only the absolute clock times
+  // are wrong. The equator test compared lengths and passed; London passed
+  // because its longitude is 0.13°, where the error is fifteen seconds. It took
+  // a Colombo route reporting "Daylight today: 16:44 – 05:08" to show it.
+  // There is now a test that pins absolute times at a longitude far from
+  // Greenwich.
   const west = -lon
-  const n = Math.round(toJulian(date) - J2000 - 0.0009 + west / 360)
-  const meanSolar = J2000 + 0.0009 - west / 360 + n
+  const n = Math.round(toJulian(date) - J2000 - 0.0009 - west / 360)
+  const meanSolar = J2000 + 0.0009 + west / 360 + n
 
   // Solar mean anomaly, and the equation of the centre that corrects the
   // circular-orbit assumption to the real ellipse.
@@ -120,6 +129,35 @@ export function sunTimes(date, lat, lon) {
   } catch {
     return null
   }
+}
+
+/**
+ * Whether a clock time for this longitude can honestly be printed on this
+ * browser's clock.
+ *
+ * Everything above works in absolute instants and is correct anywhere. Turning
+ * an instant into "18:24" is not: `Intl` formats in the *viewer's* timezone, and
+ * a viewer looking at a route in Colombo from California is shown Californian
+ * clock times for a Sri Lankan sunset. The demo made this obvious — the daylight
+ * line read "16:44 – 05:08", which is not a day.
+ *
+ * A place's civil timezone cannot be derived from coordinates without a tz
+ * database, which would be a large dependency for one line of copy. What *can*
+ * be derived is solar offset — longitude / 15 — and comparing that against the
+ * browser's own offset says whether the two are talking about the same clock.
+ * Three hours of slack covers the genuinely wide zones (China, Spain, Argentina)
+ * without admitting a viewer on the other side of the world.
+ *
+ * When they do not agree the caller renders nothing, which is this module's
+ * standing rule: an unknown is silence, not a guess. In the case the app is
+ * actually for — someone about to walk out of their own front door — the two
+ * always agree.
+ */
+export function canStateLocalTime(lon, when = new Date()) {
+  if (typeof lon !== 'number' || Number.isNaN(lon)) return false
+  const solarOffsetHours = lon / 15
+  const browserOffsetHours = -when.getTimezoneOffset() / 60
+  return Math.abs(solarOffsetHours - browserOffsetHours) <= 3
 }
 
 /** "05:58". 24-hour deliberately: the handoff's copy is 24-hour, and a walker

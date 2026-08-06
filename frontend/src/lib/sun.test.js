@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import {
+  canStateLocalTime,
   daylightGuard,
   daylightSentence,
   minutesToFinishBySunset,
@@ -21,6 +22,32 @@ describe('sunTimes', () => {
     expect(Math.abs(diffMin(times.sunrise, new Date('2026-03-20T06:01:00Z')))).toBeLessThan(5)
     expect(Math.abs(diffMin(times.sunset, new Date('2026-03-20T18:12:00Z')))).toBeLessThan(5)
   })
+
+  it('pins absolute times at a longitude far from Greenwich', () => {
+    // This test exists because the longitude correction had both its signs
+    // inverted and every other test still passed. A longitude error moves
+    // sunrise and sunset by the same amount, so day *length* stays correct and
+    // only absolute times are wrong — and nothing here checked an absolute time
+    // at a longitude where the error was visible. Colombo is 79.86 E, where the
+    // bug was worth 5.3 hours.
+    //
+    // The assertion is a property rather than an almanac value, so it does not
+    // depend on a published figure that cannot be verified offline: the
+    // midpoint of sunrise and sunset is solar noon, which for a given longitude
+    // is 12:00 UTC minus lon/15 hours, give or take the equation of time (at
+    // most ±16 minutes across the year).
+    const lat = 6.9271
+    const lon = 79.8612
+    const t = sunTimes(new Date('2026-03-20T06:00:00Z'), lat, lon)
+
+    expect(t.sunrise.valueOf()).toBeLessThan(t.sunset.valueOf())
+
+    const dayStart = Date.UTC(2026, 2, 20)
+    const midpointUtcHours = (t.sunrise.getTime() + t.sunset.getTime()) / 2 / 3600000 - dayStart / 3600000
+    const solarNoonUtcHours = 12 - lon / 15
+    expect(Math.abs(midpointUtcHours - solarNoonUtcHours)).toBeLessThan(20 / 60)
+  })
+
 
   it('matches published sunrise and sunset near the equator, where the day barely varies', () => {
     // Colombo (6.9271 N, 79.8612 E) — one of the app's demo locations.
@@ -197,5 +224,24 @@ describe('minutesToFinishBySunset', () => {
     expect(
       minutesToFinishBySunset(new Date('2026-03-20T19:00:00Z'), new Date('2026-03-20T18:12:00Z')),
     ).toBeNull()
+  })
+})
+
+describe('canStateLocalTime', () => {
+  // The suite runs under TZ=UTC, so the browser offset is 0 and the question
+  // becomes "is this longitude within three hours of Greenwich".
+  it('accepts a longitude in the viewer\'s own part of the world', () => {
+    expect(canStateLocalTime(-0.1278)).toBe(true) // London
+    expect(canStateLocalTime(4.9)).toBe(true) // Amsterdam
+  })
+
+  it('refuses a longitude half a world away, so no clock time is printed', () => {
+    expect(canStateLocalTime(79.8612)).toBe(false) // Colombo
+    expect(canStateLocalTime(-122.4194)).toBe(false) // San Francisco
+  })
+
+  it('refuses rather than guessing when there is no longitude', () => {
+    expect(canStateLocalTime(undefined)).toBe(false)
+    expect(canStateLocalTime(NaN)).toBe(false)
   })
 })
