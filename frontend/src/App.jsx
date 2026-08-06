@@ -4,7 +4,8 @@ import { buildRouteRequest, fetchRoutes } from './api/client.js'
 import FirstRun from './components/FirstRun.jsx'
 import About from './components/About.jsx'
 import MapView from './components/MapView.jsx'
-import RouteList from './components/RouteList.jsx'
+import RouteDetail from './components/RouteDetail.jsx'
+import RouteRail from './components/RouteRail.jsx'
 import Ribbon from './components/Ribbon.jsx'
 import StatusBanner from './components/StatusBanner.jsx'
 import Topbar from './components/Topbar.jsx'
@@ -308,6 +309,7 @@ export default function App() {
   )
 
   const hasRoutes = state.routes.length > 0
+  const selectedRoute = state.routes.find((r) => r.id === state.selected) ?? null
 
   // The first-run card replaces panel and stage entirely (§7). Gating on
   // `origin` rather than on `routes` means the map is never created until there
@@ -386,12 +388,16 @@ export default function App() {
 
             {state.reason && <p className="field__hint">{state.reason}</p>}
 
-            <RouteList
+            <RouteRail
               routes={state.routes}
               selected={state.selected}
               theme={state.theme}
+              loading={state.phase === 'loading'}
+              expected={state.objectives.length}
               onSelect={onSelect}
             />
+
+            <RouteDetail route={selectedRoute} theme={state.theme} />
           </div>
 
           <div className="panel__spacer" aria-hidden="true" />

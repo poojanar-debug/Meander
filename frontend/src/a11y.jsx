@@ -43,10 +43,14 @@ async function setOrigin() {
   return true
 }
 
-// `.card` is the pre-redesign row, `.route` the rail row that replaces it in
-// phase 4. Matching both means this harness keeps working across the change
+// `.card` is the pre-redesign row, `button.route` the rail row that replaces it
+// in phase 4. Matching both means this harness keeps working across the change
 // rather than silently auditing an empty page — which would pass.
-const ROW_SELECTOR = '.route, .card'
+//
+// `button.route` and not `.route`: the loading skeletons carry the same class
+// on a <div>, so the looser selector was satisfied by three placeholders and
+// the audit ran against a half-streamed result.
+const ROW_SELECTOR = 'button.route, .card'
 
 async function waitForRoutes() {
   for (let i = 0; i < 120; i += 1) {

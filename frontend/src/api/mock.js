@@ -138,7 +138,13 @@ function buildRoutes(req) {
     duration_min: Math.round(22 * scale),
     distance_m: Math.round(1720 * scale),
     mode,
-    scores: { nature: 0.44, air: 0.65, shade: 0.31 },
+    // `shade: null` is deliberate and is the only fixture that exercises it.
+    // A null score means "we did not measure this"; a 0 means "we measured it
+    // and it is zero". They are different statements and the UI must never
+    // render them alike — null gets a hatched track and the words "not
+    // measured", 0 gets a real, empty bar. Without a null anywhere in the mock
+    // that branch was never seen.
+    scores: { nature: 0.44, air: 0.65, shade: null },
     scoring_method: 'geometry_only',
     confidence: 0.41,
     rest_stops: [{ ...pointAt(accessibleGeom, 0.3), type: 'bench', at_m: 520 }],

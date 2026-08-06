@@ -915,100 +915,397 @@ fieldset.chips legend {
   color: var(--raised);
 }
 
-/* ---------------------------------------------------------------- cards */
+/* ------------------------------------------------------------------ rail */
 
-.route-list {
+.rail {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s2);
+  list-style: none;
+  margin: var(--s3) 0 0;
+  padding: 0;
+}
+
+/* One button, only phrasing content inside it. The 4px edge is a grid column
+   rather than an absolutely-positioned bar so it is full height whatever the
+   row contains. */
+.route {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  grid-template-columns: 4px minmax(0, 1fr);
   gap: var(--s3);
+  width: 100%;
+  padding: 0;
+  border: 1px solid var(--rule);
+  border-radius: var(--r-md);
+  background: var(--raised);
+  color: var(--ink);
+  font: inherit;
+  text-align: start;
+  cursor: pointer;
+  overflow: hidden;
+}
+.route:hover {
+  border-color: var(--rule-strong);
+  box-shadow: var(--shadow-1);
+}
+.route[aria-pressed='true'] {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent), var(--shadow-1);
+  transition: box-shadow 120ms ease;
+}
+
+.route__edge {
+  display: block;
+  align-self: stretch;
+}
+
+.route__body {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+  padding: var(--s3) var(--s3) var(--s3) 0;
+}
+
+.route__top {
+  display: flex;
+  align-items: baseline;
+  gap: var(--s2);
+  min-width: 0;
+}
+.route__name {
+  font-family: var(--font-display);
+  font-size: var(--t-h3);
+  color: var(--ink);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.route__dur {
+  margin-inline-start: auto;
+  font-family: var(--font-display);
+  font-size: var(--t-metric);
+  line-height: 1;
+  white-space: nowrap;
+}
+.route__dur-unit {
+  font-family: var(--font-body);
+  font-size: 0.9375rem;
+  color: var(--ink-2);
+}
+/* A blocked route's duration is not a promise, so it does not read as one. */
+.route--blocked .route__dur {
+  color: var(--ink-2);
+}
+
+.route__sub {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--t-small);
+  color: var(--ink-2);
+  min-width: 0;
+}
+.route__pattern {
+  display: inline-block;
+  width: 26px;
+  height: 3px;
+  border-radius: 2px;
+  flex: none;
+}
+
+.badge {
+  flex: none;
+  padding: 2px var(--s2);
+  border-radius: var(--r-pill);
+  font-size: var(--t-micro);
+  font-weight: 600;
+  border: 1px solid transparent;
+}
+.badge--showing {
+  background: var(--brand-tint);
+  color: var(--ok-ink);
+  border-color: var(--accent);
+}
+.badge--blocked {
+  background: var(--warn-ground);
+  color: var(--warn-ink);
+  border-color: var(--warn-rule);
+}
+
+/* three aligned score meters — the thing that makes rows comparable */
+
+.route__scores {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--s2);
+  margin-top: 2px;
+}
+.score {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+.score__head {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--s1);
+  font-size: var(--t-micro);
+  color: var(--ink-2);
+}
+.score__none {
+  font-style: italic;
+  text-align: end;
+}
+
+/* "not measured" is ~78px at --t-micro and a score column is 114px at the
+   panel's widest and ~98px at its narrowest, so it cannot share a line with
+   the label. It wraps — and a wrapped head made that one row taller than the
+   others, which breaks the alignment the rail exists to provide.
+   The fix reserves the second line across the WHOLE rail rather than on the
+   row that needs it, so every row grows together and the three tracks stay on
+   one horizontal line. When no route has an unmeasured score, nothing matches
+   and the head stays the single tight row §4.6 specifies. */
+.rail:has(.score__none) .score__head {
+  /* Two lines at the inherited 1.5 line-height. Setting this in `em` keeps it
+     tied to --t-micro rather than to a pixel guess. */
+  min-height: 3em;
+  align-items: flex-start;
+}
+.score__track {
+  display: block;
+  height: 5px;
+  border-radius: 3px;
+  background: var(--sunken);
+  overflow: hidden;
+}
+.score__fill {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+  border-radius: 3px;
+}
+/* A null score and a 0 score are different statements and must never render
+   alike. `0` gets a real, empty track; `null` gets this hatch and the words
+   "not measured" where the percentage would be. */
+.score__track--hatched {
+  background-image: repeating-linear-gradient(
+    45deg,
+    var(--rule-strong) 0 2px,
+    transparent 2px 5px
+  );
+}
+
+/* verification meter */
+
+.verify {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--t-micro);
+  min-width: 0;
+}
+.verify__track {
+  display: flex;
+  gap: 2px;
+  flex: none;
+}
+.verify__seg {
+  display: block;
+  width: 12px;
+  height: 6px;
+  border-radius: 2px;
+  background: var(--sunken);
+  box-shadow: inset 0 0 0 1px var(--rule);
+}
+.verify--ok .verify__seg.is-on {
+  background: var(--ok-ink);
+  box-shadow: none;
+}
+.verify--warn .verify__seg.is-on {
+  background: var(--warn-ink);
+  box-shadow: none;
+}
+.verify__text {
+  color: var(--ink-2);
+  min-width: 0;
+}
+/* Weight and a glyph as well as the colour — a thin verification score is the
+   most important thing on the row and cannot be a hue alone. */
+.verify--warn .verify__text {
+  color: var(--warn-ink);
+  font-weight: 600;
+}
+.verify__glyph {
+  margin-inline-end: 3px;
+}
+
+/* skeletons — hold the row height so the layout never jumps */
+
+.route--skeleton {
+  cursor: default;
+}
+.route--skeleton .route__edge {
+  background: var(--sunken);
+}
+.sk {
+  display: block;
+  border-radius: var(--r-sm);
+  background: var(--sunken);
+}
+.sk--title {
+  height: 22px;
+  width: 60%;
+}
+.sk--sub {
+  height: 14px;
+  width: 80%;
+}
+.sk--scores {
+  height: 26px;
+}
+.sk--verify {
+  height: 14px;
+  width: 70%;
+}
+
+/* ---------------------------------------------------------------- detail */
+
+.detail {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s4);
+  margin-top: var(--s3);
+  padding: var(--s5);
+  background: var(--raised);
+  border: 1px solid var(--rule);
+  border-radius: var(--r-lg);
+  box-shadow: var(--shadow-1);
+}
+
+.detail__head {
+  display: flex;
+  align-items: baseline;
+  gap: var(--s2);
+  flex-wrap: wrap;
+}
+.detail__pattern {
+  width: 26px;
+  height: 3px;
+  border-radius: 2px;
+  flex: none;
+  align-self: center;
+}
+.detail__title {
+  font-size: var(--t-h2);
+  margin: 0;
+}
+.detail__figures {
+  margin: 0 0 0 auto;
+  color: var(--ink-2);
+}
+
+.detail__narration {
+  font-family: var(--font-display);
+  font-size: var(--t-h3);
+  line-height: 1.55;
+  margin: 0;
+}
+.detail__narration--pending {
+  color: var(--ink-2);
+  font-style: italic;
+}
+
+.detail__section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s2);
+}
+.detail__h {
+  font-family: var(--font-body);
+  font-size: var(--t-micro);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--ink-2);
+  margin: 0;
+}
+.detail__pattern-note {
+  margin: 0;
+  font-size: var(--t-micro);
+  color: var(--ink-2);
+}
+
+.stops {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
   list-style: none;
   margin: 0;
   padding: 0;
 }
-
-.card {
-  position: relative;
-  background: var(--raised);
+.stop {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px var(--s3);
   border: 1px solid var(--rule);
-  border-radius: var(--r-md);
-  padding: var(--s4) var(--s4) 14px;
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  cursor: pointer;
-  overflow: hidden;
-}
-.card:hover {
-  border-color: var(--rule-strong);
-  box-shadow: var(--shadow-1);
-}
-.card--selected {
-  border-color: var(--accent);
-  box-shadow: 0 0 0 1px var(--accent), var(--shadow-1);
-}
-.card__bar {
-  position: absolute;
-  inset: 0 0 auto;
-  height: 4px;
-}
-.card__head {
-  margin: 0;
-  font-size: 1rem;
+  border-radius: var(--r-pill);
+  background: var(--sunken);
+  font-size: var(--t-small);
 }
 
-/* The one interactive element in the card. Full-bleed so the whole header row
-   is a target, and comfortably over 44px tall. */
-.card__select {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  flex-wrap: wrap;
-  gap: var(--s1) var(--s3);
-  width: 100%;
-  min-height: var(--target);
-  padding: var(--s1) 0;
+.note {
+  padding: var(--s3);
+  border: 1px solid var(--rule);
+  border-radius: var(--r-sm);
+  background: var(--sunken);
+  font-size: var(--t-small);
+}
+.note--warn {
+  background: var(--warn-ground);
+  border-color: var(--warn-rule);
+  color: var(--warn-ink);
+}
+.note__title {
   margin: 0;
+  font-weight: 600;
+}
+.note__sub {
+  margin: var(--s1) 0 0;
+  color: var(--ink-2);
+}
+.note--warn .note__sub {
+  color: inherit;
+}
+
+.blockers__list {
+  margin: var(--s2) 0 0;
+  padding-inline-start: 18px;
+  font-size: var(--t-small);
+}
+.blockers__list li + li {
+  margin-top: var(--s1);
+}
+
+.link-button {
+  align-self: flex-start;
+  margin-top: var(--s2);
+  min-height: var(--target);
+  padding: var(--s2) 0;
   background: none;
   border: 0;
-  font: inherit;
   color: inherit;
-  text-align: start;
+  font: inherit;
+  font-size: var(--t-small);
+  font-weight: 600;
+  text-decoration: underline;
+  text-underline-offset: 3px;
   cursor: pointer;
 }
-.card__label {
-  font-family: var(--font-display);
-  font-size: 1.25rem;
-  font-weight: 500;
-}
-.card__select[aria-pressed='true'] .card__label::after {
-  content: ' — showing on the map';
-  font-family: var(--font-body);
-  font-size: var(--t-micro);
-  font-weight: 400;
-  color: var(--ink-2);
-}
-.card__pattern {
-  font-size: var(--t-micro);
-  color: var(--ink-2);
-  font-weight: 400;
-}
-.card__figures {
-  display: flex;
-  align-items: baseline;
-  gap: 14px;
-  flex-wrap: wrap;
-  margin: 0;
-}
-.card__duration {
-  font-family: var(--font-display);
-  font-size: 1.875rem;
-  font-variant-numeric: tabular-nums;
-  line-height: 1;
-}
-.card__distance {
-  color: var(--ink-2);
-  font-variant-numeric: tabular-nums;
-}
+
+/* full-width score meters in the detail panel */
 
 .scores {
   display: flex;
@@ -1018,7 +1315,7 @@ fieldset.chips legend {
 }
 .scores__row {
   display: grid;
-  grid-template-columns: 4.5rem 1fr 2.75rem;
+  grid-template-columns: 5.5rem minmax(0, 1fr) 2.5rem;
   align-items: center;
   gap: var(--s2);
   font-size: var(--t-small);
@@ -1041,7 +1338,6 @@ fieldset.chips legend {
 }
 .scores__value {
   text-align: end;
-  font-variant-numeric: tabular-nums;
 }
 /* Spans the bar and the number: "not measured" is a sentence, not a value. */
 .scores__unmeasured {
@@ -1050,76 +1346,6 @@ fieldset.chips legend {
   font-style: italic;
 }
 
-.card__method {
-  font-size: var(--t-micro);
-  color: var(--ink-2);
-  margin: 0;
-}
-.card__confidence {
-  font-size: var(--t-small);
-  margin: 0;
-}
-.card__confidence--caution {
-  color: var(--warn-ink);
-}
-.card__confidence--warning {
-  color: var(--warn-ink);
-  font-weight: 600;
-}
-.card__narration {
-  font-family: var(--font-display);
-  font-size: var(--t-h3);
-  line-height: 1.55;
-  margin: 0;
-  color: var(--ink);
-}
-.card__narration--pending {
-  color: var(--ink-2);
-  font-style: italic;
-}
-.card__rest {
-  font-size: var(--t-small);
-  color: var(--ink-2);
-  margin: 0;
-}
-.card__synthetic {
-  font-size: var(--t-micro);
-  font-weight: 600;
-  color: var(--warn-ink);
-  background: var(--warn-ground);
-  border: 1px solid var(--warn-rule);
-  border-radius: var(--r-sm);
-  padding: 6px 10px;
-  margin: 0;
-}
-
-.blockers {
-  margin: 0;
-  padding: 10px var(--s3);
-  background: var(--warn-ground);
-  border: 1px solid var(--warn-rule);
-  border-radius: var(--r-sm);
-  color: var(--warn-ink);
-  font-size: var(--t-small);
-}
-.blockers__title {
-  font-weight: 700;
-  margin: 0 0 6px;
-}
-.blockers__list {
-  margin: 0;
-  padding-inline-start: 18px;
-}
-.blockers__list li + li {
-  margin-top: var(--s1);
-}
-
-.card__status {
-  font-size: var(--t-small);
-  font-weight: 600;
-  color: var(--warn-ink);
-  margin: 0;
-}
 
 /* ----------------------------------------------------------- responsive */
 
