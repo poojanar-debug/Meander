@@ -228,8 +228,16 @@ describe('minutesToFinishBySunset', () => {
 })
 
 describe('canStateLocalTime', () => {
-  // The suite runs under TZ=UTC, so the browser offset is 0 and the question
-  // becomes "is this longitude within three hours of Greenwich".
+  // This function reads the *viewer's* timezone, so every expectation below is
+  // relative to where the suite runs. vite.config.js pins TZ=UTC for exactly
+  // that reason; assert it rather than trusting the comment, because when it
+  // drifts the symptom is a pair of inverted longitude assertions that say
+  // nothing about the cause. On a machine in Asia/Colombo they read as "London
+  // is half a world away" — which is a confusing way to learn about $TZ.
+  it('runs under the UTC clock its expectations are written against', () => {
+    expect(new Date().getTimezoneOffset()).toBe(0)
+  })
+
   it('accepts a longitude in the viewer\'s own part of the world', () => {
     expect(canStateLocalTime(-0.1278)).toBe(true) // London
     expect(canStateLocalTime(4.9)).toBe(true) // Amsterdam
