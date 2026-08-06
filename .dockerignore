@@ -1,6 +1,13 @@
-# Everything is excluded, then the two things the API image needs are allowed
+# Everything is excluded, then the things the images actually need are allowed
 # back. A deny-list here would silently start shipping whatever gets added to
 # the repository next; this cannot.
+#
+# ⚠ **One context, two images.** Both Dockerfiles build from the repository
+# root, so this file governs the router as well as the API. It was written as
+# though only the API existed, and the router build failed on its first ever
+# run with `COPY failed: graphhopper/config.yml: file does not exist` — the
+# blanket `graphhopper/` exclusion below had taken the router's own config with
+# it. Nothing caught it, because Phase 3's images were written and never built.
 *
 
 !backend/
@@ -20,7 +27,8 @@ backend/requirements.txt
 #                 production writing them.
 #   graphhopper/  a 45 MB JAR and a multi-GB graph. The router has its own
 #                 image; putting the graph in the API image would be a
-#                 gigabyte of dead weight per deploy.
+#                 gigabyte of dead weight per deploy. Three small files are
+#                 allowed back below — they are the router image's inputs.
 #   frontend/     served from S3, not from here.
 #   .env          secrets. config.py loads it if present, so an .env that
 #                 reached the image would silently override the task
@@ -40,3 +48,17 @@ docs/
 *.md
 data/*.db-wal
 data/*.db-shm
+
+# The router image's own inputs, allowed back after the blanket `graphhopper/`
+# above. Order matters here: a later rule wins, so these must follow it.
+#
+# The JAR and graphhopper/data/ stay excluded. The JAR is downloaded and
+# checksummed inside the image, and the graph is a build artifact staged into
+# graph-dist/ by scripts/publish_graph.sh — which is empty except when someone
+# is deliberately baking a graph in. The API image never COPYs any of these;
+# they cost it a little context-transfer time and nothing in the image.
+!graphhopper/config.yml
+!graphhopper/docker-entrypoint.sh
+!graphhopper/graph-dist/
+graphhopper/data/
+graphhopper/*.jar

@@ -16,10 +16,16 @@
 #   docker run -e GRAPH_S3_URI=s3://bucket/graph-demo.tar.zst \
 #              -e GRAPH_SHA256=<digest> meander-graphhopper
 
+# Declared before the first FROM so it can select a stage further down. Needs
+# BuildKit — `docker buildx build`, or DOCKER_BUILDKIT=1 — because only BuildKit
+# builds the selected stage alone. The classic builder produces the same final
+# image but walks every stage on the way, which means copying the graph even
+# when the build asked for none.
+ARG GRAPH_SOURCE=none
+
 FROM eclipse-temurin:21-jre-noble AS runtime
 
 ARG GH_VERSION=11.0
-ARG GRAPH_SOURCE=none
 
 ENV GH_VERSION=${GH_VERSION} \
     GH_DATA=/data \
@@ -46,25 +52,51 @@ COPY graphhopper/config.yml /app/config.yml
 COPY graphhopper/docker-entrypoint.sh /app/entrypoint.sh
 RUN chmod +x /app/entrypoint.sh
 
-# Optional bake-in. The build context must contain graphhopper/graph-dist/ with
-# a completed graph-cache/ in it; see scripts/publish_graph.sh. With
-# GRAPH_SOURCE=none this copies the placeholder and the entrypoint fetches
-# instead. (A COPY of a missing path fails the build, hence the placeholder.)
-COPY graphhopper/graph-dist/ /graph-dist/
-RUN if [ "$GRAPH_SOURCE" = "local" ]; then \
-      test -f "/graph-dist/graph-cache/${GRAPH_MARKER}" || { \
-        echo "GRAPH_SOURCE=local but /graph-dist/graph-cache/${GRAPH_MARKER} is missing." >&2; \
-        echo "That marker is written only by a completed import — an interrupted" >&2; \
-        echo "one leaves a directory that exists and then dies on load." >&2; \
-        exit 1; } ; \
-      mkdir -p "$GH_DATA" && cp -a /graph-dist/graph-cache "$GH_DATA/graph-cache" ; \
-      echo "graph baked in: $(du -sh "$GH_DATA/graph-cache" | cut -f1)" ; \
-    fi \
- && rm -rf /graph-dist
-
 # Unprivileged, and it owns /data because the entrypoint may unpack into it.
+#
+# **Before the graph arrives, not after.** This block used to sit below the
+# COPY and ended with `chown -R gh:gh "$GH_DATA"`, which rewrites the metadata
+# of every file in the graph — and because layers are copy-on-write per file,
+# that duplicated all 485 MB again in a new layer. /app is left root-owned:
+# `gh` only ever reads the JAR and the config, and chowning 47 MB of JAR would
+# have cost another copy for nothing.
 RUN useradd --system --uid 10001 --create-home gh \
- && mkdir -p "$GH_DATA" && chown -R gh:gh "$GH_DATA" /app
+ && mkdir -p "$GH_DATA" && chown gh:gh "$GH_DATA"
+
+# --- the graph, or not --------------------------------------------------
+#
+# Two stages, selected by GRAPH_SOURCE. A `COPY` cannot be made conditional
+# any other way, and the previous attempt — copy always, then `cp -a` into
+# place if asked — put the graph in the image **three** times: once in the
+# COPY layer, once in the RUN that copied it, and once more when a later
+# `chown -R` rewrote every file's metadata (layers are copy-on-write per
+# file). Deleting the staging directory afterwards only writes a whiteout;
+# the bytes stay in the layer below. A 485 MB graph made a 2.65 GB image.
+#
+# Now it lands once, in its final home, already owned by `gh`: 1.1 GB. That is
+# 1.5 GB less to hold in ECR and 1.5 GB less to pull on every task start,
+# which is time a task spends not serving.
+
+FROM runtime AS graph-none
+# Nothing. The entrypoint fetches from GRAPH_S3_URI, or refuses to start and
+# says how to give it a graph.
+
+FROM runtime AS graph-local
+# The build context must contain graphhopper/graph-dist/graph-cache — see
+# scripts/publish_graph.sh --local.
+COPY --chown=gh:gh graphhopper/graph-dist/ /data/
+# Read-only, so it adds no meaningful layer. Asserts on the marker rather than
+# on the directory: an interrupted import leaves a graph-cache/ that exists,
+# passes any -d test, and then dies on load with an opaque error.
+RUN test -f "${GH_DATA}/graph-cache/${GRAPH_MARKER}" || { \
+      echo "GRAPH_SOURCE=local but ${GH_DATA}/graph-cache/${GRAPH_MARKER} is missing." >&2; \
+      echo "That marker is written only by a completed import." >&2; \
+      echo "Run scripts/publish_graph.sh --local first." >&2; \
+      exit 1; } \
+ && echo "graph baked in: $(du -sh "${GH_DATA}/graph-cache" | cut -f1)"
+
+FROM graph-${GRAPH_SOURCE} AS final
+
 USER gh
 
 # 8989 routing, 8990 admin. config.yml binds 127.0.0.1 for a laptop; inside a
