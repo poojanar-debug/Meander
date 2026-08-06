@@ -19,13 +19,16 @@ export default function Ribbon({ routes }) {
   if (!anySynthetic && !usingMockApi()) return null
 
   return (
-    <div className="ribbon" role="note">
+    // A <section> with a name is a region landmark, so the warning is reachable
+    // by landmark navigation instead of being loose content between the topbar
+    // and the main element. role="note" is not a landmark and did not do this.
+    <section className="ribbon" aria-label="Data source">
       <span className="ribbon__icon" aria-hidden="true">
         ⚠
       </span>
       <span>
         Demonstration data — routes come from fixtures, not live routing. Do not follow them.
       </span>
-    </div>
+    </section>
   )
 }

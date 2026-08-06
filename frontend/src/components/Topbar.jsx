@@ -17,7 +17,7 @@ export default function Topbar({ theme, onTheme, onAbout }) {
   return (
     <header className="topbar">
       <div className="topbar__brand">
-        <span className="topbar__wordmark">Meander</span>
+        <h1 className="topbar__wordmark">Meander</h1>
         <span className="topbar__tagline">routes that are worth the walk</span>
       </div>
 

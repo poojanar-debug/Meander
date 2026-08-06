@@ -21,7 +21,7 @@ export default function FirstRun({ minutes, origin, locating, geoDenied, onMinut
   return (
     <div className="firstrun">
       <div className="firstrun__card">
-        <h1 className="firstrun__headline">Where are you, and how long have you got?</h1>
+        <h2 className="firstrun__headline">Where are you, and how long have you got?</h2>
         <p className="firstrun__lede">
           Meander works out three ways back: the fastest, the greenest, and one that holds to real
           accessibility constraints.
