@@ -63,6 +63,24 @@ function loop(origin, radiusM, lobes, points = 60) {
   return out
 }
 
+/** Great-circle length of a [lon, lat] polyline, in metres. */
+function lengthOf(geometry) {
+  const R = 6371000
+  const rad = Math.PI / 180
+  let total = 0
+  for (let i = 1; i < geometry.length; i += 1) {
+    const [lon1, lat1] = geometry[i - 1]
+    const [lon2, lat2] = geometry[i]
+    const dLat = (lat2 - lat1) * rad
+    const dLon = (lon2 - lon1) * rad
+    const h =
+      Math.sin(dLat / 2) ** 2 +
+      Math.sin(dLon / 2) ** 2 * Math.cos(lat1 * rad) * Math.cos(lat2 * rad)
+    total += 2 * R * Math.asin(Math.min(1, Math.sqrt(h)))
+  }
+  return total
+}
+
 function pointAt(geometry, fraction) {
   const idx = Math.min(geometry.length - 1, Math.floor(geometry.length * fraction))
   const [lon, lat] = geometry[idx]
@@ -126,19 +144,27 @@ function buildRoutes(req) {
     ? loop(origin, 380 * scale, 0)
     : polyline(origin, 22, 2100 * scale, -0.09)
 
+  // Distances are measured from the drawn geometry rather than declared
+  // separately. When they disagreed, the rail said 1.4 km and follow mode's
+  // progress said 2.6 km for the same walk — real routing data never does that,
+  // so the mock should not either.
+  const fastestM = Math.round(lengthOf(fastestGeom))
+  const natureM = Math.round(lengthOf(natureGeom))
+  const accessibleM = Math.round(lengthOf(accessibleGeom))
+
   const fastest = {
     id: 'fastest',
     label: 'Fastest',
     status: 'ok',
     geometry: fastestGeom,
     duration_min: Math.round(18 * scale),
-    distance_m: Math.round(1450 * scale),
+    distance_m: fastestM,
     mode,
     scores: { nature: 0.31, air: 0.62, shade: 0.2 },
     scoring_method: 'clip',
     confidence: 0.88,
     rest_stops: [{ ...pointAt(fastestGeom, 0.12), type: 'bench', at_m: 180 }],
-    steps: steps(fastestGeom, 1450 * scale, 18 * scale, [
+    steps: steps(fastestGeom, fastestM, 18 * scale, [
       'Galle Road',
       'Chatham Street',
       'York Street',
@@ -157,7 +183,7 @@ function buildRoutes(req) {
     status: 'ok',
     geometry: natureGeom,
     duration_min: Math.round(26 * scale),
-    distance_m: Math.round(2080 * scale),
+    distance_m: natureM,
     mode,
     scores: { nature: 0.79, air: 0.71, shade: 0.58 },
     scoring_method: 'clip',
@@ -167,13 +193,23 @@ function buildRoutes(req) {
       { ...pointAt(natureGeom, 0.46), type: 'drinking water', at_m: 910 },
       { ...pointAt(natureGeom, 0.78), type: 'bench', at_m: 1580 },
     ],
-    steps: steps(natureGeom, 2080 * scale, 26 * scale, [
+    steps: steps(natureGeom, natureM, 26 * scale, [
       'Green Path',
       'Lake Walk',
       'Park Lane',
       'Cinnamon Gardens',
     ]),
-    blockers: [],
+    // A barrier on a route that is still walkable. The backend reports
+    // accessibility findings on every preset, not only `accessible` — someone
+    // on foot may well take a route with a kerb on it and should still be told
+    // it is there. This is what follow mode's 200 m proximity alert is for.
+    blockers: [
+      {
+        type: 'kerb',
+        ...pointAt(natureGeom, 0.55),
+        description: 'Dropped kerb missing where the path crosses the service road.',
+      },
+    ],
     narration: null,
     synthetic_upstream: false,
     confidence_note: 'Accessibility data covers 72% of this route.',
@@ -188,7 +224,7 @@ function buildRoutes(req) {
     status: 'blocked',
     geometry: accessibleGeom,
     duration_min: Math.round(22 * scale),
-    distance_m: Math.round(1720 * scale),
+    distance_m: accessibleM,
     mode,
     // `shade: null` is deliberate and is the only fixture that exercises it.
     // A null score means "we did not measure this"; a 0 means "we measured it
@@ -202,7 +238,7 @@ function buildRoutes(req) {
     rest_stops: [{ ...pointAt(accessibleGeom, 0.3), type: 'bench', at_m: 520 }],
     // Both blockers below fall inside one of these steps, which is what
     // exercises the in-step barrier placement — the point of the feature.
-    steps: steps(accessibleGeom, 1720 * scale, 22 * scale, [
+    steps: steps(accessibleGeom, accessibleM, 22 * scale, [
       'Canal Walk',
       'Green Path',
       'Station Road',

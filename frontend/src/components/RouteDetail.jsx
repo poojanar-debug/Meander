@@ -55,7 +55,7 @@ function Barriers({ blockers }) {
  * The blocked notice is placed **above** Along the way rather than at the end,
  * because it changes whether any of the rest matters.
  */
-export default function RouteDetail({ route, theme, stepList, children }) {
+export default function RouteDetail({ route, theme, stepList, onStart, children }) {
   if (!route) return null
 
   const style = styleFor(route.id)
@@ -173,6 +173,29 @@ export default function RouteDetail({ route, theme, stepList, children }) {
           injected by App rather than imported here, so this component stays
           about layout and the phases stay separable. */}
       {children}
+
+      {/* No Share or Save. Save is §6.8, which is deferred; Share has no
+          specification and the app holds no state in the URL, so a share link
+          would point at the front door and say nothing about the route. A
+          control that does nothing reads as broken rather than as unbuilt. */}
+      {onStart && route.steps?.length > 0 && (
+        <div className="detail__actions">
+          <button
+            type="button"
+            className="button button--primary"
+            disabled={blocked}
+            aria-describedby={blocked ? 'start-blocked' : undefined}
+            onClick={() => onStart(route.id)}
+          >
+            Start this route
+          </button>
+          {blocked && (
+            <p className="field__hint" id="start-blocked">
+              This route cannot be completed, so it cannot be followed.
+            </p>
+          )}
+        </div>
+      )}
 
       <p className="detail__pattern-note">
         Drawn as a {style.pattern} line{route.geometry?.length > 1 ? '' : ' — no geometry available'}.

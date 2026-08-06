@@ -1605,3 +1605,116 @@ fieldset.chips legend {
   margin-top: 6px;
   font-size: var(--t-micro);
 }
+
+/* ---------------------------------------------------------------- follow */
+
+/* Sits over the stage, not over the whole app: the sheet is not a modal and
+   the map underneath stays pannable and reachable (§6.7). */
+.follow {
+  position: absolute;
+  inset: 0;
+  z-index: 30;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--s2);
+  padding: var(--s3);
+  pointer-events: none;
+}
+.follow > * {
+  pointer-events: auto;
+}
+
+/* First in the DOM and therefore first in the tab order, always visible, and
+   comfortably over the 44px floor. Getting out has to be one tap however lost
+   you are. */
+.follow__exit {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: var(--target);
+  padding: var(--s2) var(--s4);
+  border: 1px solid var(--rule-strong);
+  border-radius: var(--r-pill);
+  background: var(--raised);
+  color: var(--ink);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+  box-shadow: var(--shadow-1);
+}
+.follow__exit:hover {
+  background: var(--sunken);
+  border-color: var(--accent);
+}
+
+.follow__alert {
+  align-self: stretch;
+  padding: var(--s3);
+  background: var(--warn-ground);
+  border: 1px solid var(--warn-rule);
+  border-radius: var(--r-md);
+  color: var(--warn-ink);
+  font-size: var(--t-small);
+  font-weight: 600;
+  box-shadow: var(--shadow-1);
+}
+.follow__alert--soft {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s3);
+}
+
+.sheet {
+  margin-top: auto;
+  align-self: stretch;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-height: 30vh;
+  padding: var(--s5);
+  background: var(--raised);
+  border: 1px solid var(--rule);
+  border-radius: var(--r-lg) var(--r-lg) var(--r-md) var(--r-md);
+  box-shadow: var(--shadow-2);
+}
+.sheet__step {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: var(--t-h3);
+}
+.sheet__metric {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: var(--t-metric);
+  line-height: 1.1;
+}
+.sheet__metric-unit {
+  font-family: var(--font-body);
+  font-size: var(--t-small);
+  color: var(--ink-2);
+}
+.sheet__row {
+  margin: 0;
+  font-size: var(--t-small);
+  color: var(--ink-2);
+}
+.sheet__privacy {
+  margin: auto 0 0;
+  padding-top: var(--s3);
+  border-top: 1px solid var(--rule);
+  font-size: var(--t-micro);
+  color: var(--ink-2);
+}
+
+.detail__actions {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s2);
+  align-items: flex-start;
+}
+.detail__actions .button--primary:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}

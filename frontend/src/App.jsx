@@ -5,6 +5,7 @@ import FirstRun from './components/FirstRun.jsx'
 import About from './components/About.jsx'
 import DaylightGuard from './components/DaylightGuard.jsx'
 import DepartureStrip from './components/DepartureStrip.jsx'
+import FollowMode from './components/FollowMode.jsx'
 import MapView from './components/MapView.jsx'
 import RouteDetail from './components/RouteDetail.jsx'
 import RouteRail from './components/RouteRail.jsx'
@@ -50,6 +51,9 @@ const initialState = {
   departAt: null,
   error: null,
   geoDenied: false,
+  // The id of the route being followed, or null. Deliberately outside
+  // withRefetch: entering follow mode must never re-request anything.
+  follow: null,
   // A display preference, not an input to the route request. It deliberately
   // does not live in `withRefetch`.
   theme: 'light',
@@ -163,6 +167,11 @@ function reducer(state, action) {
     // routes. It is a paint change and nothing else.
     case 'theme':
       return { ...state, theme: action.value }
+
+    // Follow mode reads geometry the app already has. It does not fetch, and it
+    // must not run through the nonce effect.
+    case 'follow':
+      return { ...state, follow: action.value }
 
     default:
       return state
@@ -332,6 +341,9 @@ export default function App() {
 
   const hasRoutes = state.routes.length > 0
   const selectedRoute = state.routes.find((r) => r.id === state.selected) ?? null
+  const followRoute = state.follow
+    ? (state.routes.find((r) => r.id === state.follow) ?? null)
+    : null
 
   // The first-run card replaces panel and stage entirely (§7). Gating on
   // `origin` rather than on `routes` means the map is never created until there
@@ -433,6 +445,7 @@ export default function App() {
               route={selectedRoute}
               theme={state.theme}
               stepList={<StepList route={selectedRoute} onHighlight={setHighlight} />}
+              onStart={(id) => dispatch({ type: 'follow', value: id })}
             >
               <DaylightGuard
                 route={selectedRoute}
@@ -459,6 +472,15 @@ export default function App() {
               theme={state.theme}
               highlight={highlight}
               onSelect={onSelect}
+            />
+          )}
+
+          {/* The sheet is not a modal: the map underneath stays reachable. */}
+          {followRoute && (
+            <FollowMode
+              route={followRoute}
+              onExit={() => dispatch({ type: 'follow', value: null })}
+              onAnnounce={announce}
             />
           )}
         </div>
