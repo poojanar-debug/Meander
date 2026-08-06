@@ -95,7 +95,35 @@ PROMPT_VARIANTS: dict[str, tuple[str, str]] = {
     ),
 }
 
-ACTIVE_PROMPT_VARIANT = "v3_nature"
+# Chosen on **real Mapillary imagery**, which reversed most of what the
+# generated-texture comparison in Phase G concluded. Separation (green - grim),
+# three pairs, 2026-08-06:
+#
+#   pair                              v1     v2     v3     v4     v5     v6     v7
+#   Hyde Park / Euston Rd          +.105  +.657  +.107  +.556  +.647  +.100  +.431
+#   Vondelpark / Euston Rd         +.091  +.217  +.612  +.279  +.757  +.119  +.335
+#   Viharamahadevi / Colombo Fort  +.038  +.262  -.141  -.133  -.339  -.022   .000
+#
+# Only **v2_plain** and v1_extreme point the right way on all three. v1_extreme
+# is correct but barely moves (+.038 to +.105); a score that hardly changes
+# between a park and an arterial road cannot rank anything. v2_plain has three
+# to six times the range and never inverts.
+#
+# The previous default, v3_nature, and the widest-separating London variant,
+# v5_street, **both invert on the Colombo pair** — they call the city fort
+# greener than the park. An inverted score is not a weak score, it is a wrong
+# one, and it is disqualifying however well the name fits.
+#
+# ⚠ Two reasons to still be sceptical, both recorded rather than resolved:
+#   * n is small — 4 to 6 images per location, and only 2 for Viharamahadevi,
+#     which is the single point deciding the one pair that separates the
+#     candidates. That pair is also the only non-European one.
+#   * "beautiful"/"ugly" measures **aesthetic appeal, not greenery**, and this
+#     score is presented as a nature score. It correlates here, but a
+#     photogenic stone street would score well without a tree in it. That is a
+#     construct mismatch, not a bug, and it is why every response still carries
+#     `scoring_method`.
+ACTIVE_PROMPT_VARIANT = "v2_plain"
 
 
 class ScoringUnavailable(RuntimeError):

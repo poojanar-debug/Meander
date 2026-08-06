@@ -235,22 +235,41 @@ def test_min_images_threshold_is_above_one() -> None:
 
 
 @needs_torch
-def test_clip_ranks_a_green_scene_above_a_grim_one() -> None:
+def test_the_contrastive_softmax_is_the_right_way_round() -> None:
     """Pipeline check on generated reference images.
 
-    Not evidence about real streets — that needs Mapillary imagery, which needs
-    a token (BLOCKED.md #2). What it does prove is that the model loads, the
-    contrastive softmax is the right way round, and the active prompt pair is
-    not inverted.
+    **Deliberately not run against ACTIVE_PROMPT_VARIANT**, and that is the
+    whole lesson of this phase. This used to assert the active pair separates on
+    a foliage texture versus an asphalt texture, which conflates two unrelated
+    claims: "the model loads and the softmax is the right way round" and "this
+    prompt pair is a good choice". Generated textures answer the first and
+    actively mislead on the second — four pairs invert on them, including the
+    one real imagery later showed to be the best of the seven. Left as it was,
+    this test would have blocked the correct choice.
+
+    So it pins the pipeline using a pair known to separate on *these* images,
+    and the prompt choice is pinned separately, from real imagery, below.
     """
     _require_clip_weights()
     from scripts.compare_prompts import _asphalt_image, _foliage_image
 
-    green = score_images([_foliage_image(i) for i in range(3)], ACTIVE_PROMPT_VARIANT)
-    grim = score_images([_asphalt_image(i) for i in range(3)], ACTIVE_PROMPT_VARIANT)
+    green = score_images([_foliage_image(i) for i in range(3)], "v3_nature")
+    grim = score_images([_asphalt_image(i) for i in range(3)], "v3_nature")
 
     assert sum(green) / len(green) > sum(grim) / len(grim)
     assert all(0.0 <= s <= 1.0 for s in green + grim)
+
+
+def test_the_active_variant_is_one_that_held_on_real_imagery() -> None:
+    """Of seven variants across three real Mapillary pairs, only these two
+    pointed the right way every time — see the table in scoring.py.
+
+    v3_nature and v5_street both invert on the Colombo pair, calling the city
+    fort greener than the park, and an inverted score is a wrong one rather than
+    a weak one. This guard exists so a future edit cannot quietly reinstate a
+    variant that was measured to invert.
+    """
+    assert ACTIVE_PROMPT_VARIANT in {"v2_plain", "v1_extreme"}
 
 
 @needs_torch
