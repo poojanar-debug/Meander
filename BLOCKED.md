@@ -164,6 +164,25 @@ committed `cache.db` instead — see the README's architecture split.
 ## 3 · One backend test fails on a machine that has a Mapillary token
 
 **Discovered:** 2026-08-06, taking a baseline before the frontend redesign.
+**RESOLVED:** 2026-08-06, taking a baseline before the iOS work, by option 1
+below. `test_fetching_imagery_without_a_token_fails_loudly` now swaps
+`backend.scoring.settings` for a fresh `Settings(mapillary_token=None)` — the
+idiom `test_fixtures.py` already used to inject a GraphHopper key — so the
+absent token comes from the test rather than from the machine. A second test,
+`test_a_token_in_the_environment_does_not_change_that_verdict`, sets the
+variable and asserts the verdict is unchanged, which is the actual regression.
+
+**395 passed with a token in `.env`, 395 with it unset.**
+
+Two tests on the frontend had the same shape and were fixed in the same
+baseline: `sun.test.js` carried a comment reading *"the suite runs under
+TZ=UTC"* and nothing set `TZ`. It was true by accident — GitHub's runners are
+UTC, and `.github/workflows/ci.yml` sets it for that job — so on a machine in
+Asia/Colombo `canStateLocalTime` inverted both expectations. `vite.config.js`
+now forces `TZ=UTC` for the test run and the comment is an assertion.
+
+**The original entry follows, because the reasoning is still why the code looks
+like this.**
 
 **It does not fail in CI**, and that distinction matters more than it looks.
 `.env` is gitignored, so a CI runner has no `MAPILLARY_TOKEN` and the suite is
@@ -190,17 +209,17 @@ with a token in .env :  1 failed, 393 passed
 without one (CI)     :    394 passed
 ```
 
-**What you need to do** — decide which of these the project wants:
+**What was decided** — option 1, with one correction to it. `monkeypatch.delenv`
+would not have worked: `Settings` is a frozen dataclass resolved once at import,
+so the module under test had already read the variable and clearing it changes
+nothing. Replacing the module-level `settings` object is what actually reaches
+it.
 
-1. Have the test clear `MAPILLARY_TOKEN` for its own duration via
-   `monkeypatch.delenv`, so it tests the no-token path regardless of the
-   developer's environment. This is the ordinary fix.
-2. Have `conftest.py` neutralise the token for the whole suite, as it already
-   does for `MEANDER_GRAPHHOPPER_URL` — that variable was made hermetic for
-   exactly this class of bug (PROGRESS.md, self-hosting defect 6).
-
-Either is a change to `backend/tests/`, which the current frontend redesign
-scope does not authorise, so it is recorded here rather than done.
+Option 2 was rejected. Neutralising the token for the whole suite would hide
+the variable from every test, including any future one that ought to exercise
+the token-present path. `MEANDER_GRAPHHOPPER_URL` is forced in `conftest.py`
+because it changes the *request signature* every fixture is keyed on, which is
+a property of the harness; a credential is not.
 
 ---
 

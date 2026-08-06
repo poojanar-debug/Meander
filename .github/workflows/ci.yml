@@ -61,9 +61,13 @@ jobs:
 
       # No .env exists in CI — it is gitignored — so no API key is present and
       # every upstream call is served from a committed fixture. That is the
-      # condition the suite is designed for, and it is why the token-absence
-      # test passes here while failing on a developer's machine that has one
-      # (BLOCKED.md #3).
+      # condition the suite is designed for.
+      #
+      # It is no longer the condition the suite *depends* on: the token-absence
+      # test used to pass here and fail on any developer machine that had a
+      # Mapillary token, and now supplies the absent token itself. BLOCKED.md #3
+      # records why. This job would therefore catch the same regression even if
+      # a runner somehow acquired one.
       - name: Tests
         run: python -m pytest backend/tests
 
@@ -115,9 +119,14 @@ jobs:
       - run: npm ci
         working-directory: frontend
 
-      # TZ is pinned because the solar tests assert against UTC instants. A
-      # runner in another zone would not make them wrong, but it would make a
-      # failure read as a maths bug rather than as a clock difference.
+      # TZ is pinned in vite.config.js, which is where it belongs — it has to
+      # hold for a developer running `npm test` too, and it did not: two solar
+      # tests inverted on a machine in Asia/Colombo while passing here, because
+      # this line was the only thing setting it.
+      #
+      # Kept anyway. It costs nothing, it documents the dependency at the point
+      # someone reads the workflow, and it means the job is still correct if the
+      # config's test block is ever refactored away.
       - name: Tests
         run: npm test
         working-directory: frontend
