@@ -105,6 +105,26 @@ class Step(BaseModel):
     lon: float
 
 
+class ElevationProfile(BaseModel):
+    """The route's shape, for drawing. Null when the router returned no elevation.
+
+    Null rather than an empty profile: "no elevation data" and "this route is
+    flat" are different statements, and a flat line drawn for the first makes
+    the second's claim.
+    """
+
+    distances_m: list[float]
+    elevations_m: list[float]
+    ascent_m: float
+    descent_m: float
+    max_gradient_pct: float
+    # [start, end) index pairs into the arrays above, for stretches over
+    # limit_pct. The limit is the same MAX_INCLINE_PCT the accessibility engine
+    # rejects on, so the drawing and the verdict cannot disagree.
+    steep_spans: list[list[int]]
+    limit_pct: float
+
+
 class Blocker(BaseModel):
     type: str
     lat: float
@@ -129,6 +149,7 @@ class Route(BaseModel):
     # different from a route with no turns, but the UI says "no directions"
     # either way rather than implying the route is a straight line.
     steps: list[Step] = Field(default_factory=list)
+    elevation: ElevationProfile | None = None
     narration: str | None = None
 
     # Not in the original spec. Present because a route built from a hand-made

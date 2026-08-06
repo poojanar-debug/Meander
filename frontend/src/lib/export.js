@@ -38,6 +38,13 @@ export function provenanceNote(route) {
   if (route.steps?.length) {
     parts.push(`${route.steps.length} directions included.`)
   }
+  if (route.elevation) {
+    parts.push(
+      `Climbs ${Math.round(route.elevation.ascent_m)} m, descends ` +
+        `${Math.round(route.elevation.descent_m)} m, steepest ` +
+        `${route.elevation.max_gradient_pct}%.`,
+    )
+  }
   if (route.status !== 'ok') {
     parts.push('This route was rejected by the accessibility constraints and cannot be completed.')
   }
@@ -56,13 +63,19 @@ const safeName = (route) =>
  */
 export function toGpx(route, { origin, dest } = {}) {
   const points = route.geometry ?? []
-  const elevations = route.elevation ?? []
 
+  // No <ele>. `route.elevation` is a *resampled and thinned* profile for
+  // drawing — 120 points at 20 m spacing — not a per-vertex array, so there is
+  // no honest way to attach one of its values to a given trackpoint. Writing
+  // the nearest sample would invent an elevation for a coordinate that does not
+  // have one, and a GPX consumer would then compute a climb figure from it and
+  // present that as measured.
+  //
+  // The climb goes in the description instead, where it is attributed.
   const trkpts = points
-    .map(([lon, lat], i) => {
-      const ele = Number.isFinite(elevations[i]) ? `<ele>${elevations[i].toFixed(1)}</ele>` : ''
-      return `      <trkpt lat="${lat.toFixed(6)}" lon="${lon.toFixed(6)}">${ele}</trkpt>`
-    })
+    .map(
+      ([lon, lat]) => `      <trkpt lat="${lat.toFixed(6)}" lon="${lon.toFixed(6)}"></trkpt>`,
+    )
     .join('\n')
 
   const waypoints = [

@@ -1,4 +1,5 @@
 import { routeColor } from '../lib/dash.js'
+import ElevationProfile from './ElevationProfile.jsx'
 import { Blockers } from './RouteCard.jsx'
 
 /**
@@ -63,6 +64,16 @@ export default function BlockedRouteCard({ route, selected, onSelect }) {
       </p>
 
       {route.blockers?.length > 0 && <Blockers blockers={route.blockers} prominent />}
+
+      {/* The profile stays on a blocked card when — and only when — it has a
+          stretch over the gradient limit. Duration and scores are suppressed
+          here because they describe a route you cannot take; a shaded hill is
+          the opposite, it is the *evidence* for the rejection. Showing it turns
+          "can't complete this route" into "can't complete this route, and here
+          is the hill". */}
+      {route.elevation?.steep_spans?.length > 0 && (
+        <ElevationProfile profile={route.elevation} />
+      )}
 
       {hasShape && (
         <p className="card__blocked-hint">

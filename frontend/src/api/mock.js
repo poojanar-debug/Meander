@@ -69,6 +69,47 @@ function pointAt(geometry, fraction) {
   return { lat, lon }
 }
 
+/**
+ * A plausible elevation profile in the backend's wire shape.
+ *
+ * `steep` forces a stretch over the 8% limit, so the shaded-gradient rendering
+ * has something to show without needing a real graph behind it.
+ */
+function mockProfile(seed, { steep = false } = {}) {
+  const n = 60
+  const distances = Array.from({ length: n }, (_, i) => i * 20)
+  const elevations = Array.from({ length: n }, (_, i) => {
+    const base = 12 + Math.sin((i / n) * Math.PI * 2 + seed) * 6
+    const ramp = steep && i > 24 && i < 34 ? (i - 24) * 2.2 : 0
+    return Math.round((base + ramp) * 10) / 10
+  })
+  let ascent = 0
+  let descent = 0
+  let maxGradient = 0
+  const spans = []
+  for (let i = 1; i < n; i += 1) {
+    const d = elevations[i] - elevations[i - 1]
+    if (d > 0) ascent += d
+    else descent -= d
+    const pct = Math.abs((d / 20) * 100)
+    maxGradient = Math.max(maxGradient, pct)
+    if (pct > 8) {
+      const last = spans[spans.length - 1]
+      if (last && last[1] === i) last[1] = i + 1
+      else spans.push([i - 1, i + 1])
+    }
+  }
+  return {
+    distances_m: distances,
+    elevations_m: elevations,
+    ascent_m: Math.round(ascent * 10) / 10,
+    descent_m: Math.round(descent * 10) / 10,
+    max_gradient_pct: Math.round(maxGradient * 10) / 10,
+    steep_spans: spans,
+    limit_pct: 8.0,
+  }
+}
+
 function buildRoutes(req) {
   const origin = req.origin ?? COLOMBO
   const isLoop = !req.destination
@@ -88,6 +129,7 @@ function buildRoutes(req) {
 
   const fastest = {
     id: 'fastest',
+    elevation: mockProfile(0.3, { steep: false }),
     label: 'Fastest',
     status: 'ok',
     geometry: fastestGeom,
@@ -107,6 +149,7 @@ function buildRoutes(req) {
 
   const nature = {
     id: 'nature',
+    elevation: mockProfile(1.1, { steep: false }),
     label: 'Nature',
     status: 'ok',
     geometry: natureGeom,
@@ -132,6 +175,7 @@ function buildRoutes(req) {
   // take. It keeps its geometry and its scores; only `status` differs.
   const accessible = {
     id: 'accessible',
+    elevation: mockProfile(2.0, { steep: true }),
     label: 'Accessible',
     status: 'blocked',
     geometry: accessibleGeom,

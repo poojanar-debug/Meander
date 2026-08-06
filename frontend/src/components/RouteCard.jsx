@@ -10,6 +10,7 @@ import {
   fmtPct,
   restStopSentence,
 } from '../lib/format.js'
+import ElevationProfile from './ElevationProfile.jsx'
 import TakeItWithYou from './TakeItWithYou.jsx'
 import TrustSignal from './TrustSignal.jsx'
 
@@ -91,6 +92,8 @@ export default function RouteCard({ route, selected, onSelect, origin, dest }) {
         </span>
       </p>
 
+      {route.elevation && <ElevationProfile profile={route.elevation} compact />}
+
       {WHY[route.id] && <p className="card__why">{WHY[route.id]}</p>}
 
       {/* ---- tier 2: the trust signal ---- */}
@@ -167,6 +170,8 @@ export default function RouteCard({ route, selected, onSelect, origin, dest }) {
             Description still being written…
           </p>
         )}
+
+        {route.elevation && <ElevationProfile profile={route.elevation} />}
 
         {route.steps?.length > 0 && (
           <div className="steps">

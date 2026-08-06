@@ -42,6 +42,7 @@ from .config import (
 )
 from .coverage import message as coverage_message
 from .coverage import outside_coverage
+from .elevation import build_profile
 from .enrich import (
     AirQuality,
     EnrichContext,
@@ -57,6 +58,7 @@ from .models import (
     BarrierReport,
     Blocker,
     CacheInfo,
+    ElevationProfile,
     GeocodeResponse,
     RestStop,
     Route,
@@ -467,6 +469,7 @@ class _Assessment:
     scores: Any
     access: Any
     clip_score: float | None
+    elevation: Any = None
 
 
 def _assess(raw: RawRoute) -> _Assessment:
@@ -483,7 +486,11 @@ def _assess(raw: RawRoute) -> _Assessment:
         clip_score=clip_score,
     )
     access = _guard("accessibility", assess_route, raw.points, raw.elevations or None, raw.details)
-    return _Assessment(scores=scores, access=access, clip_score=clip_score)
+    # Same input, same threshold, computed in the same place as the verdict.
+    profile = _guard("elevation_profile", build_profile, raw.points, raw.elevations or None)
+    return _Assessment(
+        scores=scores, access=access, clip_score=clip_score, elevation=profile
+    )
 
 
 def _scored_route(
@@ -550,6 +557,9 @@ def _scored_route(
             Step(text=st.text, distance_m=round(st.distance_m), lat=st.lat, lon=st.lon)
             for st in raw.steps
         ],
+        elevation=(
+            ElevationProfile(**vars(assessment.elevation)) if assessment.elevation else None
+        ),
         rest_stops=[
             RestStop(lat=s.lat, lon=s.lon, type=s.type, at_m=s.at_m)
             for s in (rest_stops or [])
