@@ -93,13 +93,35 @@ function meanderServiceWorker() {
   }
 }
 
+/**
+ * HTTPS for testing on a real phone, and it is not optional there.
+ *
+ * A service worker needs a secure context, and `http://192.168.1.5:5173` is not
+ * one — only `localhost` gets the exemption. So over plain LAN HTTP the app
+ * runs, but nothing about Phase 6.5 does: no worker registers, no install
+ * prompt appears, and the offline path cannot be reached at all. Tapping
+ * through a certificate warning does not help either; browsers refuse to
+ * register a worker on an origin with a certificate error, interstitial
+ * accepted or not. The certificate has to actually be trusted on the device.
+ *
+ * Off unless both variables are set, so a normal `npm run dev` is unchanged:
+ *
+ *   MEANDER_DEV_CERT=… MEANDER_DEV_KEY=… npm run preview -- --host
+ */
+const devHttps = () => {
+  const cert = process.env.MEANDER_DEV_CERT
+  const key = process.env.MEANDER_DEV_KEY
+  if (!cert || !key) return undefined
+  return { cert: readFileSync(cert), key: readFileSync(key) }
+}
+
 export default defineConfig({
   plugins: [react(), meanderServiceWorker()],
-  server: { proxy: API_PROXY },
+  server: { proxy: API_PROXY, https: devHttps() },
   // `vite preview` serves the real build, which is the only way to exercise the
   // service worker — a dev server has no hashed assets and no sw.js. It needs
   // the same proxy as the dev server or every route request 404s.
-  preview: { proxy: API_PROXY },
+  preview: { proxy: API_PROXY, https: devHttps() },
   build: {
     // MapLibre is large and rarely changes; keeping it in its own chunk means a
     // UI change does not invalidate it in the browser cache.
