@@ -982,3 +982,107 @@ are inside the old `.card` and all are on pairings §2 pre-verifies. Phase 4
 deletes that component; re-checked there rather than carried forward.
 
 **Live API calls:** none.
+
+---
+
+## Redesign phase 4 — Rail and detail · 2026-08-06
+
+The core change. `RouteList` + `RouteCard` → `RouteRail` + `RouteRow` +
+`RouteDetail`, plus `VerificationMeter` and `verificationTier()` (§4.6–4.8).
+
+**Done**
+
+- Uniform-height comparison rows for every route; full detail for the selected
+  route only.
+- The four-segment verification meter, with the server's confidence sentence
+  still rendering verbatim in the detail panel underneath it.
+- `verificationTier()`, `restStopSummary()`, `durationParts()`, `waysBack()` in
+  `lib/format.js`.
+
+**Verified**
+
+- Every row is a single `<button>` with **zero** `p`/`ul`/`ol`/`dl`/`div`
+  descendants, checked in the browser rather than by reading the JSX.
+- All three rows exactly **159px**; all nine score tracks at the same **117px**
+  offset within their row.
+- A `null` score and a `0` score render differently.
+- axe-core: 0 violations, 0 best-practice, 41 rules passed.
+
+**Decisions**
+
+- **The accessible name is the visible content, not an `aria-label`.** An
+  aria-label would have produced the tidy four-fact name §9 describes and
+  silently discarded the three score percentages — the numbers the rail exists
+  to let people compare. The visible text is instead written so that reading it
+  in order makes sense, with visually-hidden connectives where the terse visual
+  form would not.
+- **Uniform height needed a fix worth writing down.** "not measured" is ~78px at
+  `--t-micro`; a score column is 114px at the panel's widest and ~98px at its
+  narrowest, so it cannot share a line with its label. It wraps, and a wrapped
+  head made that row taller than the others — destroying the alignment the
+  component exists for. Shrinking the type was tried and fails at 360px. The fix
+  reserves the second line across the **whole rail** rather than on the row that
+  needs it (`.rail:has(.score__none) .score__head { min-height: 3em }`), so
+  every row grows together. With nothing unmeasured, nothing matches and the
+  head stays the single tight row §4.6 specifies.
+- **No `Share` or `Save` action**, though §4.8 lists them. `Save` is §6.8, which
+  is deferred. `Share` has no specification anywhere, and the app holds no state
+  in the URL, so a share link would point at the app's front door and say
+  nothing about the route. Same reasoning as the topbar profile button: a
+  control that does nothing reads as broken.
+
+**Found while working**
+
+The mock had no `null` score anywhere, so the branch that distinguishes "not
+measured" from "zero" had never once been rendered. The Accessible fixture now
+carries `shade: null`. Separately, the a11y harness was matching `.route`, which
+the loading skeletons also carry — three placeholders satisfied it and the audit
+ran against a half-streamed result. It now matches `button.route`.
+
+---
+
+## Redesign phase 5 — Map · 2026-08-06
+
+**Done**
+
+- Basemap recoloured to the §2.4 palette in place, per theme.
+- `--raised` casing at line-width + 6 under the selected line; unselected routes
+  at 5px / 0.45 opacity.
+- Rest stops as a circle layer on the selected route; barriers as ✕ markers.
+- Bottom-left legend, hidden below 900px.
+- 44px controls, last in the tab order.
+
+**Verified**
+
+- Light: background `#e9e5d8`, water `#c6dae4`, park `#cfe0c9`.
+  Dark: `#16221b`, `#152a33`, `#1d3527`. Route lines and casings switch with them.
+- axe-core: **0 violations, 0 best-practice** at light desktop, dark desktop and
+  390px. 0px horizontal overflow at 390px.
+
+**Two bugs found by running it, not by reading it**
+
+1. **The map drew streets and nothing else.** Route layers were gated on
+   MapLibre's `load` event, and with the current upstream positron style that
+   event never fires — `areTilesLoaded()` is true and tiles paint, but
+   `isStyleLoaded()` stays false forever. Every route layer was waiting on
+   something that was never coming. `load` and `idle` are both wired now, plus a
+   250 ms poll on `getStyle().layers.length`, which is the real precondition for
+   `addSource`. Readiness is idempotent so whichever arrives first wins.
+2. **The map repainted in the palette it was leaving.** React runs every child's
+   passive effect before the parent's, so MapView read `--map-land` and friends
+   out of `getComputedStyle` *before* App had written the new `data-theme`.
+   Applying the theme in a `useLayoutEffect` fixes the ordering, because all
+   layout effects run before any passive effect.
+
+**Deviations**
+
+- **`role="img"` is not on the map container**, though §4.10 asks for it. It
+  declares an element a single graphic whose contents are not exposed, so
+  nesting the zoom buttons inside it is `nested-interactive` — a serious WCAG
+  4.1.2 failure, which axe caught. It cannot move to the canvas wrapper either,
+  because MapLibre injects its own attribution button there. The summary reaches
+  assistive technology through a labelled region plus a visually-hidden
+  description carrying the same sentence.
+
+**Live API calls:** none — OpenFreeMap basemap tiles only, which the app already
+loaded before this work.
