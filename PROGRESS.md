@@ -1086,3 +1086,160 @@ ran against a half-streamed result. It now matches `button.route`.
 
 **Live API calls:** none — OpenFreeMap basemap tiles only, which the app already
 loaded before this work.
+
+---
+
+## Redesign phase 6 — When to go · 2026-08-06
+
+Best departure and the daylight window, built together because they share the
+strip (§6.2, §6.3).
+
+**Done**
+
+- `DepartureStrip.jsx` — the headline, the daylight line, and six hour chips.
+  `payload.best_departure` has been in the API response since the backend was
+  written and the UI ignored it.
+- `lib/sun.js` — NOAA short-form solar position, computed in the browser. No
+  network call: asking a service what time it gets dark would mean sending it
+  the user's coordinates.
+- `DaylightGuard.jsx` — at most one warning and at most one action.
+- `vitest` added as a devDependency; 23 tests for the solar maths.
+
+**Two bugs the tests found**
+
+1. **A route crossing midnight produced no warning at all.** The first version
+   asked `end > sunset-of-the-day-the-end-falls-on`; for a walk from 23:30 to
+   00:30 that end lands on a day whose sunset is eighteen hours in its *future*,
+   so a walk entirely in darkness passed silently. Replaced with "how light is
+   it at this moment", which handles midnight without special-casing it.
+2. **The longitude correction had both signs inverted** — worth 5.3 hours at
+   Colombo, and *every one of the twenty-two tests still passed*. A longitude
+   error moves sunrise and sunset by the same amount, so day length stays
+   correct and only absolute times are wrong; the equator test compared lengths,
+   and London is at 0.13 E where the error is fifteen seconds. It took a real
+   route reporting "Daylight today: 16:44 – 05:08" to show it. There is now a
+   test at a far longitude, asserting a *property* — the midpoint of sunrise and
+   sunset is solar noon — rather than an almanac figure taken on trust.
+
+**Decisions**
+
+- **The daylight layer goes quiet when the viewer's timezone and the route's
+  longitude disagree.** Sun times are absolute instants and correct anywhere,
+  but `Intl` formats in the viewer's timezone, so a Colombo route read from
+  California shows Californian clock times for a Sri Lankan sunset. A place's
+  civil timezone cannot be derived from coordinates without a tz database;
+  solar offset can, and three hours of slack admits the genuinely wide zones
+  while excluding the other side of the world. Sentence and moon glyphs go
+  together — half a signal is worse than none.
+- The shorten action disappears once sunset has passed. Offering to finish
+  before a sunset that has been and gone is nonsense.
+
+---
+
+## Redesign phase 7 — Turn-by-turn steps · 2026-08-06
+
+**Done**
+
+- `routing.py` requests instructions and parses them; `models.py` gained a
+  `Step` model and a `steps` field; `main.py` passes them through.
+- `StepList.jsx` — a `<details>` in the detail panel, instructions written as
+  sentences, barriers rendered **inside the step** they fall on, and a map
+  `highlight` layer on hover or focus.
+
+**Deviations**
+
+- **`models.py` was touched, which the scope said not to.** There was no way
+  around it: `Route` is a Pydantic model, so a field that does not exist there
+  cannot reach the response however `routing.py` parses it. One `Step` model and
+  one field. `accessibility.py` is untouched and nothing here goes near the
+  §6.5 request-model work `models.py` was being kept clear for.
+- **No `Share` or `Save` action in the detail panel**, though §4.8 lists them.
+  Save is §6.8, deferred. Share has no specification and the app holds no state
+  in the URL, so a share link would point at the front door.
+
+**The fixture problem, which is the part worth reading**
+
+Turning on `instructions` changed the request body, and fixtures are keyed on a
+hash of that body — so **68 fixtures became unreachable in one commit** and the
+offline suite started missing every one. This is the same coupling recorded
+above as self-hosting defect 6. Resolved by starting the self-hosted server and
+re-recording (16 real recordings with real instruction arrays), teaching
+`make_synthetic_fixtures.py` to emit instructions, and deleting the orphans.
+
+Two more bugs found by the new tests: a non-numeric `distance` threw and took
+the whole route with it, and the end-to-end assertion revealed that the
+COLOMBO→VIHARA scenario runs on a synthetic fixture that had no instructions at
+all — so the feature would have shipped with no offline test data despite a
+correct parser.
+
+---
+
+## Redesign phase 8 — Live follow mode · 2026-08-06
+
+**Done**
+
+- `lib/follow.js` — projection onto the line, progress, next turn, next rest
+  stop, barrier proximity, sustained off-route. 22 tests.
+- `FollowMode.jsx` — bottom sheet, barrier alert, off-route banner, wake lock,
+  one-tap exit.
+
+**Verified**
+
+- **The privacy claim was measured, not asserted.** Ten positions were fed
+  through follow mode with `fetch`, `XMLHttpRequest` and `sendBeacon` all
+  instrumented: **zero outbound requests of any kind**, and nothing carrying a
+  coordinate.
+- Barrier alert fires at 145 m on a walkable route with a recorded kerb,
+  `role="alert"`, naming type and description.
+- Off-route does **not** fire on a single distant reading, and does fire after a
+  continuous run past 15 s.
+- Exit is first in the DOM, first in the tab order, and takes focus on entry.
+- `Start this route` is disabled on a blocked route with the reason on
+  `aria-describedby`, and absent entirely when the router gave no instructions.
+
+**Decisions**
+
+- **Positions project onto the segment, not onto the nearest vertex.** On a long
+  straight stretch the nearest vertex can be 200 m away while the walker stands
+  exactly on the line; snapping would declare them lost. There is a test for it.
+- **Off-route needs a continuous run.** City GPS bounces off buildings by tens
+  of metres, and a 40 m threshold tested against one sample fires constantly on
+  a good walk and trains people to ignore it.
+- `barriersWithin` takes no notice of a route's status. Someone who read the
+  warning and chose to walk it anyway is the person who most needs telling when
+  the steps are 200 m ahead.
+
+**Two mock corrections found while testing**
+
+Route distances are now measured from the drawn geometry — they had been
+declared separately, so the rail said 1.4 km while follow mode said 2.6 km for
+the same walk. And the Nature route carries a recorded kerb, because without it
+nothing in the demo exercised the proximity alert: the only route with barriers
+was the one that cannot be started.
+
+---
+
+## Redesign — definition of done · 2026-08-06
+
+| Check | Result |
+|---|---|
+| Every §2 token declared once; no hard-coded hex outside the `:root` blocks | pass — `awk` check returns nothing |
+| Light and dark both ship; theme persists; defaults to `prefers-color-scheme` | pass |
+| axe-core 0 violations at light desktop, dark desktop, 390px | pass — 0 violations **and** 0 best-practice at all three, 42 rules passed |
+| Full keyboard pass in the §9 order with a visible focus ring | pass — skip link → topbar → trip bar → departure → rail → detail → about → map → **map controls last**; 3px ring |
+| No horizontal overflow at 320 / 390 / 768 / 1024 / 1440 / 1920 | pass — 0px at every width |
+| Fully usable with the map element removed from the DOM | pass — all three rows readable, selection, detail, scores, confidence sentence, rest stops and steps all work with `.map` deleted |
+| Greyscale: all three routes distinguishable | pass — solid / dashed / dotted, each named in words |
+| A `null` score and a `0` score render differently | pass — hatched track + "not measured" versus a real empty bar |
+| Backend tests | 393 passed, 1 failed — the pre-existing `MAPILLARY_TOKEN` environment failure recorded in BLOCKED.md #3 |
+| New tests cover instruction pass-through and the solar maths incl. polar day/night | pass — 5 backend, 45 frontend |
+| `prefers-reduced-motion` removes the animations | pass — the global rule collapses every transition to 0.001 ms |
+| No new runtime third-party requests | pass — vitest is a devDependency; the only runtime hosts are the ones the app already used |
+| Nothing new sent to the server; the live position never leaves the browser, and the UI says so | pass — measured at zero requests |
+| Sunrise/sunset renders nothing rather than guessing when it cannot be computed | pass |
+
+**Not built, as instructed:** §6.1 streaming choreography, §6.5 accessibility
+profile, §6.6 barrier detail popover, §6.8 saved places.
+
+**Live API calls this phase:** GraphHopper 16, all against the self-hosted
+server and therefore unmetered.

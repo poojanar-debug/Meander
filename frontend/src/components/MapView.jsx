@@ -1,7 +1,7 @@
 import maplibregl from 'maplibre-gl'
 import { useCallback, useEffect, useRef, useState } from 'react'
 
-import { routeColor, styleFor } from '../lib/dash.js'
+import { routeColor, styleFor, swatchBackground } from '../lib/dash.js'
 
 const STYLE_URL = 'https://tiles.openfreemap.org/styles/positron'
 const INITIAL_CENTER = [79.8521, 6.921]
@@ -575,18 +575,13 @@ export default function MapView({ routes, selected, origin, dest, theme, highlig
                 key={route.id}
                 className={route.id === selected ? 'legend__row is-selected' : 'legend__row'}
               >
+                {/* One property, not `background` plus `backgroundImage`.
+                    Setting both — even with one undefined — makes React warn
+                    about mixing shorthand and longhand, and swatchBackground
+                    already returns whichever of the two this route needs. */}
                 <span
                   className="legend__line"
-                  style={{
-                    background:
-                      style.dash.length === 2 && style.dash[1] === 0
-                        ? routeColor(route.id, theme)
-                        : undefined,
-                    backgroundImage:
-                      style.dash.length === 2 && style.dash[1] === 0
-                        ? undefined
-                        : `repeating-linear-gradient(90deg, ${routeColor(route.id, theme)} 0 ${style.dash[0] * 3}px, transparent ${style.dash[0] * 3}px ${(style.dash[0] + style.dash[1]) * 3}px)`,
-                  }}
+                  style={{ background: swatchBackground(route.id, theme) }}
                 />
                 {route.label} <span className="legend__pattern">{style.pattern}</span>
               </p>
