@@ -1,3 +1,5 @@
+import { formatDistance } from './units.js'
+
 /** Formatting helpers. Every string here can end up in a screen reader, so they
  * read as sentences rather than as abbreviations. */
 
@@ -33,9 +35,9 @@ export function fmtDurSpoken(minutes) {
 }
 
 export function fmtDist(metres) {
-  if (metres == null || Number.isNaN(metres)) return '—'
-  if (metres < 1000) return `${Math.round(metres / 10) * 10} m`
-  return `${(metres / 1000).toFixed(metres < 10000 ? 1 : 0)} km`
+  // Delegates, so the ~15 existing call sites follow the unit preference
+  // without any of them needing to know it exists.
+  return formatDistance(metres)
 }
 
 export function fmtPct(fraction) {

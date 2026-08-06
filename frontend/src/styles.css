@@ -1876,3 +1876,14 @@ fieldset.chips legend {
 .report__status:empty {
   display: none;
 }
+
+.linkish {
+  font: inherit;
+  background: none;
+  border: 0;
+  padding: 0;
+  color: var(--ink);
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}

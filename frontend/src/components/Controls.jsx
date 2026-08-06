@@ -1,6 +1,7 @@
 import { IMPLEMENTED, OBJECTIVES, swatchBackground } from '../lib/dash.js'
 import PlaceInput from './PlaceInput.jsx'
 import TimeDial from './TimeDial.jsx'
+import UnitsControl from './UnitsControl.jsx'
 
 const MODES = [
   { value: 'auto', label: 'Choose for me' },
@@ -141,6 +142,8 @@ export default function Controls({
               </p>
             )}
           </fieldset>
+
+          <UnitsControl />
         </>
       )}
     </form>

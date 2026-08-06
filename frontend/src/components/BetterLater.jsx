@@ -1,3 +1,5 @@
+import { formatTime } from '../lib/units.js'
+
 /**
  * "Better later" — the departure suggestion, with the thing it explains.
  *
@@ -27,9 +29,7 @@ export default function BetterLater({ when, reason }) {
         Better if you leave at{' '}
         <strong>
           <time dateTime={valid ? at.toISOString() : undefined}>
-            {valid
-              ? at.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-              : 'a later time'}
+            {valid ? formatTime(at) : 'a later time'}
           </time>
         </strong>
       </p>
