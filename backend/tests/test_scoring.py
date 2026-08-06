@@ -7,15 +7,20 @@ need torch is skipped when it is absent rather than silently passing.
 
 from __future__ import annotations
 
+import dataclasses
 import importlib.util
 
+import httpx
 import pytest
 
+from backend import fixtures as fx
+from backend import scoring
 from backend.cache import Cache
 from backend.geometry import LatLon
 from backend.scoring import (
     ACTIVE_PROMPT_VARIANT,
     MAPILLARY_BBOX_HALF_DEG,
+    MAPILLARY_BBOX_MIN_HALF_DEG,
     MIN_IMAGES_FOR_A_SCORE,
     PROMPT_VARIANTS,
     ScoringUnavailable,
@@ -330,3 +335,148 @@ def test_a_high_clip_score_lifts_the_nature_score(tmp_cache_db) -> None:
     with_clip = _scored_route("nature", "Nature", _raw_route(points, synthetic=False))
 
     assert with_clip.scores.nature > without.scores.nature
+
+
+# --- the dense-bbox refusal ------------------------------------------------
+#
+# Found with a real token against Euston Road. Mapillary answers a bbox it
+# considers too dense with HTTP 500 and "Please reduce the amount of data you're
+# asking for" — regardless of `limit`, which bounds rows returned rather than
+# rows scanned. Density is a proxy for how photographed a place is, so the
+# failure lands squarely on busy arterial roads: Hyde Park answered first time
+# while Euston Road, 2 km away, failed on every attempt at the default box.
+
+
+def _mapillary_transport(monkeypatch, handler) -> dict[str, list[str]]:
+    """Point the shared client at a handler and record the bboxes it is asked for.
+
+    `Settings` is frozen, so the token arrives as a replaced copy swapped into
+    the module rather than as an assignment to the field.
+    """
+    seen: dict[str, list[str]] = {"bbox": []}
+
+    def wrapped(request: httpx.Request) -> httpx.Response:
+        seen["bbox"].append(request.url.params.get("bbox", ""))
+        return handler(request, len(seen["bbox"]))
+
+    monkeypatch.setattr(
+        fx, "_client", httpx.AsyncClient(transport=httpx.MockTransport(wrapped))
+    )
+    monkeypatch.setattr(
+        scoring,
+        "settings",
+        dataclasses.replace(scoring.settings, mapillary_token="MLY|test|token"),
+    )
+    return seen
+
+
+def _too_dense() -> httpx.Response:
+    return httpx.Response(
+        500,
+        json={"error": {"code": 1,
+                        "message": "Please reduce the amount of data you're asking "
+                                   "for, then retry your request"}},
+    )
+
+
+def _bbox_half_width(bbox: str) -> float:
+    min_lon, _, max_lon, _ = (float(v) for v in bbox.split(","))
+    return (max_lon - min_lon) / 2
+
+
+@pytest.mark.asyncio
+async def test_a_bbox_refused_as_too_dense_is_narrowed_and_retried(
+    tmp_fixture_dir, fixture_mode, monkeypatch
+) -> None:
+    """The busiest streets are the ones this fails on, and they are the ones that
+    most need scoring — giving up would mean CLIP only ever sees quiet places."""
+    def handler(request: httpx.Request, attempt: int) -> httpx.Response:
+        if attempt == 1:
+            return _too_dense()
+        return httpx.Response(200, json={"data": [
+            {"id": "1", "thumb_1024_url": "https://example.invalid/1.jpg",
+             "computed_geometry": {"type": "Point", "coordinates": [-0.1657, 51.5073]}},
+        ]})
+
+    seen = _mapillary_transport(monkeypatch, handler)
+    monkeypatch.setattr(
+        fx, "_budget", fx.LiveCallBudget(tmp_fixture_dir / "b.json", caps={"mapillary": 10})
+    )
+    fixture_mode("live")
+
+    images = await fetch_images_near(HYDE)
+
+    assert len(images) == 1
+    assert len(seen["bbox"]) == 2, "it should have retried exactly once"
+    first, second = (_bbox_half_width(b) for b in seen["bbox"])
+    assert first == pytest.approx(MAPILLARY_BBOX_HALF_DEG, abs=1e-9)
+    assert second == pytest.approx(first / 2, abs=1e-9)
+
+
+@pytest.mark.asyncio
+async def test_narrowing_stops_at_the_floor_rather_than_shrinking_for_ever(
+    tmp_fixture_dir, fixture_mode, monkeypatch
+) -> None:
+    """Below the floor "imagery near this point" stops being a claim about the
+    point, so it raises instead of returning imagery from a 5 m box."""
+    seen = _mapillary_transport(monkeypatch, lambda request, attempt: _too_dense())
+    monkeypatch.setattr(
+        fx, "_budget", fx.LiveCallBudget(tmp_fixture_dir / "b.json", caps={"mapillary": 50})
+    )
+    fixture_mode("live")
+
+    with pytest.raises(ScoringUnavailable, match="Mapillary returned 500"):
+        await fetch_images_near(HYDE)
+
+    # 0.002 -> 0.001 -> 0.0005 -> 0.00025, and then it gives up. The tolerance
+    # is float slop from repeated halving, not slack in the rule.
+    assert len(seen["bbox"]) == 4
+    smallest = min(_bbox_half_width(b) for b in seen["bbox"])
+    assert smallest == pytest.approx(MAPILLARY_BBOX_MIN_HALF_DEG, rel=1e-6)
+
+
+@pytest.mark.asyncio
+async def test_a_500_that_is_not_the_density_refusal_is_not_retried(
+    tmp_fixture_dir, fixture_mode, monkeypatch
+) -> None:
+    """`code: 1` alone is Facebook's generic "unknown error". Narrowing the box
+    for an unrelated outage would triple the spend and fix nothing."""
+    seen = _mapillary_transport(
+        monkeypatch,
+        lambda request, attempt: httpx.Response(
+            500, json={"error": {"code": 1, "message": "An unknown error occurred"}}
+        ),
+    )
+    monkeypatch.setattr(
+        fx, "_budget", fx.LiveCallBudget(tmp_fixture_dir / "b.json", caps={"mapillary": 10})
+    )
+    fixture_mode("live")
+
+    with pytest.raises(ScoringUnavailable, match="Mapillary returned 500"):
+        await fetch_images_near(HYDE)
+
+    assert len(seen["bbox"]) == 1, "a generic 500 must not be retried"
+
+
+@pytest.mark.asyncio
+async def test_every_narrowed_retry_is_charged_to_the_budget(
+    tmp_fixture_dir, fixture_mode, monkeypatch
+) -> None:
+    """A retry is a second request. Not charging it would let one dense point
+    spend several live calls off the books, which is how a budget stops working.
+
+    `record`, not `live`: live mode is deliberately uncapped — it is the mode a
+    person picks to record fixtures on purpose — and never touches the counter.
+    Metering only exists on the record path, which is the one this asserts.
+    """
+    def handler(request: httpx.Request, attempt: int) -> httpx.Response:
+        return _too_dense() if attempt < 3 else httpx.Response(200, json={"data": []})
+
+    _mapillary_transport(monkeypatch, handler)
+    budget = fx.LiveCallBudget(tmp_fixture_dir / "b.json", caps={"mapillary": 10})
+    monkeypatch.setattr(fx, "_budget", budget)
+    fixture_mode("record")
+
+    await fetch_images_near(HYDE)
+
+    assert budget.spent("mapillary") == 3
