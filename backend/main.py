@@ -43,6 +43,7 @@ from .models import (
     RouteRequest,
     RoutesResponse,
     Scores,
+    Step,
     effective_mode,
 )
 from .ratelimit import RateLimiter
@@ -265,6 +266,17 @@ def _scored_route(
         rest_stops=[
             RestStop(lat=s.lat, lon=s.lon, type=s.type, at_m=s.at_m)
             for s in (rest_stops or [])
+        ],
+        steps=[
+            Step(
+                text=st.text,
+                distance_m=round(st.distance_m, 1),
+                duration_min=round(st.duration_min, 2),
+                street_name=st.street_name,
+                sign=st.sign,
+                interval=list(st.interval),
+            )
+            for st in raw.steps
         ],
         synthetic_upstream=synthetic,
         confidence_note=(

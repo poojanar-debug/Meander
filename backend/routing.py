@@ -263,6 +263,23 @@ def accessible_custom_model(with_smoothness: bool | None = None) -> dict[str, An
 # ---------------------------------------------------------------------------
 
 
+@dataclass(frozen=True)
+class RouteStep:
+    """One turn instruction, as GraphHopper described it.
+
+    ``interval`` is the half-open span of point indices this step covers, which
+    is what lets the frontend highlight the matching stretch of the drawn line
+    and place a barrier inside the step a walker would meet it on.
+    """
+
+    text: str
+    distance_m: float
+    duration_min: float
+    street_name: str | None
+    sign: int
+    interval: tuple[int, int]
+
+
 @dataclass
 class RawRoute:
     """A route as GraphHopper returned it, before scoring or enrichment."""
@@ -273,6 +290,7 @@ class RawRoute:
     mode: EffectiveMode
     elevations: list[float] = field(default_factory=list)
     details: dict[str, list[tuple[int, int, Any]]] = field(default_factory=dict)
+    steps: list[RouteStep] = field(default_factory=list)
     synthetic_upstream: bool = False
     preset: str = "fastest"
     # Set when the preset could not fully deliver what it promises — over the
@@ -301,7 +319,13 @@ def _base_body(profile: str, elevation: bool = True) -> dict[str, Any]:
     return {
         "profile": profile,
         "points_encoded": False,
-        "instructions": False,
+        # Turn instructions, for the step list. Asking for them changes the
+        # request body, and fixtures are keyed on a hash of that body — so
+        # flipping this invalidates every recorded GraphHopper fixture and the
+        # offline suite starts missing every one of them. The synthetic
+        # fixtures are regenerated from this same function, so they follow
+        # automatically; recorded ones need re-recording.
+        "instructions": True,
         "calc_points": True,
         "elevation": elevation,
         "details": path_details(),
@@ -327,6 +351,58 @@ def _parse_details(raw: Any) -> dict[str, list[tuple[int, int, Any]]]:
     return out
 
 
+def _parse_instructions(raw: Any) -> list[RouteStep]:
+    """GraphHopper's instruction array, or an empty list.
+
+    An empty list is a real answer and the frontend renders it as one — "step
+    by step directions are not available for this route". Instructions are
+    never synthesised from the geometry: a turn the router did not describe is
+    a turn nobody has checked.
+    """
+    if not isinstance(raw, list):
+        return []
+    steps: list[RouteStep] = []
+    for item in raw:
+        if not isinstance(item, dict):
+            continue
+        text = item.get("text")
+        if not isinstance(text, str) or not text.strip():
+            continue
+        interval = item.get("interval")
+        if isinstance(interval, list | tuple) and len(interval) >= 2:
+            try:
+                span = (int(interval[0]), int(interval[1]))
+            except (TypeError, ValueError):
+                span = (0, 0)
+        else:
+            span = (0, 0)
+        street = item.get("street_name")
+        steps.append(
+            RouteStep(
+                text=text.strip(),
+                distance_m=_number(item.get("distance")),
+                duration_min=_number(item.get("time")) / 60_000.0,
+                street_name=street.strip() if isinstance(street, str) and street.strip() else None,
+                sign=int(_number(item.get("sign"))),
+                interval=span,
+            )
+        )
+    return steps
+
+
+def _number(value: Any) -> float:
+    """A float, or zero. Never an exception.
+
+    A malformed field in one instruction must not cost the user the whole route:
+    the geometry, the scores and the accessibility findings are all still good.
+    Losing them because a distance came back as a string would be a bad trade.
+    """
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return 0.0
+
+
 def _parse_path(path: dict[str, Any], mode: EffectiveMode, synthetic: bool, preset: str
                 ) -> RawRoute:
     coords = (path.get("points") or {}).get("coordinates") or []
@@ -350,6 +426,7 @@ def _parse_path(path: dict[str, Any], mode: EffectiveMode, synthetic: bool, pres
         mode=mode,
         elevations=elevations,
         details=_parse_details(path.get("details")),
+        steps=_parse_instructions(path.get("instructions")),
         synthetic_upstream=synthetic,
         preset=preset,
     )

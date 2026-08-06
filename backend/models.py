@@ -103,6 +103,23 @@ class Blocker(BaseModel):
     description: str
 
 
+class Step(BaseModel):
+    """One turn instruction from the router.
+
+    Added for the turn-by-turn step list. The frontend writes these as sentences
+    in the narration's voice; the raw fields are carried so it can, and
+    ``interval`` lets it highlight the matching stretch of the line and place a
+    barrier inside the step where a walker would meet it.
+    """
+
+    text: str
+    distance_m: float
+    duration_min: float
+    street_name: str | None = None
+    sign: int = 0
+    interval: list[int] = Field(default_factory=list)
+
+
 class Route(BaseModel):
     id: str
     label: str
@@ -116,6 +133,9 @@ class Route(BaseModel):
     confidence: float
     rest_stops: list[RestStop] = Field(default_factory=list)
     blockers: list[Blocker] = Field(default_factory=list)
+    # Empty when the router returned no instructions. The frontend says so
+    # rather than inventing directions.
+    steps: list[Step] = Field(default_factory=list)
     narration: str | None = None
 
     # Not in the original spec. Present because a route built from a hand-made

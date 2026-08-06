@@ -40,6 +40,35 @@ def test_routes_differ_in_duration_and_geometry(api_client) -> None:
     assert by_id["accessible"]["geometry"] != by_id["fastest"]["geometry"]
 
 
+def test_turn_instructions_reach_the_wire(api_client) -> None:
+    """routing.py parsing them is not enough — they have to survive to the payload.
+
+    The step list, and the follow mode built on top of it, exist only if this
+    array does.
+    """
+    routes = api_client.post("/api/routes", json=_body()).json()["routes"]
+    fastest = next(r for r in routes if r["id"] == "fastest")
+
+    assert fastest["steps"], "the router described turns and the API dropped them"
+    first = fastest["steps"][0]
+    assert first["text"]
+    assert first["distance_m"] >= 0
+    # Indexes into this route's own geometry, which is what lets the frontend
+    # highlight the matching stretch and put a barrier inside the step where a
+    # walker would meet it.
+    assert len(first["interval"]) == 2
+    assert 0 <= first["interval"][0] <= first["interval"][1] < len(fastest["geometry"])
+
+
+def test_a_route_without_instructions_reports_an_empty_list(api_client) -> None:
+    """Never a synthesised turn. Absence of data is not permission to fill it in —
+    the same rule that makes an untagged path UNKNOWN rather than accessible."""
+    routes = api_client.post("/api/routes", json=_body()).json()["routes"]
+
+    for route in routes:
+        assert isinstance(route["steps"], list)
+
+
 def test_geometry_is_lon_lat_pairs(api_client) -> None:
     first = api_client.post("/api/routes", json=_body()).json()["routes"][0]["geometry"][0]
 
