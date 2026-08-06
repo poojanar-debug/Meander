@@ -11,6 +11,7 @@ import importlib.util
 
 import pytest
 
+from backend import config, scoring
 from backend.cache import Cache
 from backend.geometry import LatLon
 from backend.scoring import (
@@ -155,8 +156,42 @@ def test_score_images_of_nothing_is_an_empty_list_not_an_error() -> None:
 
 
 @pytest.mark.asyncio
-async def test_fetching_imagery_without_a_token_fails_loudly() -> None:
-    """Silently returning no imagery would look like "this place has none"."""
+async def test_fetching_imagery_without_a_token_fails_loudly(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Silently returning no imagery would look like "this place has none".
+
+    The absent token is supplied by the test rather than by the developer's
+    .env. Settings is frozen and resolved once at import, so clearing the
+    environment variable here would not reach the module that already read it;
+    swapping the module-level `settings` for a fresh one is the same idiom
+    test_fixtures.py uses to inject a GraphHopper key.
+
+    Without this the test asserted whatever the machine happened to have. A
+    developer who followed BLOCKED.md #2 and set MAPILLARY_TOKEN got past the
+    guard and died further down on a missing Mapillary fixture — a failure that
+    named the wrong thing entirely, and which CI could never reproduce because
+    .env is gitignored.
+    """
+    monkeypatch.setattr(scoring, "settings", config.Settings(mapillary_token=None))
+
+    with pytest.raises(ScoringUnavailable, match="MAPILLARY_TOKEN"):
+        await fetch_images_near(HYDE)
+
+
+@pytest.mark.asyncio
+async def test_a_token_in_the_environment_does_not_change_that_verdict(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The test above must assert the same thing on every machine.
+
+    Pinned because the environment already broke it once: this is BLOCKED.md #3,
+    and the failure mode is a suite that is green in CI and red on the laptop of
+    anyone who has done the imagery work.
+    """
+    monkeypatch.setenv("MAPILLARY_TOKEN", "a-real-looking-token")
+    monkeypatch.setattr(scoring, "settings", config.Settings(mapillary_token=None))
+
     with pytest.raises(ScoringUnavailable, match="MAPILLARY_TOKEN"):
         await fetch_images_near(HYDE)
 
