@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState } from 'react'
 
 import { buildRouteRequest, fetchRoutes } from './api/client.js'
 import FirstRun from './components/FirstRun.jsx'
@@ -239,7 +239,14 @@ export default function App() {
 
   // index.html already painted the right theme before React existed; this keeps
   // the DOM in step once the user starts toggling.
-  useEffect(() => {
+  //
+  // useLayoutEffect, not useEffect, and that is load-bearing. React runs every
+  // child's passive effect before the parent's, so MapView's theme effect ran
+  // *before* this one had flipped `data-theme` — it read the outgoing palette
+  // out of getComputedStyle and repainted the basemap in the colours we were
+  // leaving. Layout effects all run before any passive effect, so this now
+  // lands first and the map reads the palette it is switching to.
+  useLayoutEffect(() => {
     applyTheme(state.theme)
   }, [state.theme])
 
@@ -412,6 +419,7 @@ export default function App() {
               selected={state.selected}
               origin={state.origin}
               dest={state.dest}
+              theme={state.theme}
               onSelect={onSelect}
             />
           )}
