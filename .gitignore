@@ -39,6 +39,7 @@ Thumbs.db
 # routing graph built from them. All reproducible from scripts/graphhopper.sh.
 graphhopper/graphhopper-web-*.jar
 graphhopper/data/
+graphhopper/graph-dist/
 
 # SQLite side files. The database itself is committed (it carries the pre-warmed
 # CLIP segment scores); these two are per-process journal state.
