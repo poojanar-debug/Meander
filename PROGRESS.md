@@ -1231,7 +1231,7 @@ was the one that cannot be started.
 | Fully usable with the map element removed from the DOM | pass — all three rows readable, selection, detail, scores, confidence sentence, rest stops and steps all work with `.map` deleted |
 | Greyscale: all three routes distinguishable | pass — solid / dashed / dotted, each named in words |
 | A `null` score and a `0` score render differently | pass — hatched track + "not measured" versus a real empty bar |
-| Backend tests | 393 passed, 1 failed — the pre-existing `MAPILLARY_TOKEN` environment failure recorded in BLOCKED.md #3 |
+| Backend tests | **394 passed, 0 failed** under CI conditions — verified in a clean torch-free virtualenv with no keys. On a machine with a `MAPILLARY_TOKEN` in `.env` one test fails; see BLOCKED.md #3 |
 | New tests cover instruction pass-through and the solar maths incl. polar day/night | pass — 5 backend, 45 frontend |
 | `prefers-reduced-motion` removes the animations | pass — the global rule collapses every transition to 0.001 ms |
 | No new runtime third-party requests | pass — vitest is a devDependency; the only runtime hosts are the ones the app already used |

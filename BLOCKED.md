@@ -44,8 +44,7 @@ could not fire from routing data at all until then. See PROGRESS.md,
 
 **What is still true, and will bite**
 
-1. **The self-hosted server has to actually be running.** It is not running as
-   of this writing (`curl localhost:8989` refuses the connection). With
+1. **The self-hosted server has to actually be running.** With
    `MEANDER_GRAPHHOPPER_URL` set and nothing listening, routing fails; unset it
    and the app falls back to the hosted API, where this entry's original
    symptom returns exactly as described above. Start it with:
@@ -54,11 +53,13 @@ could not fire from routing data at all until then. See PROGRESS.md,
    scripts/graphhopper.sh serve
    ```
 
-2. **Only imported regions can be routed.** The graph covers Sri Lanka, the
-   Netherlands and Great Britain — the `REGIONS` list at the top of
-   `scripts/graphhopper.sh`. Anywhere else has no path at any preset. Add a
-   Geofabrik path and re-run `setup` to widen it; `scripts/graphhopper.sh
-   regions` prints what is currently built in.
+2. **Only imported regions can be routed.** The graph actually built here is
+   narrower than the `REGIONS` list at the top of `scripts/graphhopper.sh`
+   suggests — the extracts on disk are **Sri Lanka, Greater London and
+   Noord-Holland**, not the whole of Great Britain and the Netherlands. That
+   covers all five demo locations and nothing else; anywhere outside them has
+   no path at any preset. `scripts/graphhopper.sh regions` prints what is
+   currently built in, and is worth trusting over the list in the script.
 
 3. `ch.disable` is conditional on which server is in use, and has to stay that
    way — `round_trip` requires it self-hosted and is rejected with it hosted.
@@ -88,16 +89,21 @@ measurement.
 | `GRAPHHOPPER_KEY` | set |
 | `MEANDER_FIXTURES` | `live` |
 | `MEANDER_BUDGET_*` | raised to 100,000 — the development guard rails are no longer the binding limit |
-| `fixtures/graphhopper/` | 68 fixtures, of which **18 are still synthetic** |
+| `fixtures/graphhopper/` | 53 fixtures — **18 synthetic, 35 recorded** against the self-hosted server |
 
 **What is still true**
 
-The eighteen original synthetic fixtures are still in the tree. They are
-correct to keep — they are what the offline test suite runs against, and they
-are why the suite never opens a socket — but it means a replayed request that
-lands on one is still demonstration data, still labelled as such, and still must
-not be followed. That labelling is not vestigial; the UI's demo ribbon keys on
-it.
+The eighteen synthetic fixtures are still in the tree. They are correct to keep
+— they are what the offline test suite runs against, and they are why the suite
+never opens a socket — but it means a replayed request that lands on one is
+still demonstration data, still labelled as such, and still must not be
+followed. That labelling is not vestigial; the UI's demo ribbon keys on it.
+
+**Every GraphHopper fixture is keyed on a hash of the request body**, so adding
+a field to that body invalidates all of them at once. Turning on turn
+instructions did exactly that and orphaned 68 fixtures in one commit; see
+PROGRESS.md, redesign phase 7. Anyone changing `_base_body` in `routing.py`
+should expect to re-record.
 
 To replace them with recordings:
 
@@ -155,9 +161,15 @@ committed `cache.db` instead — see the README's architecture split.
 
 ---
 
-## 3 · One backend test fails, for an environmental reason
+## 3 · One backend test fails on a machine that has a Mapillary token
 
 **Discovered:** 2026-08-06, taking a baseline before the frontend redesign.
+
+**It does not fail in CI**, and that distinction matters more than it looks.
+`.env` is gitignored, so a CI runner has no `MAPILLARY_TOKEN` and the suite is
+**394 passed, 0 failed** — verified in a clean torch-free virtualenv with no
+keys, which is exactly what the runner builds. It fails only for a developer who
+has a token in `.env`, which is most people who have done step 1 of #2 above.
 
 `backend/tests/test_scoring.py::test_fetching_imagery_without_a_token_fails_loudly`
 asserts that requesting imagery with no `MAPILLARY_TOKEN` raises
@@ -171,10 +183,11 @@ Input: 'No fixture for mapillary request 451de727c24f885a …'
 ```
 
 Unsetting the variable makes it pass, which confirms the cause. **The test is
-right and the environment changed under it.** The suite is otherwise green:
+right and the environment changed under it.**
 
 ```
-1 failed, 388 passed
+with a token in .env :  1 failed, 393 passed
+without one (CI)     :    394 passed
 ```
 
 **What you need to do** — decide which of these the project wants:

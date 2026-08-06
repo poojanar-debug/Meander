@@ -307,7 +307,7 @@ def test_no_instructions_is_an_empty_list_not_an_invention() -> None:
     This is the same rule as an untagged path being UNKNOWN rather than
     accessible: absence of data is not permission to fill it in.
     """
-    from backend.routing import _parse_instructions  # noqa: PLC0415
+    from backend.routing import _parse_instructions
 
     assert _parse_instructions(None) == []
     assert _parse_instructions([]) == []
@@ -317,7 +317,7 @@ def test_no_instructions_is_an_empty_list_not_an_invention() -> None:
 
 
 def test_malformed_instruction_entries_degrade_rather_than_raise() -> None:
-    from backend.routing import _parse_instructions  # noqa: PLC0415
+    from backend.routing import _parse_instructions
 
     steps = _parse_instructions(
         [
