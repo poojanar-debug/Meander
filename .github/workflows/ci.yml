@@ -10,13 +10,31 @@ name: ci
 # templates. None of those things exist on this branch, so none of them are
 # checked here; when that branch lands, its file supersedes this one.
 
+# `push` is scoped to main rather than to '**', and that is the whole of the
+# de-duplication. With `push: ['**']` alongside `pull_request`, every commit on
+# a branch with an open PR ran the whole suite twice — verified on 6ad38c8,
+# which produced one `push` run and one `pull_request` run of five jobs each.
+# The concurrency group did not collapse them because the two events carry
+# different refs: `refs/heads/<branch>` against `refs/pull/<n>/merge`.
+#
+# Scoping to main also tests the better commit. A `pull_request` run builds the
+# branch already merged into its base, which is the thing that will actually
+# land; a `push` run builds the branch head in isolation and can pass while the
+# merge is broken.
+#
+# The trade is that a branch with no open PR gets no CI. That is the usual
+# arrangement, and CONTRIBUTING.md already asks for the suite to be run before
+# every commit.
 on:
   push:
-    branches: ['**']
+    branches: [main]
   pull_request:
 
+# Keyed on the PR number where there is one, so all of a pull request's runs
+# share a group and a new push cancels the run still in flight. Falling back to
+# the ref keeps pushes to main grouped per branch.
 concurrency:
-  group: ci-${{ github.ref }}
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 permissions:
