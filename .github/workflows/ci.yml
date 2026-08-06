@@ -1,0 +1,157 @@
+name: ci
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+
+  backend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: '3.13' }
+
+      # requirements-dev.txt, not requirements.txt. The latter pulls 2.5 GB of
+      # torch so that two tests can un-skip, and it is the *further* environment
+      # from production, which has no torch either.
+      - run: python -m pip install -r backend/requirements-dev.txt
+
+      - name: Lint
+        run: python -m ruff check backend/ scripts/
+
+      - name: Tests, with the coverage floor
+        # The floor lives in pyproject.toml so it is the same number here and on
+        # a workstation. 85%, measured at 87.33%.
+        run: python -m pytest backend/tests --cov --cov-report=term:skip-covered
+
+      - name: The suite must not have opened a socket
+        # conftest blocks sockets and a meta-test proves the guard is active, so
+        # this is a third line of defence: if the guard were ever removed, the
+        # suite would still pass locally on a developer's network and silently
+        # start depending on it. Running with no DNS makes that impossible to
+        # miss. `unshare` is available on GitHub's Ubuntu runners.
+        # The interpreter is resolved before sudo: sudo's PATH is not the
+        # runner's, so a bare `python` here would be a different one without
+        # the dependencies.
+        run: |
+          sudo unshare -n "$(command -v python)" -m pytest backend/tests -q
+
+  deploy-image-is-torch-free:
+    # The guarantee the whole 512 MB deployment rests on, checked against the
+    # real requirements file rather than by reading it.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: '3.13' }
+      - run: python -m pip install -r backend/requirements-deploy.txt
+      - name: torch, open_clip and torchvision must all be absent
+        run: |
+          python - <<'PY'
+          import importlib.util as u
+          absent = {m: u.find_spec(m) is None for m in ("torch", "open_clip", "torchvision")}
+          print(absent)
+          assert all(absent.values()), f"a deploy dependency pulled in {absent}"
+          import backend.main   # must import cleanly with none of them present
+          print("backend.main imports without torch")
+          PY
+
+  frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: '22', cache: npm, cache-dependency-path: frontend/package-lock.json }
+      - run: npm ci
+        working-directory: frontend
+
+      # `npm run build` runs check:palette, check:permalink and check:offline
+      # before vite. Named individually here so a failure says which contract
+      # broke rather than "build failed".
+      - run: npm run check:palette
+        working-directory: frontend
+      - run: npm run check:permalink
+        working-directory: frontend
+      - run: npm run check:offline
+        working-directory: frontend
+      - run: npm run build
+        working-directory: frontend
+
+      - name: The service worker must carry a real precache manifest
+        # The build plugin asserts this too. Repeated here because the failure
+        # it guards — a worker shipping a literal __PRECACHE__, or one with no
+        # index.html in the list — produces a build that looks entirely fine
+        # and an app that opens blank offline.
+        working-directory: frontend
+        run: |
+          set -euo pipefail
+          grep -q '__PRECACHE__' dist/sw.js && { echo "sw.js has an unsubstituted placeholder" >&2; exit 1; } || true
+          grep -q '"/index.html"' dist/sw.js || { echo "sw.js precache has no index.html" >&2; exit 1; }
+          echo "sw.js precache looks right"
+
+  browser-gates:
+    # gate.mjs and pwa-gate.mjs drive headless Chrome over CDP. They are the
+    # only checks that measure the thing Phase 5 and Phase 6.5 are graded on —
+    # three routes visible without scrolling, and a saved route labelled with
+    # its age — and neither can be asserted from source.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: '22', cache: npm, cache-dependency-path: frontend/package-lock.json }
+      - uses: actions/setup-python@v5
+        with: { python-version: '3.13' }
+
+      - run: npm ci && npm run build
+        working-directory: frontend
+      - run: python -m pip install -r backend/requirements-dev.txt
+
+      - name: Start headless Chrome
+        run: |
+          google-chrome --headless=new --remote-debugging-port=9222 --disable-gpu \
+            --no-sandbox --user-data-dir=/tmp/chrome-ci --no-first-run about:blank &
+          for i in $(seq 1 30); do sleep 1; curl -sf http://localhost:9222/json/version && break; done
+
+      - name: Phase 5 gate — layout, targets, axe, light and dark
+        working-directory: frontend
+        run: |
+          VITE_MOCK_API=1 npx vite --port 5199 --strictPort &
+          for i in $(seq 1 30); do sleep 1; curl -sf http://localhost:5199/ >/dev/null && break; done
+          node scripts/gate.mjs http://localhost:5199
+
+      - name: Phase 6.5 gate — the service worker, with the server stopped
+        # Needs the API, because it drives the app to real routes and then takes
+        # the origin away. MEANDER_FIXTURES=replay so it spends nothing and
+        # needs no key: the demo locations have committed fixtures.
+        run: |
+          MEANDER_FIXTURES=replay python -m uvicorn backend.main:app --port 8000 &
+          for i in $(seq 1 30); do sleep 1; curl -sf http://localhost:8000/healthz && break; done
+          cd frontend && node scripts/pwa-gate.mjs
+
+  infrastructure:
+    # Every template that describes the deployment must at least be
+    # well-formed. This is a syntax check and nothing more — infra/README.md is
+    # explicit that none of it has been applied.
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: CloudFormation templates parse
+        # cfn-lint rather than `aws cloudformation validate-template`, which
+        # needs credentials. It also catches more: unresolved !Ref targets,
+        # unknown resource properties, and bad intrinsic function arguments.
+        run: |
+          python -m pip install cfn-lint
+          cfn-lint infra/*.yaml

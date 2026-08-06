@@ -23,3 +23,17 @@
 pytest==8.3.4
 pytest-asyncio==0.25.2
 ruff==0.9.2
+
+# The coverage floor lives in pyproject.toml so it is the same number in CI and
+# on a workstation.
+pytest-cov==6.0.0
+
+# Property tests over coordinates (test_geometry_properties.py). It found two
+# real defects on its first run — a bearing of exactly 360.0, and an
+# interpolation that leaves the planet at the poles — neither of which any
+# example-based test was ever going to generate.
+hypothesis==6.125.1
+
+# CloudFormation templates in infra/. Catches more than
+# `aws cloudformation validate-template` and, unlike it, needs no credentials.
+cfn-lint==1.54.0
