@@ -1205,3 +1205,202 @@ Every one of these produced output that looked fine.
 
 **Live API calls:** GraphHopper self-hosted ~30 (unmetered), Nominatim 0
 (recorded), Overpass ~6, Open-Meteo ~12.
+
+---
+
+## Launch phase 4 · AWS, written and not applied
+
+Four CloudFormation stacks, a deploy workflow on GitHub OIDC, and a gate table
+where every row says UNVERIFIED and names the command that would settle it.
+
+**Nothing was applied.** The credentials here are account root and creating
+billable resources was out of scope. What *was* done is run
+`aws cloudformation validate-template` — a read-only call — and then `cfn-lint`,
+against all four. Both pass. That is a much weaker claim than "it works", and
+`infra/README.md` opens by saying so: a template that parses proves nothing
+about whether a security group rule is right or two services can reach each
+other.
+
+CloudFormation rather than Terraform or CDK for exactly that reason. It is the
+only one of the three whose templates can be checked against the real AWS API
+without installing a provider, standing up state, or creating anything.
+
+**What the account can actually do, checked rather than assumed.** There is no
+Route 53 hosted zone, and the `freshhaul.com` certificate in us-east-1 is
+`VALIDATION_TIMED_OUT` — requested, never validated, expired after 72 hours
+because the DNS records were never published. So the domain and both
+certificates are optional parameters and the distribution falls back to its own
+`cloudfront.net` name. HANDOFF.md said "an ACM cert exists"; it exists and it is
+dead, which is a different thing.
+
+**Three settings that are load-bearing and none fails loudly**
+
+`MEANDER_GRAPHHOPPER_SELF_HOSTED=1`, because the hostname sniff resolves a
+Cloud Map name to *not* self-hosted, `path_details()` then drops `smoothness`,
+and the accessible model silently stops excluding surfaces recorded as
+impassable.
+
+`MEANDER_TRUSTED_PROXY_HOPS=2`, and HANDOFF.md said 1. Both are right for
+different topologies: 1 behind an ALB alone, 2 behind CloudFront *and* an ALB,
+because CloudFront sets X-Forwarded-For to the viewer and the ALB appends
+CloudFront's address. The app sees `viewer, cloudfront` and counts from the
+right. At 1 the limiter still works — it just puts every request in the world
+in one bucket, which is what makes it hard to notice.
+
+`MEANDER_CACHE_DB` deliberately unset, because setting it points the API away
+from the `data/cache.db` baked into the image and every route quietly drops to
+`geometry_only`. Phase K found this in `render.yaml`.
+
+**The cost estimate has two lines worth arguing about.** ~$108/month, and the
+NAT gateway is $32 of it — more than the API it serves — while the load balancer
+is $18, about as much as everything it balances. `infra/README.md` says plainly
+that below this size ECS is the wrong shape and a single small instance would
+do. An IaC document that only argues for itself is not much use.
+
+**What I did not do.** No WAF: $6/month plus per-request, and the app already
+has a per-IP bucket and a daily ceiling — worth adding when there is traffic to
+protect, not before. No autoscaling: a scaling policy with nothing to size it
+from is a guess with a bill attached. No database: there is no user data, and
+adding one would create the retention question this project exists not to have.
+
+---
+
+## Launch phase 3, revisited · The images, finally built
+
+Phase 3 wrote both Dockerfiles, the entrypoint and the compose stack, and never
+built any of them. Building them found what building always finds.
+
+**`.dockerignore` governs two images and was written for one.** Both Dockerfiles
+build from the repository root, so the blanket `graphhopper/` exclusion — right
+for keeping a multi-GB graph out of the API image — also took the router's own
+`config.yml` with it. The router build failed on its first ever run.
+
+**The graph was in the router image three times.** `docker history` on a 485 MB
+graph showed 509 + 509 + 556 MB: the staging COPY, the `cp -a` into place (and
+`rm -rf` afterwards writes a whiteout, so the bytes stay in the layer below),
+and then a `chown -R` that rewrote every file's metadata — layers being
+copy-on-write per *file*, that copied all of it again. **2.65 GB → 1.2 GB**:
+create the user first, `COPY --chown` straight to the final path, leave /app
+root-owned because `gh` only reads the JAR.
+
+The conditional bake-in is two stages selected by `GRAPH_SOURCE`, which is the
+only way to make a COPY conditional. It needs BuildKit, and that is the point:
+BuildKit builds the selected stage alone, so `GRAPH_SOURCE=none` really produces
+an image with no graph (520 MB) rather than quietly including whatever happened
+to be staged.
+
+**Verified on colima + Docker 29 + buildx, arm64.** Both images build both ways;
+`docker compose up` reaches healthy on both services; `/api/health` reports
+`clip_available: false`, 146 CLIP segments, and `self_hosted_source: "env"` with
+`smoothness` present — which is precisely the case Phase 1.1 exists for, since
+the API reaches the router at `http://graphhopper:8989`, a hostname. A real
+request returns three routes with `scoring_method: "clip"`.
+
+---
+
+## Launch phase 7 · Technical soundness, and four bugs the new tests found
+
+567 tests to **626**, plus a coverage floor, CI, a Makefile, a runbook and six
+ADRs. The interesting part is that every new category of test found something.
+
+**The greenness regression test — the promise nothing was checking.** The app is
+named after a claim no test asserted end to end. `scripts/verify_selfhosted.py`
+checks something adjacent: that the three presets return *different geometries*
+against a live server. That is a check on the router, it needs a network, and it
+would pass happily on three routes of identical greenness.
+
+The invariant is not "nature is always greener" but **greener, or it admits it**
+— `route_nature` ships the best it can find with a `preset_note` naming the
+promise it missed. Which is exactly the shape of the defect found while
+pre-warming the cache, where the greenness floor was measured without the CLIP
+term while the card was rendered with it.
+
+**Property tests over coordinates found two real bugs on their first run.** The
+existing tests check the maths against hand-computable cases, which catches a
+wrong formula and not the class of bug that actually bites geographic code.
+
+`bearing_deg` could return exactly **360.0** — `atan2` gives -2.8e-14 degrees
+for a due-north step across the antimeridian, Python's float modulo takes the
+sign of the divisor, and 360 minus that much is not representable. The docstring
+promised `[0, 360)`. And `interpolate` between -89.99999999999999 and 90.0
+returns 90.00000000000001: a nanometre past the pole, and still a latitude
+`models.py` refuses.
+
+Two of the properties were themselves wrong, which was also instructive.
+`SamplePoint` carries `at_m`, not `distance_m`. And `to_lonlat_pairs` rounds to
+six decimal places — deliberately, so two people searching the same place
+produce a byte-identical request body (Phase J, defect 3) — so the round-trip
+property asserts routing precision rather than float equality. There is now a
+property pinning that rounding, because it is also a privacy property: a
+coordinate at full float precision is far more identifying than one at 0.1 m.
+
+`derandomize=True`, because this is a build gate. Without it Hypothesis explores
+a different set each run and the same commit can pass then fail, which is how a
+property suite gets labelled flaky and deleted.
+
+**The SSE contract, asserted against the file that parses it.** The existing
+streaming tests read the stream through a helper that mirrors the frontend's
+parser — right for behaviour, wrong for a wire format, because changing the
+framing on both sides of a shared helper leaves every test green and the browser
+blank. The last test reads the literal `line.slice(5)` out of `client.js`.
+Verified by breaking it.
+
+**`/metrics`, and a test that it can never describe a person.** Every series is
+a whole-instance total with no labels, and the tests assert the *shape*: no
+label, no non-integer value, no series named after a request attribute. That
+last check first searched the raw text for "ip" and failed on the word "clip" in
+a HELP line — the sort of check that gets deleted rather than fixed, taking the
+rule with it.
+
+**The coverage floor is 85%, measured at 87.33%,** over source modules with the
+tests excluded. Statement coverage rather than branch, and the reason is
+recorded: `branch = true` collides with the subprocess in
+`test_privacy_guard.py`, because pytest-cov's `.pth` auto-instruments the child
+without branch mode and combining the two fails the entire run. That subprocess
+is the test proving the privacy guard holds in a fresh interpreter.
+
+**The load test measures the right question, after measuring the wrong one.**
+Not requests per second — that would be a measurement of Overpass, whose tail is
+13.6 s against routing's 24 ms. Its first run reported p50 0.00 s and p95 9.81 s,
+which is not a distribution but two: a 429 is refused in microseconds and 38 of
+50 requests were refused, because all the load came from one address and shares
+one bucket by design. With served and refused reported separately and the
+limiter raised: 50/50 served, **p50 3.48 s, p95 5.36 s** — the shape the p95
+alarm was sized for. The hint it printed named an environment variable that does
+not exist.
+
+**CI runs the suite twice**, the second time under `unshare -n` with no network
+namespace at all. conftest blocks sockets and a meta-test proves the guard is
+active, but if that guard were removed the suite would still pass on a
+developer's network and silently start depending on it.
+
+---
+
+## Launch phase 8 · Finishing
+
+`DEPLOY.md` rewritten for AWS, keeping and extending the one part of it worth
+keeping — the "things that will look like bugs and are not" table, which went
+from 8 rows to 15. Most of it was never about Render: `clip_available: false`,
+`scoring_method: geometry_only`, identical routes from an ignored custom model,
+`null` rest stops. The new rows are the silent ones — `MEANDER_CACHE_DB` set,
+`smoothness` missing from `path_details`, everyone rate-limited at once — each
+of which leaves the app looking healthy.
+
+`render.yaml` and `vercel.json` moved to `docs/legacy/` with a note on what the
+AWS version changed and why, and how to go back if the cheaper shape is worth
+losing two of the three presets for.
+
+**What a reviewer should still be sceptical about**, unchanged in kind from the
+hostile audit and shorter than it was:
+
+- **Nothing is deployed.** The templates validate; that is all.
+- **The CLIP prompt choice rests on three location pairs**, one of which has two
+  images, and the winning pair measures aesthetic appeal rather than greenery.
+- **No real phone.** Everything about the mobile layout and the PWA is measured
+  in headless Chrome at 390×844.
+- **The naturalness and air-blend weightings are judgements**, written down
+  rather than buried.
+
+**Live API calls this phase:** Mapillary ~600 (metadata and image downloads for
+the cache pre-warm), GraphHopper self-hosted ~200 (unmetered), Overpass ~40,
+Open-Meteo ~60, Nominatim 0.

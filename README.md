@@ -69,19 +69,36 @@ working as intended rather than a defect.
 
 ### What is still unverified
 
-**Every route is `scoring_method: "geometry_only"`.** `data/cache.db` ships with zero CLIP segment
-scores, so nothing in this checkout has ever been scored from real street-level imagery, and the
-prompt pair driving CLIP has still only been ranked against generated reference images.
-[BLOCKED.md](BLOCKED.md) §2 is open and has the two commands that would close it.
+**Nothing is deployed, and the AWS stacks have never been applied.** All four
+CloudFormation templates validate and `cfn-lint` passes, which proves they are
+well-formed and nothing else. [`infra/README.md`](infra/README.md) lists
+seventeen gate items and marks every one UNVERIFIED with the command that would
+settle it.
 
-The "accessible is longer with fewer barriers" claim in [PROGRESS.md](PROGRESS.md) is a single
-Hyde Park measurement. Nothing re-runs it.
+**The scenery scores are now real, and you should still read the caveats.**
+`data/cache.db` ships with 146 pre-warmed CLIP segments and `/api/routes`
+returns `scoring_method: "clip"` — but the prompt pair was chosen from three
+location pairs, one of which rests on two images, and `v2_plain` measures
+aesthetic appeal rather than greenery. The full table and both caveats are in
+`backend/scoring.py` beside the constant, and in
+[BLOCKED.md](BLOCKED.md) §2.
+
+**Not tested on a real phone.** The layout, the targets, the install prompt and
+the offline label are all measured in headless Chrome at 390×844. That is not
+the same claim as a phone in a hand.
 
 ### What is deployed
 
-Nothing yet. [DEPLOY.md](DEPLOY.md) is written to be followed without asking questions.
-[PROGRESS.md](PROGRESS.md) is the full build log, including the hostile self-audit and what a
-reviewer should still be sceptical about.
+Nothing. [`infra/`](infra/) is four CloudFormation stacks that would deploy it —
+ECS Fargate for the API and the router, CloudFront and S3 for the app, GitHub
+OIDC for CI with no stored AWS credentials — and none has been applied.
+[DEPLOY.md](DEPLOY.md) is written to be followed without guessing.
+
+What *has* run end to end is the same stack under `docker compose`: both images
+build, both containers reach healthy, and a real request returns three routes
+with real CLIP scores. [PROGRESS.md](PROGRESS.md) is the full build log,
+including the hostile self-audit and what a reviewer should still be sceptical
+about. [docs/adr/](docs/adr/) has the six decisions worth questioning.
 
 ---
 
@@ -114,7 +131,7 @@ reviewer should still be sceptical about.
 
 ### The split that makes it deployable
 
-CLIP needs 2–3 GB of RAM. The Render free tier has 512 MB. So scoring is split in two:
+CLIP needs 2–3 GB of RAM. The deployed container has 1 GB. So scoring is split in two:
 
 | local (`requirements.txt`) | deployed (`requirements-deploy.txt`) |
 |---|---|
@@ -129,7 +146,10 @@ Cached regions get real CLIP scores. Everywhere else falls back to geometry with
 
 ## Setup from a clean clone
 
-Requires Python 3.11+ and Node 18+.
+Requires Python 3.13 and Node 18+. `make help` lists every command in the
+project; `make check` runs exactly what CI runs.
+
+> Python 3.14 cannot build `pydantic-core` as of this writing. Use 3.13.
 
 ```bash
 git clone https://github.com/<you>/meander.git && cd meander
@@ -322,22 +342,36 @@ confidence sentence is warning you about.
 
 ### Scenery scores are estimates, and they say which kind
 
-| `scoring_method` | what produced the number |
+Every route reports `scoring_method`, and it means exactly three things:
+
+| value | what produced the numbers |
 |---|---|
-| `clip` | CLIP inference over Mapillary street-level imagery near the route |
-| `geometry_only` | route shape, elevation profile and OSM road tags — no imagery |
-| `placeholder` | **not a measurement.** Do not present it as one. |
+| `clip` | CLIP over real Mapillary street imagery, read from the pre-warmed cache |
+| `geometry_only` | OSM road-class and surface tags, curviness and elevation — no imagery |
+| `placeholder` | The route itself came from a hand-built fixture. The maths ran; the terrain is invented. Not a measurement of anywhere. |
 
-CLIP scoring only exists where somebody has run the offline pre-warm for that area. Everywhere
-else falls back to geometry, which is a judgement encoded in a lookup table, not an observation.
-The naturalness and air-proxy weightings in `geometry.py` are opinions, and reasonable people would
-choose different numbers.
+`data/cache.db` ships with 146 CLIP segments across the five demo locations, so
+those return `clip`. Anywhere else returns `geometry_only` and says so.
 
-The prompt pair that drives CLIP scoring was chosen against generated reference images, not real
-street photography — see PROGRESS.md, Phase G. Four of the seven pairs tried, including the one
-originally specified, ranked an asphalt image as *more* scenic than a foliage one. That is a
-warning about how brittle zero-shot aesthetic scoring is, and it has not yet been re-checked
-against real imagery.
+**Three things to be sceptical about, and they are not small.**
+
+The prompt pair was chosen on three real location pairs. Of the seven variants,
+only `v2_plain` and `v1_extreme` pointed the right way on all three — the
+previous default `v3_nature` and the widest-separating London variant
+`v5_street` **both invert on the Colombo pair**, scoring a city fort greener
+than a park. The full table is in `backend/scoring.py`.
+
+The evidence behind that is thin: four to six images per location, and only two
+at Viharamahadevi — which is the single point deciding the one pair that
+separates the candidates, and the only non-European pair.
+
+And `v2_plain` is "a photo of a beautiful place" against "a photo of an ugly
+place", which measures **aesthetic appeal, not greenery**, while the number it
+feeds is presented as a nature score. They correlate on this sample. A
+photogenic stone street would score well without a tree in it.
+
+The naturalness and air-blend weightings are judgements rather than
+measurements, written down here and in PROGRESS.md rather than buried.
 
 ### Air quality is regional, blended with a local proxy
 
@@ -366,7 +400,9 @@ Point the app at a self-hosted GraphHopper and that stops being true — the rou
 
 ### Other things worth knowing
 
-- The free Render instance sleeps; the first request after a quiet spell takes 30–60 seconds.
+- Offline, the map is blank and the route list is not. Map tiles are deliberately never
+  cached — a tile cache is a record of where you have been, and they come from a third party.
+  A route served from the cache is always labelled with its age.
 - The daily routing ceiling is a real ceiling. When it is reached the app says so and stops.
 - Round-trip loops come from GraphHopper's `round_trip` algorithm with a fixed seed. The direction
   is not controllable, and the distance is derived from your time budget using conservative average
