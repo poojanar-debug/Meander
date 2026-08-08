@@ -1,5 +1,6 @@
 import { routeColor, styleFor, swatchBackground } from '../lib/dash.js'
 import { durationParts, fmtDist, fmtPct, restStopSummary } from '../lib/format.js'
+import { cacheChipText, cacheTier, formatCacheAge } from '../lib/offline.js'
 import VerificationMeter from './VerificationMeter.jsx'
 
 const SCORE_ROWS = [
@@ -32,7 +33,7 @@ const SCORE_ROWS = [
  * that varies in length — narration, barrier lists, the full confidence
  * sentence — lives in the detail panel for the selected route.
  */
-export default function RouteRow({ route, selected, theme, units, onSelect }) {
+export default function RouteRow({ route, selected, theme, units, cacheAgeMs, onSelect }) {
   const style = styleFor(route.id)
   const blocked = route.status !== 'ok'
   const hasShape = route.geometry?.length > 1
@@ -65,6 +66,14 @@ export default function RouteRow({ route, selected, theme, units, onSelect }) {
                 {route.blockers?.length
                   ? `${route.blockers.length} barrier${route.blockers.length === 1 ? '' : 's'}`
                   : 'blocked'}
+              </span>
+            )}
+            {route.servedFromCache && (
+              <span className={`badge badge--cached badge--cached-${cacheTier(cacheAgeMs)}`}>
+                <span className="visually-hidden">
+                  Saved copy from {formatCacheAge(cacheAgeMs)}.{' '}
+                </span>
+                <span aria-hidden="true">{cacheChipText(cacheAgeMs)}</span>
               </span>
             )}
             <span className="route__dur tabular">

@@ -1953,6 +1953,66 @@ fieldset.chips legend {
   cursor: not-allowed;
 }
 
+/* --------------------------------------------------------------- offline */
+
+/* Volume rises with age. Colour is never the only signal — the tiers differ by
+   wording and by a ⚠ glyph as well as by tint. Zero new colour tokens. */
+.offline {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s1);
+  flex: none;
+  padding: var(--s2) var(--s4);
+  padding-inline: calc(var(--s4) + var(--safe-left)) calc(var(--s4) + var(--safe-right));
+  background: var(--sunken);
+  border-bottom: 1px solid var(--rule-strong);
+  font-size: var(--t-small);
+}
+.offline--amber,
+.offline--loud {
+  background: var(--warn-ground);
+  color: var(--warn-ink);
+  border-bottom-color: var(--warn-rule);
+}
+.offline--loud {
+  border-bottom-width: 2px;
+}
+.offline__headline {
+  margin: 0;
+  font-weight: 600;
+}
+.offline__detail {
+  margin: 0;
+  color: var(--ink-2);
+}
+.offline--amber .offline__detail,
+.offline--loud .offline__detail {
+  color: inherit;
+}
+.offline__icon {
+  font-size: 1rem;
+  line-height: 1;
+}
+
+.badge--cached {
+  background: var(--sunken);
+  border: 1px solid var(--rule-strong);
+  color: var(--ink-2);
+}
+.badge--cached-amber,
+.badge--cached-loud {
+  background: var(--warn-ground);
+  border-color: var(--warn-rule);
+  color: var(--warn-ink);
+}
+.badge--cached-loud {
+  font-weight: 700;
+}
+
+.detail__cached .note__title {
+  font-weight: 600;
+}
+
 /* ------------------------------------------------------- take it with you */
 
 .takeaway {

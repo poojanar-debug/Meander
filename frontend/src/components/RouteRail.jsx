@@ -35,6 +35,7 @@ export default function RouteRail({
   loading,
   expected,
   units,
+  cacheAgeMs,
   onSelect,
 }) {
   const showSkeletons = loading && routes.length === 0
@@ -59,6 +60,7 @@ export default function RouteRail({
                 selected={route.id === selected}
                 theme={theme}
                 units={units}
+                cacheAgeMs={cacheAgeMs}
                 onSelect={onSelect}
               />
             ))}

@@ -1,4 +1,5 @@
 import { forwardRef } from 'react'
+import OfflineControl from './OfflineControl.jsx'
 
 /**
  * The old footer, collapsed. Implements §4.9.
@@ -27,11 +28,21 @@ const About = forwardRef(function About({ cache }, ref) {
         </p>
 
         <p>
-          Nothing is stored about where you go. No cookies, no analytics, no location history —
-          your coordinates are used to answer this one request and then discarded. Two words are
-          kept in this browser: whether you chose the light or the dark theme, and whether you read
-          distances in kilometres or miles.
+          Nothing about where you go is kept unless you ask. No cookies, no analytics, no location
+          history — your coordinates answer this one request and are then discarded. Three things
+          are kept here: whether you chose light or dark, whether you read kilometres or miles, and
+          the app itself, so it opens without a connection. That last one is the program — the same
+          for everyone, and it says nothing about you.
         </p>
+
+        {/* The control that changes this promise sits against the sentence that
+            states it, rather than three screens away in a settings drawer. */}
+        <p>
+          If you turn on “keep the last routes”, one set of routes is kept too, always labelled
+          with its age and deleted the moment you turn it off.
+        </p>
+
+        <OfflineControl />
 
         {/* The address bar is the one place a coordinate becomes visible, so it
             is named here rather than left for someone to notice. A device fix

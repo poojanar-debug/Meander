@@ -91,9 +91,13 @@ describe('durations are never converted', () => {
 
 describe('localStorage stays where rule 5 puts it', () => {
   it('is touched by exactly two modules', () => {
+    // Comment-stripped: offlineStore.js explains at length why it does *not*
+    // use localStorage, and prose about a rule must not trip the rule. Actual
+    // usage still does.
+    const strip = (src) => src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '')
     const users = walk()
       .filter((rel) => !/\.test\.jsx?$/.test(rel))
-      .filter((rel) => read(rel).includes('localStorage'))
+      .filter((rel) => strip(read(rel)).includes('localStorage'))
       .sort()
     // A third key is a CI failure rather than a review question. Saved places
     // and profiles are described elsewhere and stay deferred; whoever ships one

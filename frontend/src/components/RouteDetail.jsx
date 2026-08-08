@@ -9,8 +9,19 @@ import {
   fmtPct,
   restStopName,
 } from '../lib/format.js'
+import { cachedNotice } from '../lib/offline.js'
 import ElevationProfile from './ElevationProfile.jsx'
 import ReportBarrier from './ReportBarrier.jsx'
+
+function CachedNote({ ageMs }) {
+  const { tier, headline, detail } = cachedNotice(ageMs)
+  return (
+    <div className={tier === 'quiet' ? 'note detail__cached' : 'note note--warn detail__cached'}>
+      <p className="note__title">{headline}</p>
+      {detail && <p className="note__sub">{detail}</p>}
+    </div>
+  )
+}
 
 const SCORE_ROWS = [
   { key: 'nature', label: 'Nature' },
@@ -61,6 +72,7 @@ export default function RouteDetail({
   route,
   theme,
   units,
+  cacheAgeMs,
   stepList,
   takeaway,
   onStart,
@@ -110,6 +122,8 @@ export default function RouteDetail({
           {route.blockers?.length > 0 && <Barriers blockers={route.blockers} />}
         </div>
       )}
+
+      {route.servedFromCache && <CachedNote ageMs={cacheAgeMs} />}
 
       <section className="detail__section">
         <h4 className="detail__h">Along the way</h4>

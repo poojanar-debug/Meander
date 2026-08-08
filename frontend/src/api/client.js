@@ -69,6 +69,23 @@ async function toApiError(res) {
   })
 }
 
+/**
+ * Did this response come out of the service worker's cache, and when.
+ *
+ * camelCase deliberately: every field that came off the wire is snake_case, so
+ * the casing is itself the signal that these two were added on this side of the
+ * boundary and are not the server's opinion.
+ *
+ * ⚠ `X-Meander-Cached` (this worker: "you are looking at a replay") is one
+ * letter from `X-Meander-Cache` (the server: "I had a warm cache and this
+ * answer is completely current"). They mean opposite things. Do not read the
+ * server's header here.
+ */
+function cacheStampFrom(res) {
+  const cachedAt = res.headers.get('X-Meander-Cached')
+  return cachedAt ? { servedFromCache: true, cachedAt } : null
+}
+
 async function realFetchRoutes(req, { signal, onProgress, onRoute }) {
   let res
   try {
@@ -85,11 +102,16 @@ async function realFetchRoutes(req, { signal, onProgress, onRoute }) {
 
   if (!res.ok) throw await toApiError(res)
 
+  const stamp = cacheStampFrom(res)
+  const mark = (route) => (stamp && route ? { ...route, ...stamp } : route)
+  const markPayload = (payload) =>
+    stamp && payload ? { ...payload, routes: (payload.routes ?? []).map(mark) } : payload
+
   const contentType = res.headers.get('content-type') ?? ''
   if (!contentType.includes('text/event-stream') || !res.body) {
     const json = await res.json()
-    json.routes.forEach(onRoute)
-    return json
+    json.routes.forEach((route) => onRoute(mark(route)))
+    return markPayload(json)
   }
 
   const reader = res.body.getReader()
@@ -114,8 +136,8 @@ async function realFetchRoutes(req, { signal, onProgress, onRoute }) {
         continue
       }
       if (evt.type === 'progress') onProgress(evt)
-      else if (evt.type === 'route') onRoute(evt.route)
-      else if (evt.type === 'done') final = evt.payload
+      else if (evt.type === 'route') onRoute(mark(evt.route))
+      else if (evt.type === 'done') final = markPayload(evt.payload)
       else if (evt.type === 'error') {
         throw new ApiError(evt.message ?? 'The server stopped part-way through.', {
           kind: evt.kind ?? 'stream',

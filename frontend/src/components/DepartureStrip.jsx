@@ -1,3 +1,5 @@
+import { departureHasPassed } from '../lib/offline.js'
+import { useNow } from '../lib/offlineStore.js'
 import { canStateLocalTime, daylightSentence, fmtClock, isDaylight, sunTimes } from '../lib/sun.js'
 
 /** §6.2 caps the row at six. */
@@ -24,8 +26,21 @@ export default function DepartureStrip({
   units,
   onDepartAt,
 }) {
+  // First statement, before the early return below — a hook after it would be
+  // a conditional hook. It also makes the hour chips below self-updating: they
+  // are built from `new Date()`, which now re-evaluates on every tick.
+  const nowMs = useNow()
+
   const recommended = bestDeparture ? new Date(bestDeparture) : null
   if (!recommended || Number.isNaN(recommended.valueOf())) return null
+
+  // best_departure is an absolute instant computed when the request was made,
+  // and nothing expires it: a tab left open renders "Leave at 19:15" at nine in
+  // the evening, and a replayed saved copy makes that hours worse. Withdraw the
+  // suggestion rather than recomputing it — choosing a new time needs the air
+  // and cloud series for the hours ahead, which is exactly what a stale or
+  // saved response no longer has.
+  const passed = departureHasPassed(recommended, nowMs)
 
   // Sun times are absolute instants and correct anywhere; printing them as
   // clock times is only honest when the viewer's timezone and the route's
@@ -51,15 +66,21 @@ export default function DepartureStrip({
 
   return (
     <section className="departure" aria-labelledby="departure-head">
-      <p className="departure__head" id="departure-head">
-        Leave at{' '}
-        <strong>
-          <time dateTime={recommended.toISOString()}>{fmtClock(recommended, units)}</time>
-        </strong>
-        {/* §6.2: with no reason from the backend, the time and the word "best"
-            and nothing more. The reason clause is not ours to invent. */}
-        {reason ? ` — ${reason}` : ' — the best time in the next few hours.'}
-      </p>
+      {passed ? (
+        <p className="departure__head" id="departure-head">
+          Meander suggested a better time to set off, but it has already passed.
+        </p>
+      ) : (
+        <p className="departure__head" id="departure-head">
+          Leave at{' '}
+          <strong>
+            <time dateTime={recommended.toISOString()}>{fmtClock(recommended, units)}</time>
+          </strong>
+          {/* §6.2: with no reason from the backend, the time and the word "best"
+              and nothing more. The reason clause is not ours to invent. */}
+          {reason ? ` — ${reason}` : ' — the best time in the next few hours.'}
+        </p>
+      )}
 
       {daylight && <p className="departure__daylight">{daylight}</p>}
 

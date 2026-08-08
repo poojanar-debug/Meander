@@ -7,6 +7,7 @@ import DaylightGuard from './components/DaylightGuard.jsx'
 import DepartureStrip from './components/DepartureStrip.jsx'
 import FollowMode from './components/FollowMode.jsx'
 import MapView from './components/MapView.jsx'
+import OfflineBar from './components/OfflineBar.jsx'
 import RouteDetail from './components/RouteDetail.jsx'
 import RouteRail from './components/RouteRail.jsx'
 import StepList from './components/StepList.jsx'
@@ -18,6 +19,8 @@ import TakeItWithYou from './components/TakeItWithYou.jsx'
 import TripBar from './components/TripBar.jsx'
 import { announceRoutes, announceSelection, effectiveMode } from './lib/format.js'
 import { applyTheme, initialTheme, readStoredTheme, storeTheme, systemTheme } from './lib/theme.js'
+import { cacheAgeMs, formatCacheAge } from './lib/offline.js'
+import { useCacheAge, useOnline } from './lib/offlineStore.js'
 import { GEOLOCATED, decodeState, writeUrl } from './lib/permalink.js'
 import {
   METRIC_24,
@@ -102,6 +105,19 @@ function init(state) {
       ? 'That link asked to leave at a time that has already passed. These routes are for leaving now.'
       : null,
   }
+}
+
+/**
+ * Is what we are looking at a replay, and from when.
+ *
+ * Derived from the routes rather than held in the reducer, so it cannot drift
+ * from what is on screen — and the moment a live route arrives the stamp is
+ * gone with no separate state to remember to clear. That is why this capability
+ * adds no reducer case, no DEBOUNCE key and no initialState field.
+ */
+function cacheStamp(routes) {
+  const hit = routes.find((route) => route.servedFromCache)
+  return hit ? { cachedAt: hit.cachedAt ?? null } : null
 }
 
 function withRefetch(state, patch, debounceMs) {
@@ -234,11 +250,15 @@ export default function App() {
   const unitsRef = useRef(initialState.units)
   const announceTimer = useRef(null)
   const aboutRef = useRef(null)
+  const online = useOnline()
 
   const mode = useMemo(
     () => effectiveMode(state.mode, state.minutes),
     [state.mode, state.minutes],
   )
+
+  const cached = useMemo(() => cacheStamp(state.routes), [state.routes])
+  const ageMs = useCacheAge(cached?.cachedAt)
 
   /** Debounced so a dial drag does not flood the live region. */
   const announce = useCallback((text) => {
@@ -289,7 +309,12 @@ export default function App() {
           reason: payload?.reason,
           bestDeparture: payload?.best_departure,
         })
-        announce(announceRoutes(payload?.routes ?? arrived, unitsRef.current))
+        const settled = payload?.routes ?? arrived
+        const replay = cacheStamp(settled)
+        const preamble = replay
+          ? `Showing a saved copy from ${formatCacheAge(cacheAgeMs(replay.cachedAt))}. `
+          : ''
+        announce(preamble + announceRoutes(settled, unitsRef.current))
       } catch (err) {
         if (err?.name === 'AbortError') return
         dispatch({ type: 'error', value: err })
@@ -460,6 +485,8 @@ export default function App() {
 
       <Ribbon routes={state.routes} />
 
+      {cached && <OfflineBar ageMs={ageMs} online={online} />}
+
       {firstRun ? (
         <FirstRun
           minutes={state.minutes}
@@ -531,6 +558,7 @@ export default function App() {
               loading={state.phase === 'loading'}
               expected={state.objectives.length}
               units={state.units}
+              cacheAgeMs={ageMs}
               onSelect={onSelect}
             />
 
@@ -538,6 +566,7 @@ export default function App() {
               route={selectedRoute}
               theme={state.theme}
               units={state.units}
+              cacheAgeMs={ageMs}
               takeaway={
                 <TakeItWithYou
                   route={selectedRoute}
