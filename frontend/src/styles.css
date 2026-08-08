@@ -135,6 +135,30 @@
 
   /* Every interactive target must be at least this in both dimensions. */
   --target: 44px;
+
+  /* Device geometry, theme-invariant for the same reason --target is.
+   *
+   * index.html:5 already sets viewport-fit=cover, so this app is opted into
+   * painting under the notch whether or not it handles the insets. These make
+   * that opt-in honest.
+   *
+   * The `0px` fallback is load-bearing, not decoration: on a UA that does not
+   * recognise the inset name the property is invalid at computed-value time
+   * and every calc() below collapses — taking the ordinary --s4 padding with
+   * it. Removing four characters would silently unpad the app.
+   *
+   * Read through these tokens, never env() directly. That indirection is what
+   * makes the geometry testable by substitution — see the probe at the end of
+   * this file — and styles.safe-area.test.js enforces it.
+   *
+   * `padding-inline` below is logical and env() is physical. Safe only because
+   * this app is LTR-only (index.html:2 is lang="en"; there is no [dir] or
+   * :dir() selector in this file). If RTL is ever added, every inline pairing
+   * below inverts. */
+  --safe-top: env(safe-area-inset-top, 0px);
+  --safe-right: env(safe-area-inset-right, 0px);
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+  --safe-left: env(safe-area-inset-left, 0px);
 }
 
 *,
@@ -190,7 +214,7 @@ h3 {
 
 .skip-link {
   position: absolute;
-  inset-inline-start: var(--s2);
+  inset-inline-start: calc(var(--safe-left) + var(--s2));
   top: -60px;
   z-index: 100;
   background: var(--raised);
@@ -202,8 +226,11 @@ h3 {
   text-decoration: none;
   transition: top 120ms ease;
 }
+/* Without --safe-top this lands at 8px — inside the status-bar strip on a
+   notched phone, so the first thing a keyboard user reaches is the one thing
+   they cannot see. */
 .skip-link:focus {
-  top: var(--s2);
+  top: calc(var(--safe-top) + var(--s2));
 }
 
 .tabular {
@@ -243,6 +270,15 @@ h3 {
   min-width: 0;
   min-height: 0;
   padding: var(--s4);
+  /* This one rule is the whole "panel and footer" half of the port. .about is
+     the footer — it was collapsed into the About disclosure — and it is pinned
+     to the panel's bottom by .panel__spacer, in normal flow, so it needs no
+     rule of its own. Same for .departure, .steps and .detail__actions.
+     padding-inline-end is deliberately absent: above 900px the panel's
+     trailing edge is the border it shares with .stage, not the viewport. It is
+     added below 900px in the safe-area section at the end of this file. */
+  padding-inline-start: calc(var(--s4) + var(--safe-left));
+  padding-bottom: calc(var(--s4) + var(--safe-bottom));
   background: var(--paper);
   border-inline-end: 1px solid var(--rule);
 }
@@ -281,9 +317,18 @@ h3 {
   align-items: center;
   justify-content: space-between;
   gap: var(--s4);
-  height: 56px;
+  /* min-height, not height: box-sizing is border-box globally, so `height: 56px`
+     plus the padding-top below would eat the inset out of the content box and
+     clip the 44px .icon-button and the 36px .theme-toggle. min-height also lets
+     the bar grow under large Dynamic Type. .topbar is flex:none in a 100dvh
+     column, so this is what sizes it; .layout shrinks by the same amount, which
+     is right — the strip under the status bar was never usable map. */
+  min-height: calc(56px + var(--safe-top));
   flex: none;
-  padding-inline: var(--s4);
+  /* Padding, never margin: the background must keep painting edge-to-edge under
+     the status bar. */
+  padding-top: var(--safe-top);
+  padding-inline: calc(var(--s4) + var(--safe-left)) calc(var(--s4) + var(--safe-right));
   background: var(--raised);
   border-bottom: 1px solid var(--rule);
   position: sticky;
@@ -345,6 +390,9 @@ h3 {
   gap: var(--s2);
   flex: none;
   padding: var(--s2) var(--s4);
+  /* Inline only: the ribbon never touches the top edge, because Topbar always
+     renders above it. */
+  padding-inline: calc(var(--s4) + var(--safe-left)) calc(var(--s4) + var(--safe-right));
   background: var(--warn-ground);
   color: var(--warn-ink);
   border-bottom: 1px solid var(--warn-rule);
@@ -547,10 +595,14 @@ h3 {
 
 /* -------------------------------------------------------------- first run */
 
+/* FirstRun replaces div.layout rather than nesting inside it, so this box is a
+   direct child of .app and touches the left, right and bottom of the viewport. */
 .firstrun {
   display: grid;
   place-items: center;
   padding: var(--s6) var(--s4);
+  padding-inline: calc(var(--s4) + var(--safe-left)) calc(var(--s4) + var(--safe-right));
+  padding-bottom: calc(var(--s6) + var(--safe-bottom));
   min-height: 100%;
 }
 .firstrun__card {
@@ -886,7 +938,9 @@ fieldset.chips legend {
 .map__controls {
   position: absolute;
   top: var(--s3);
-  inset-inline-end: var(--s3);
+  /* The stage's trailing edge is the viewport's at every width. This moves the
+     cluster; it never resizes the 44px buttons. */
+  inset-inline-end: calc(var(--s3) + var(--safe-right));
   z-index: 5;
   display: flex;
   flex-direction: column;
@@ -916,7 +970,9 @@ fieldset.chips legend {
 /* Legend, bottom-left. Hidden below 900px — there the rail is the legend. */
 .legend {
   position: absolute;
-  inset-block-end: var(--s3);
+  inset-block-end: calc(var(--s3) + var(--safe-bottom));
+  /* inset-inline-start needs nothing: the stage's leading edge is interior at
+     every width where the legend renders — it is display:none below 900px. */
   inset-inline-start: var(--s3);
   z-index: 5;
   padding: var(--s2) var(--s3);
@@ -1598,9 +1654,13 @@ fieldset.chips legend {
   .topbar__tagline {
     display: none;
   }
+  /* This shorthand-free override lands after the base rule and would otherwise
+     delete its --safe-right. `top` stays as-is: at this width the stage sits
+     below the topbar in document flow, so its top edge is already past the
+     inset. */
   .map__controls {
     top: var(--s2);
-    inset-inline-end: var(--s2);
+    inset-inline-end: calc(var(--s2) + var(--safe-right));
   }
   .ribbon {
     font-size: var(--t-micro);
@@ -1615,8 +1675,14 @@ fieldset.chips legend {
 }
 
 @media (max-width: 420px) {
+  /* The shorthand lands after the base rule and resets all four sides, so the
+     safe-area longhands have to be restated or they are silently deleted here.
+     inline-end is unconditional: this width is always single-column. */
   .panel {
     padding: var(--s3);
+    padding-inline-start: calc(var(--s3) + var(--safe-left));
+    padding-inline-end: calc(var(--s3) + var(--safe-right));
+    padding-bottom: calc(var(--s3) + var(--safe-bottom));
   }
   .dial__ticks {
     font-size: 0.6875rem;
@@ -1771,6 +1837,10 @@ fieldset.chips legend {
   align-items: flex-start;
   gap: var(--s2);
   padding: var(--s3);
+  /* Bottom is width-scoped and lives in the safe-area section at the end of
+     this file — below 900px the stage is a band at the top of the document and
+     the home indicator is nowhere near it. */
+  padding-inline-end: calc(var(--s3) + var(--safe-right));
   pointer-events: none;
 }
 .follow > * {
@@ -1870,3 +1940,57 @@ fieldset.chips legend {
   opacity: 0.55;
   cursor: not-allowed;
 }
+
+/* ------------------------------------------------------------- safe area */
+
+/* These three rules are at the END of the file, not in the responsive block
+   above, and that is not tidiness. `.follow` is declared after that block, so
+   `@media (max-width: 899px) { .follow { … } }` placed up there would LOSE to
+   it — equal specificity, later source wins, media queries contribute none.
+   It would fail silently and look fine on every desktop. */
+
+/* Below 900px the panel is the only column, so its trailing edge is the
+   viewport's. Above it, the stage is. */
+@media (max-width: 899px) {
+  .panel {
+    padding-inline-end: calc(var(--s4) + var(--safe-right));
+  }
+}
+
+/* Above 900px the stage reaches the bottom of the viewport, so the follow sheet
+   must clear the home indicator. Below it the stage is a 230px band at the TOP
+   of the document and the indicator is nowhere near it — 34px there would eat an
+   eighth of the band for nothing. */
+@media (min-width: 900px) {
+  .follow {
+    padding-bottom: calc(var(--s3) + var(--safe-bottom));
+  }
+}
+
+/* MapLibre's compact attribution button. attributionControl is on, and this
+   file has no other .maplibregl-* rule at all, so the button sits in the literal
+   corner of the stage — which above 900px is the corner of the viewport.
+   Padding on the container, not margin: MapLibre gives its own children
+   `margin: 0 10px 10px 0`, and a margin here would replace that rather than add
+   to it. Physical sides, to match MapLibre's own physical class names. */
+.map .maplibregl-ctrl-bottom-right {
+  padding-right: var(--safe-right);
+}
+@media (min-width: 900px) {
+  .map .maplibregl-ctrl-bottom-right,
+  .map .maplibregl-ctrl-bottom-left {
+    padding-bottom: var(--safe-bottom);
+  }
+}
+
+/* PROBE — to exercise any of this on a machine that reports no insets, which is
+   every desktop browser and every headless Chrome:
+ *
+ *   const r = document.documentElement.style
+ *   r.setProperty('--safe-top', '59px');   r.setProperty('--safe-right', '0px')
+ *   r.setProperty('--safe-bottom', '34px'); r.setProperty('--safe-left', '0px')
+ *
+ * (iPhone 15 Pro portrait. Landscape, notch to the left: 0/59/21/59.)
+ * Every rule above reads the token, never env() directly, precisely so this
+ * substitution is faithful. It proves the arithmetic and the stacking. It
+ * cannot prove the UA reports the right numbers — only a device can. */
