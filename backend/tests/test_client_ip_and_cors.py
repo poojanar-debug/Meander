@@ -374,3 +374,26 @@ def test_a_fractional_refill_rate_survives(monkeypatch: pytest.MonkeyPatch) -> N
 def test_an_unparseable_refill_rate_still_falls_back(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("MEANDER_RATE_REFILL_PER_MIN", "banana")
     assert config.load_settings().per_ip_refill_per_min == 3.0
+
+
+def test_an_empty_flag_value_means_unset_not_false(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """.env.example is a file people copy to .env and fill in selectively.
+
+    Every key it lists is present with an empty value, so a copied file sets
+    MEANDER_ALLOW_LOCAL_ORIGINS='' — and _env_flag read that as false, silently
+    switching off the dev-server origins the same file promises need no
+    configuration. _env_int and _env_float had always treated blank as absent;
+    only the flag helper did not.
+
+    An explicit 0 must still override, or the escape hatch is gone.
+    """
+    monkeypatch.setenv("MEANDER_FIXTURES", "replay")
+    monkeypatch.setenv("MEANDER_ALLOWED_ORIGINS", "")
+
+    monkeypatch.setenv("MEANDER_ALLOW_LOCAL_ORIGINS", "")
+    assert "http://localhost:5173" in config._resolve_origins()
+
+    monkeypatch.setenv("MEANDER_ALLOW_LOCAL_ORIGINS", "0")
+    assert config._resolve_origins() == ()

@@ -115,8 +115,20 @@ SERVICE_HOSTS: dict[str, str] = {
 }
 
 def _env_flag(name: str, default: bool = False) -> bool:
+    """An empty value means "unset", the same as it does for ints and floats.
+
+    `_env_int` and `_env_float` both treat a blank string as absent. This did
+    not, so `MEANDER_ALLOW_LOCAL_ORIGINS=` read as *false* rather than as "no
+    opinion" — and .env.example is a file people copy to .env and fill in
+    selectively, which produces exactly that. The result was that copying the
+    example and running `make run` turned off the dev-server origins the same
+    example promises need no configuration.
+
+    Empty is not the same as 0, and only the latter should be able to override
+    a default.
+    """
     raw = os.environ.get(name)
-    if raw is None:
+    if raw is None or not raw.strip():
         return default
     return raw.strip().lower() in {"1", "true", "yes", "on"}
 

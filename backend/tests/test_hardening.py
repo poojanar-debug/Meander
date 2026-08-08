@@ -266,6 +266,15 @@ def test_env_example_matches_the_code_defaults() -> None:
         "MEANDER_RATE_CAPACITY": settings.per_ip_bucket_capacity,
         "MEANDER_RATE_REFILL_PER_MIN": settings.per_ip_refill_per_min,
         "MEANDER_ROUTE_CACHE_TTL_S": settings.route_cache_ttl_s,
+        # Module-level rather than on Settings, and undocumented until the
+        # release pass. infra/20-services.yaml:288 still describes the HTTP
+        # timeout as 12 seconds when it has been 20 for a while, which is the
+        # drift this test exists to catch a second instance of.
+        "MEANDER_HTTP_TIMEOUT_S": config.HTTP_TIMEOUT_S,
+        "MEANDER_HTTP_CONNECT_TIMEOUT_S": config.HTTP_CONNECT_TIMEOUT_S,
+        "MEANDER_REQUEST_DEADLINE_S": config.REQUEST_DEADLINE_S,
+        "MEANDER_DRAIN_TIMEOUT_S": config.DRAIN_TIMEOUT_S,
+        "MEANDER_TRUSTED_PROXY_HOPS": config.TRUSTED_PROXY_HOPS,
     }
 
     drifted = []
