@@ -27,9 +27,10 @@ const About = forwardRef(function About({ cache }, ref) {
         </p>
 
         <p>
-          Nothing is stored. No cookies, no analytics, no location history — your coordinates are
-          used to answer this one request and then discarded. The only thing kept in this browser
-          is whether you chose the light or the dark theme.
+          Nothing is stored about where you go. No cookies, no analytics, no location history —
+          your coordinates are used to answer this one request and then discarded. Two words are
+          kept in this browser: whether you chose the light or the dark theme, and whether you read
+          distances in kilometres or miles.
         </p>
 
         {/* The paragraph above has exactly one exception, so it names it rather
