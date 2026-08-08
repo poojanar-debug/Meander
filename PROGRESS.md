@@ -2571,3 +2571,106 @@ harness needs falsifying too.
 
 **Live API calls this phase:** zero. Everything against the mock and the replay
 fixtures.
+
+## Act II, phase 4 — the link, and the file
+
+Two capabilities that both answer the same question — how does a route leave
+this page — and both turned out to have a privacy edge the brief does not
+mention.
+
+### `lib/permalink.js` + `ShareButton`
+
+The contract is one sentence: a link reproduces the same request body. The test
+asserts exactly that, against `buildRouteRequest`.
+
+**`departAt` had to be added, not ported.** The source branch has no concept of
+it, because the departure strip postdates it. A faithful port would therefore
+break its own headline contract for anyone who has touched that strip —
+`client.js` puts `depart_at` in the body, so the link would answer a different
+question than the sender was looking at. A time that has already passed is
+dropped and explained rather than sent, because the strip builds its chips from
+the top of the current hour and cannot offer an earlier one.
+
+**A device fix never reaches the address bar.** `writeUrl` returns early on the
+geolocation sentinel. The address bar persists into browser history, and
+mirroring a satellite fix there on every state change is the one thing in this
+feature that would have made "no location history" untrue. A place the user
+searched for is a place they chose to name; a GPS fix is not. Sharing one is
+still possible — but only by pressing the button, and the button says so first.
+
+The link arrives by **seeding the reducer**, not by dispatching from an effect:
+`nonce: 1, debounceMs: 0` out of `init()`. That is what leaves the nonce-keyed
+fetch effect untouched. The alternative routes the defaults, then routes again.
+
+⚠ **Halfway through verifying this, the dev server on 5175 died** and every
+browser check went green against an error page — including two that "passed"
+because the URL was empty and the DOM was blank. A vacuous pass looks exactly
+like a real one. I now start my own server and assert the app actually rendered
+before trusting any result.
+
+### `lib/export.js`
+
+**The print sheet is not in the file the brief points at.** There is no print
+code in that module at all — no `window.print`, no `@media print`, not the word
+"print" in its 231 lines. Restoring only the library ships three formats of four
+and does not notice.
+
+**`provenanceNote` is a rewrite, and the reason is a rule-1 violation in the
+source.** It computed its own coverage clause from `route.confidence`, so a
+placeholder-scored route exported "Accessibility data covers 90% of this route"
+while the screen said it had not been evaluated. It now delegates to
+`confidenceSentence`, so the file and the screen cannot drift. Four additions:
+how the coverage was measured; unmeasured scores named rather than omitted; the
+gradient limit read from the payload rather than hard-coded; and a case the spec
+did not anticipate — a route exported *mid-enrichment* would otherwise bake "No
+rest stops found" into a file that outlives the session.
+
+**One spec expectation I did not meet, deliberately.** It asks that a null
+confidence produce no "0%". `confidenceSentence` renders `null` and `0`
+identically — "covers only 0% … do not rely on it" — and that is what
+`RouteDetail` already shows on screen. Special-casing it in the exporter would
+break the delegation the whole rewrite is built on. The conflation of
+"unmeasured" with "measured zero" is real, but it is pre-existing, shared, and
+errs conservatively, and the machine-readable GeoJSON field still reports
+`null`. **It belongs in `format.js`, where it changes an accessibility claim on
+screen too — so it is flagged here rather than fixed quietly.**
+
+Two silent-failure traps in the print work: the source forces collapsed content
+open with `[hidden] { display: flex !important }`, which cannot port because the
+collapsed content here is `<details>` and CSS cannot open one — without the
+`beforeprint` hook the sheet has no directions and no OSM caveat, and nobody
+learns that until they print. And the print block has to remap its tokens under
+`[data-theme='dark']` as well as `:root`, or a dark-theme user prints near-white
+ink on white paper.
+
+### The falsification harness needed falsifying, three times
+
+Nineteen more mutations this phase, all eventually caught — but the first runs
+reported four false "vacuous" results, and **every one was a bug in my mutation
+script rather than a weak gate**: perl escaping that never applied the edit, an
+anchor with the wrong indentation, an ambiguous anchor matching twice, and a
+`-t` filter written against an assertion phrase instead of a test name.
+
+The lesson is not "check the harness once". It is that a mutation that fails to
+apply is indistinguishable, in the output, from a gate that cannot fail — and
+the reflex of trusting the alarming reading is what nearly deleted a good test.
+Every "vacuous" result now gets the mutation confirmed on disk before the gate is
+blamed.
+
+One genuine weakness did surface this way: the permalink round-trip helper
+spreads the original state before the decoded one, so a field the encoder drops
+*entirely* was masked by the original value and the request body still looked
+correct. Dropping `at` survived the first run because of it.
+
+### Measured
+
+| | |
+|---|---|
+| backend tests | 652, unchanged this phase |
+| coverage | 87.71% |
+| frontend tests | 170 → **234** |
+| frontend test files | 6 → 8 |
+| deliberate mutations caught | 22 of 22 |
+| capabilities restored | **6 of 9** |
+
+**Live API calls this phase:** zero.
