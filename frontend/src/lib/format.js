@@ -1,6 +1,8 @@
 /** Formatting helpers. Every string here can end up in a screen reader, so they
  * read as sentences rather than as abbreviations. */
 
+import { METRIC_24, formatDistance } from './units.js'
+
 /** Must match `derive_mode` in backend/models.py exactly. */
 export const deriveMode = (m) => (m <= 45 ? 'foot' : m <= 120 ? 'bike' : 'car')
 
@@ -48,10 +50,15 @@ export function fmtDurSpoken(minutes) {
   return rest === 0 ? h : `${h} ${rest} minute${rest === 1 ? '' : 's'}`
 }
 
-export function fmtDist(metres) {
-  if (metres == null || Number.isNaN(metres)) return '—'
-  if (metres < 1000) return `${Math.round(metres / 10) * 10} m`
-  return `${(metres / 1000).toFixed(metres < 10000 ? 1 : 0)} km`
+/**
+ * Distances are the one thing here that the user can change the shape of, so
+ * this delegates. `units` is defaulted, which keeps every existing caller
+ * compiling — and is exactly why units-callsites.test.js exists: with no ESLint
+ * in this repo, a call site nobody threaded would keep rendering kilometres to
+ * a user who asked for miles, and no other gate would notice.
+ */
+export function fmtDist(metres, units = METRIC_24) {
+  return formatDistance(metres, units)
 }
 
 export function fmtPct(fraction) {
@@ -170,7 +177,7 @@ export function restStopName(type, count) {
 }
 
 /** Rest stops as a sentence, so the list is a complete substitute for the map. */
-export function restStopSentence(restStops) {
+export function restStopSentence(restStops, units = METRIC_24) {
   if (!restStops || restStops.length === 0) {
     return 'No rest stops found along this route.'
   }
@@ -182,28 +189,28 @@ export function restStopSentence(restStops) {
   const list =
     parts.length === 1 ? parts[0] : `${parts.slice(0, -1).join(', ')} and ${parts.at(-1)}`
   const first = Math.round(restStops[0].at_m)
-  return `${restStops.length} rest stop${restStops.length === 1 ? '' : 's'} along the way: ${list}. The first is ${fmtDist(first)} in.`
+  return `${restStops.length} rest stop${restStops.length === 1 ? '' : 's'} along the way: ${list}. The first is ${fmtDist(first, units)} in.`
 }
 
-export function announceRoutes(routes) {
+export function announceRoutes(routes, units = METRIC_24) {
   if (!routes.length) return ''
   const routable = routes.filter((r) => r.status === 'ok')
   const head = `${routes.length} route${routes.length === 1 ? '' : 's'} ready, ${routable.length} routable.`
   const detail = routes
     .map((r) =>
       r.status === 'ok'
-        ? `${r.label}, ${fmtDurSpoken(r.duration_min)}, ${fmtDist(r.distance_m)}.`
+        ? `${r.label}, ${fmtDurSpoken(r.duration_min)}, ${fmtDist(r.distance_m, units)}.`
         : `${r.label} is blocked. ${r.status_note ?? ''}`.trim(),
     )
     .join(' ')
   return `${head} ${detail}`
 }
 
-export function announceSelection(route) {
+export function announceSelection(route, units = METRIC_24) {
   if (!route) return ''
   if (route.status !== 'ok') {
     return `${route.label} selected. This route is blocked. ${route.status_note ?? ''}`.trim()
   }
   const { text } = confidenceSentence(route.confidence, route.scoring_method)
-  return `${route.label} selected. ${fmtDurSpoken(route.duration_min)}, ${fmtDist(route.distance_m)}. ${text}`
+  return `${route.label} selected. ${fmtDurSpoken(route.duration_min)}, ${fmtDist(route.distance_m, units)}. ${text}`
 }

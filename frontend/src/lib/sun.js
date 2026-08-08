@@ -22,6 +22,8 @@
  *      An unknown daylight window is silence, not a caution.
  */
 
+import { METRIC_24, fmtClockIn } from './units.js'
+
 const RAD = Math.PI / 180
 const OBLIQUITY = 23.4397
 
@@ -160,24 +162,26 @@ export function canStateLocalTime(lon, when = new Date()) {
   return Math.abs(solarOffsetHours - browserOffsetHours) <= 3
 }
 
-/** "05:58". 24-hour deliberately: the handoff's copy is 24-hour, and a walker
- *  reading "6:24" has to work out whether that is dawn or dusk. */
-export function fmtClock(date) {
-  if (!(date instanceof Date) || Number.isNaN(date.valueOf())) return null
-  return new Intl.DateTimeFormat(undefined, {
-    hour: '2-digit',
-    minute: '2-digit',
-    hour12: false,
-  }).format(date)
+/**
+ * "05:58", or "5:58 AM".
+ *
+ * 24-hour remains the default wherever the locale implies it, which is most of
+ * the world and includes en-GB. The objection this comment used to record — a
+ * walker reading "6:24" cannot tell dawn from dusk — is answered not by refusing
+ * the 12-hour clock but by never emitting it without a meridiem. fmtClockIn
+ * guarantees that, and a test asserts it across all 24 hours.
+ */
+export function fmtClock(date, units = METRIC_24) {
+  return fmtClockIn(date, units)
 }
 
 /** "Daylight today: 05:58 – 18:24", or the polar sentence, or null. */
-export function daylightSentence(times) {
+export function daylightSentence(times, units = METRIC_24) {
   if (!times) return null
   if (times.polar === 'day') return 'The sun does not set here today.'
   if (times.polar === 'night') return 'The sun does not rise here today.'
-  const from = fmtClock(times.sunrise)
-  const to = fmtClock(times.sunset)
+  const from = fmtClock(times.sunrise, units)
+  const to = fmtClock(times.sunset, units)
   if (!from || !to) return null
   return `Daylight today: ${from} – ${to}.`
 }
@@ -225,7 +229,7 @@ function lightAt(when, lat, lon) {
  * it, because at the end you are as far from where you began as the route ever
  * takes you.
  */
-export function daylightGuard({ start, end, lat, lon }) {
+export function daylightGuard({ start, end, lat, lon, units = METRIC_24 }) {
   if (!(start instanceof Date) || !(end instanceof Date)) return null
 
   const from = lightAt(start, lat, lon)
@@ -253,7 +257,7 @@ export function daylightGuard({ start, end, lat, lon }) {
     const mins = roundMinutes(end - to.times.sunset)
     return {
       severity: 2,
-      text: `This route finishes about ${mins} minute${mins === 1 ? '' : 's'} after sunset (${fmtClock(to.times.sunset)} today).`,
+      text: `This route finishes about ${mins} minute${mins === 1 ? '' : 's'} after sunset (${fmtClock(to.times.sunset, units)} today).`,
       action: 'shorten',
     }
   }
@@ -261,7 +265,7 @@ export function daylightGuard({ start, end, lat, lon }) {
     const mins = roundMinutes(from.times.sunrise - start)
     return {
       severity: 1,
-      text: `This route starts about ${mins} minute${mins === 1 ? '' : 's'} before sunrise (${fmtClock(from.times.sunrise)} today) — the first stretch will be in the dark.`,
+      text: `This route starts about ${mins} minute${mins === 1 ? '' : 's'} before sunrise (${fmtClock(from.times.sunrise, units)} today) — the first stretch will be in the dark.`,
       action: 'sunrise',
     }
   }

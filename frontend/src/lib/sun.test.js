@@ -4,9 +4,14 @@ import {
   canStateLocalTime,
   daylightGuard,
   daylightSentence,
+  fmtClock,
   minutesToFinishBySunset,
   sunTimes,
 } from './sun.js'
+import { METRIC_24 } from './units.js'
+
+const TWELVE_HOUR = { distance: 'metric', clock: '12' }
+const MERIDIEM = /(AM|PM|am|pm|a\.m\.|p\.m\.)/
 
 /** Minutes between two Dates, signed. */
 const diffMin = (a, b) => (a - b) / 60000
@@ -131,6 +136,31 @@ describe('daylightGuard', () => {
     expect(guard.action).toBe('shorten')
   })
 
+  it('prints the sunset in a 24-hour clock by default', () => {
+    const guard = daylightGuard({
+      start: at('2026-03-20T17:50:00Z'),
+      end: at('2026-03-20T18:37:00Z'),
+      lat: LAT,
+      lon: LON,
+      units: METRIC_24,
+    })
+    // Pins the pre-port string: the parenthetical was "(18:12 today)" before
+    // units existed and must still be that for a metric, 24-hour reader.
+    expect(guard.text).toMatch(/\(18:1\d today\)/)
+  })
+
+  it('prints the sunset in a 12-hour clock when that was chosen', () => {
+    const guard = daylightGuard({
+      start: at('2026-03-20T17:50:00Z'),
+      end: at('2026-03-20T18:37:00Z'),
+      lat: LAT,
+      lon: LON,
+      units: TWELVE_HOUR,
+    })
+    expect(guard.text).toMatch(MERIDIEM)
+    expect(guard.text).not.toMatch(/\(18:/)
+  })
+
   it('warns when a route starts before sunrise', () => {
     const guard = daylightGuard({
       start: at('2026-03-20T05:41:00Z'),
@@ -251,5 +281,39 @@ describe('canStateLocalTime', () => {
   it('refuses rather than guessing when there is no longitude', () => {
     expect(canStateLocalTime(undefined)).toBe(false)
     expect(canStateLocalTime(NaN)).toBe(false)
+  })
+})
+
+describe('fmtClock', () => {
+  // The function had no direct test before units made its output a choice.
+  const at = (iso) => new Date(iso)
+
+  it('renders a 24-hour time by default', () => {
+    expect(fmtClock(at('2026-08-08T18:05:00Z'), METRIC_24)).toBe('18:05')
+  })
+
+  it('renders a 12-hour time with a meridiem', () => {
+    const got = fmtClock(at('2026-08-08T18:05:00Z'), TWELVE_HOUR)
+    expect(got).toContain('6:05')
+    expect(got).toMatch(MERIDIEM)
+  })
+
+  it('renders nothing rather than guessing when there is no usable date', () => {
+    expect(fmtClock(new Date('nope'), METRIC_24)).toBeNull()
+    expect(fmtClock('2026-01-01', METRIC_24)).toBeNull()
+  })
+})
+
+describe('daylightSentence', () => {
+  it('reads as a 24-hour range by default', () => {
+    const times = sunTimes(new Date('2026-03-20T12:00:00Z'), 51.5074, -0.1278)
+    expect(daylightSentence(times, METRIC_24)).toMatch(/^Daylight today: 0\d:\d\d – 1\d:\d\d\.$/)
+  })
+
+  it('carries two meridiem markers when a 12-hour clock was chosen', () => {
+    const times = sunTimes(new Date('2026-03-20T12:00:00Z'), 51.5074, -0.1278)
+    const sentence = daylightSentence(times, TWELVE_HOUR)
+    expect(sentence.match(new RegExp(MERIDIEM.source, 'g'))).toHaveLength(2)
+    expect(sentence).not.toContain('18:')
   })
 })
