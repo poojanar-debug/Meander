@@ -43,7 +43,7 @@ lists the seven pieces of it that have to come back, and why each one is wanted.
 
 ### What is proven
 
-**652 backend tests and 46 frontend tests pass offline**, at 87.71% statement coverage against an
+**652 backend tests and 334 frontend tests pass offline**, at 87.71% statement coverage against an
 85% floor. The suite never opens a socket, and a job in CI runs it under `unshare -n` to prove
 that rather than trust it. The deploy image imports with torch absent, checked against the real
 requirements file, and `backend.main` is imported in that environment to prove absence is not the
@@ -72,12 +72,14 @@ sunrise and sunset computed in the browser, turn-by-turn directions with a barri
 the step you would meet it on, and a live follow mode in which the position never leaves the page,
 measured at zero outbound requests.
 
-⚠ **It no longer installs or opens offline, and that is a regression this tree owns.** The service
-worker, the offline store and the two headless-browser gates belonged to the launch frontend and
-did not merge. The claim that used to sit here — 25 checks with the server stopped — was true of a
-frontend this branch does not have, so it is withdrawn rather than restated. It is coming back
-re-based on native storage, because a service worker never registers under `capacitor://localhost`
-in the first place; [BLOCKED.md](BLOCKED.md) §5 has the list.
+**It installs and opens offline again.** The service worker precaches the app shell, and the
+layout and accessibility gate is back — rewritten rather than restored, because the version that
+belonged to the launch frontend selected on seven classes this tree does not have and four of its
+checks graded nothing. Verified with the network cut at the browser level: the app still opens.
+
+The *native* rebase is still open. A service worker never registers under `capacitor://localhost`,
+so the iOS build needs the same capability on Preferences rather than CacheStorage;
+[BLOCKED.md](BLOCKED.md) §5 has that row.
 
 ### What is measured
 
@@ -334,20 +336,19 @@ in-memory digest keyed by a salt generated at process start and never written an
 
 ### What the browser keeps
 
-**One key, holding one word.**
+**Two words, the program, and — only if you ask — one route.**
 
 | what | when | why it is allowed |
 |---|---|---|
 | `meander:theme` — `light` or `dark` | after you pick one | five characters, says nothing about anybody, and without it a dark-mode reader gets a frame of cream on every load |
+| `meander:units` — `metric`/`imperial` and `12`/`24` | after you pick one | two words, validated against those enums on both read and write, so the key is structurally incapable of holding a coordinate |
+| `meander-shell-<hash>` (CacheStorage) | on first load | the program. Identical bytes for every visitor, derived from the build; it says nothing about anybody, and it is what makes the app open without a network |
+| `meander-prefs` (CacheStorage) | after you answer | one word, `true` or `false`. Deliberately **unversioned**, so a deploy cannot silently re-grant a permission you withdrew |
+| `meander-results-<hash>` (CacheStorage) | only on explicit consent | **one** route response, replaced rather than accumulated, always labelled with its age, and deleted from two independent paths the moment you say no |
 
-Nothing else. No route is written anywhere, no units preference, no service worker cache, no map
-tiles, no cookie, no history. The theme read is wrapped in a `try`, because Safari in private mode
-throws on access rather than on write.
-
-> This section used to describe three things the browser kept, including a saved route and a
-> service-worker app cache. That was the launch branch's frontend, which did not merge — see
-> [BLOCKED.md](BLOCKED.md) §5. Saved routes are coming back on native storage rather than a
-> service worker, and this table changes when they do, not before.
+No cookie, no analytics, no history, no map tiles. Every storage read is wrapped in a `try`,
+because Safari in private mode throws on access rather than on write — and the consent flag is
+written and then read *back*, so a control cannot claim a permission that storage refused.
 
 Map tiles will **never** be cached. A tile cache is a record of where you have been, and they come
 from a third party. The cost is that an offline route has no map behind it — which the app says,
@@ -357,8 +358,9 @@ A route served from that cache is always labelled as saved, with its age, on the
 and on a pill under the top bar that no panel position can hide. Past fifteen minutes it also
 names what has stopped being true: air quality, rest stops and the best time to leave are
 measurements of a moment, while the shape of the route is not.
-`frontend/scripts/check-offline.mjs` holds that contract — there is no age, including an age it
-cannot work out, for which the label is allowed to be absent or quiet.
+`frontend/src/lib/offline.test.js` holds that contract — there is no age, including an age it
+cannot work out, for which the label is allowed to be absent or quiet. An entry that cannot say how
+old it is is treated as the *least* trustworthy thing on the screen, not the most.
 
 ---
 

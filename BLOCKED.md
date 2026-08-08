@@ -285,7 +285,8 @@ module-level `settings` is what reaches it, which is the idiom
 
 ## 5 · The reconciliation merge took main's frontend entirely
 
-**Status:** open, and shrinking. Not a defect — a deferral with a list.
+**Status:** closed for the web release; one row remains open for iOS.
+Not a defect — a deferral with a list, now worked through.
 
 **Updated 2026-08-08, during the release pass.** Two capabilities are back, and
 two more were found that this section never tracked at all. See "What has come
@@ -335,9 +336,31 @@ Two corrections to what was believed about them:
 
 ### Still open
 
-`env(safe-area-inset-*)`, `lib/units.js`, `lib/permalink.js`, `lib/export.js`,
-the offline trio, `public/` icons + manifest, and `scripts/gate.mjs` — the seven
-rows in the table above.
+**None, for the web release.** All seven rows in the table above are back, along
+with the two the table never tracked. What each of them actually needed, as
+opposed to what the table said, is recorded in `PROGRESS.md` under Act II
+phases 3-6.
+
+Three of them are not restorations and should not be read as such:
+
+- **`lib/offlineStore.js` was rewritten.** The source kept its consent flag in
+  `localStorage` under a third key, which this project's rules do not permit,
+  and then mirrored it into CacheStorage anyway because a worker cannot read
+  localStorage. The flag now lives only in CacheStorage. One source of truth,
+  and it fails closed harder.
+- **`lib/units.js` dropped its store.** The source published units through a
+  module singleton subscribed by exactly one component, so choosing miles
+  re-rendered the control and left every distance on screen in kilometres.
+  Units are threaded as a prop.
+- **`scripts/gate.mjs` was rewritten**, per the warning below, and now refuses
+  to grade anything until its own selectors match.
+
+**The Capacitor rebase is a separate, still-open row**, and conflating it with
+the web work is what the original row did. A service worker never registers
+under `capacitor://localhost`, so the iOS build needs the same capability on
+Preferences rather than CacheStorage. The labelling contract in
+`lib/offline.js` is storage-agnostic and carries across unchanged; only
+`offlineStore.js` and `sw.js` need native equivalents.
 
 ⚠ **`scripts/gate.mjs` is a rewrite, not a port, and for a sharper reason than
 recorded here.** It selects on `.row__button`, `.sheet__handle` and
@@ -355,11 +378,22 @@ not reading. `01160fb` fixes the pattern and makes the gate self-test before it
 is allowed to certify anything. Any gate restored from `feat/launch` should be
 made to fail once, on purpose, before it is trusted.
 
-**`scripts/pwa-gate.mjs` is deliberately not on that list.** It drives headless
-Chrome with the server stopped and asserts a service worker serves the shell.
-There is no service worker on iOS, so it would have nothing to assert about —
-and a gate that cannot fail is worse than no gate, because it reads as coverage.
-It needs rewriting against the native store or replacing with an on-device
-check.
+**`scripts/pwa-gate.mjs` is deliberately not on that list**, and the reasoning
+splits by platform now that a worker exists on the web.
+
+For **iOS** the original objection stands unchanged: there is no service worker
+under `capacitor://localhost`, so the gate would have nothing to assert about,
+and a gate that cannot fail is worse than no gate. It needs rewriting against
+the native store or replacing with an on-device check.
+
+For the **web** it was not restored either, but for a different reason: as
+written it asserts `localStorage.getItem('meander.offline')` — a third storage
+key, which this project does not allow, and one this tree deliberately does not
+have. What it was really guarding is now covered without it: the shell-opens-
+offline claim is verified with the network cut at the browser level, and the
+worker's own invariants — nothing cross-origin cached, an unversioned prefs
+cache, one saved response, no replay of a stream that ended in an error — are
+asserted by `frontend/src/lib/sw-contract.test.js`, which runs in `make check`
+rather than needing a browser at all.
 
 The CI jobs that graded the dropped code went with it. They come back with it.
