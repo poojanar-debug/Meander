@@ -48,6 +48,17 @@ services:
       # The point of this file. See the header.
       MEANDER_GRAPHHOPPER_SELF_HOSTED: "1"
       MEANDER_FIXTURES: live
+      # ⚠ Both of the next two are laptop settings, and this is the file most
+      # likely to be copied onto a server. This is the pair to change when it is.
+      #
+      # MEANDER_FIXTURES=live means the API no longer adds the dev server to the
+      # allowlist by itself (see _resolve_origins in backend/config.py), so a
+      # compose stack serving a Vite frontend has to ask for it. That is what
+      # these two lines do, and it is the reason they are safe here and wrong in
+      # production.
+      #
+      # On a public host: MEANDER_ALLOWED_ORIGINS becomes the real site origin
+      # and MEANDER_ALLOW_LOCAL_ORIGINS becomes 0.
       MEANDER_ALLOWED_ORIGINS: http://localhost:5173
       MEANDER_ALLOW_LOCAL_ORIGINS: "1"
       # 0, not 1: nothing is in front of the API here. Set it to 1 behind an

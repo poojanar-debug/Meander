@@ -207,10 +207,17 @@ def test_an_empty_origin_list_still_means_local_development(
 ) -> None:
     """The other half of the same defect: '' is not 'deny everything'.
 
-    Documented rather than changed. A deployment that leaves CorsOrigins empty
-    gets the dev-server allowlist, which is wrong for production and right for a
-    developer running `make run` — and the fix is to configure it, which
-    infra/20-services.yaml now does.
+    Still true, and now only in development. The suite runs in replay mode
+    (conftest.py:26), which is exactly what "development" means to
+    _resolve_origins, so an unconfigured origin list still yields the dev-server
+    allowlist here — the behaviour `make run` depends on and the property
+    test_localhost_is_allowed_when_nothing_is_configured pins.
+
+    What changed is the production half. This used to hold in live mode too, so
+    a deployment that forgot MEANDER_ALLOWED_ORIGINS silently allowlisted the
+    Vite dev server. That was documented rather than fixed, and closed only in
+    CloudFormation — which a compose deploy does not inherit. See
+    test_live_mode_never_allows_localhost_by_omission below.
     """
     monkeypatch.setenv("MEANDER_ALLOWED_ORIGINS", "")
     monkeypatch.delenv("MEANDER_ALLOW_LOCAL_ORIGINS", raising=False)
@@ -219,6 +226,50 @@ def test_an_empty_origin_list_still_means_local_development(
         "http://localhost:5173",
         "http://127.0.0.1:5173",
     )
+
+
+def test_live_mode_never_allows_localhost_by_omission(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Forgetting to configure origins in production must close the door, not open it.
+
+    live is the only fixture mode that talks to real upstreams, which makes it
+    the one honest signal for "this is not a laptop". A deployment that sets
+    nothing gets an empty allowlist — every cross-origin request refused — which
+    is a loud, obvious failure rather than a quiet, wrong success.
+    """
+    monkeypatch.setenv("MEANDER_FIXTURES", "live")
+    monkeypatch.delenv("MEANDER_ALLOWED_ORIGINS", raising=False)
+    monkeypatch.delenv("MEANDER_ALLOW_LOCAL_ORIGINS", raising=False)
+
+    assert config._resolve_origins() == ()
+
+
+def test_live_mode_still_honours_an_explicit_opt_in(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """docker-compose.yml is a laptop file that runs live against the real router.
+
+    It needs the dev server allowed and says so explicitly. Keying the *default*
+    off fixture mode must not take the override away, or the one-command local
+    stack stops working.
+    """
+    monkeypatch.setenv("MEANDER_FIXTURES", "live")
+    monkeypatch.setenv("MEANDER_ALLOWED_ORIGINS", "")
+    monkeypatch.setenv("MEANDER_ALLOW_LOCAL_ORIGINS", "1")
+
+    assert "http://localhost:5173" in config._resolve_origins()
+
+
+def test_live_mode_with_a_real_origin_does_not_gain_localhost(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The shape of the actual deployment: a Pages origin and nothing else."""
+    monkeypatch.setenv("MEANDER_FIXTURES", "live")
+    monkeypatch.setenv("MEANDER_ALLOWED_ORIGINS", "https://meander.pages.dev")
+    monkeypatch.delenv("MEANDER_ALLOW_LOCAL_ORIGINS", raising=False)
+
+    assert config._resolve_origins() == ("https://meander.pages.dev",)
 
 
 def test_the_resolved_allowlist_is_what_the_middleware_was_given() -> None:

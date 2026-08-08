@@ -324,15 +324,36 @@ def _resolve_fixture_mode() -> FixtureMode:
 def _resolve_origins() -> tuple[str, ...]:
     raw = os.environ.get("MEANDER_ALLOWED_ORIGINS", "")
     origins = [o.strip() for o in raw.split(",") if o.strip()]
+
     # The Vite dev server used to be appended to *every* deployment's allowlist
     # unconditionally, which quietly means a page served from a developer's
     # laptop can call production.
     #
-    # The default is now "only when no origins were configured at all", i.e.
-    # local development, where it is the whole allowlist. Configure
-    # MEANDER_ALLOWED_ORIGINS — which any deployment must — and localhost stops
-    # being allowed unless MEANDER_ALLOW_LOCAL_ORIGINS says otherwise.
-    if _env_flag("MEANDER_ALLOW_LOCAL_ORIGINS", not origins):
+    # That was narrowed to "only when no origins were configured at all", which
+    # is better and still not right: an empty MEANDER_ALLOWED_ORIGINS is exactly
+    # what a deployment that forgot to configure it looks like, and "forgot to
+    # configure it" then got the dev-server allowlist rather than a closed door.
+    # The previous pass documented that rather than fixing it and closed the hole
+    # in CloudFormation instead — a fix a compose deploy does not inherit.
+    #
+    # The default now keys off fixture mode, which is the one signal that is
+    # already required to be correct and already differs between the two cases:
+    #
+    #   replay / record   development. MEANDER_FIXTURES defaults to replay, so a
+    #                     developer who has configured *nothing at all* still
+    #                     gets localhost — the property pinned by
+    #                     test_localhost_is_allowed_when_nothing_is_configured,
+    #                     which is deliberate and stays true.
+    #   live              production, by definition: it is the only mode that
+    #                     talks to real upstreams. localhost is never added
+    #                     implicitly here.
+    #
+    # MEANDER_ALLOW_LOCAL_ORIGINS still overrides in both directions, so a
+    # laptop running compose against the real router (MEANDER_FIXTURES=live) says
+    # so explicitly — see docker-compose.yml — and production can never acquire
+    # the dev server by omission.
+    is_development = _resolve_fixture_mode() != "live"
+    if _env_flag("MEANDER_ALLOW_LOCAL_ORIGINS", is_development and not origins):
         for d in ("http://localhost:5173", "http://127.0.0.1:5173"):
             if d not in origins:
                 origins.append(d)
