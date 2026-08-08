@@ -45,7 +45,7 @@ const TYPES = [
   ['incline', 'Gradient'],
 ]
 
-export default function ReportBarrier({ route }) {
+export default function ReportBarrier({ route, units }) {
   const formId = useId()
   const [open, setOpen] = useState(false)
   const [type, setType] = useState('barrier')
@@ -134,8 +134,8 @@ export default function ReportBarrier({ route }) {
 
       <div className="field">
         <label className="field__label" htmlFor={`${formId}-at`}>
-          How far along the route? <span className="tabular">{fmtDist(atM)}</span> of{' '}
-          <span className="tabular">{fmtDist(total)}</span>
+          How far along the route? <span className="tabular">{fmtDist(atM, units)}</span> of{' '}
+          <span className="tabular">{fmtDist(total, units)}</span>
         </label>
         <input
           id={`${formId}-at`}
@@ -145,7 +145,7 @@ export default function ReportBarrier({ route }) {
           max={total}
           step={Math.max(10, Math.round(total / 100))}
           value={atM}
-          aria-valuetext={`${fmtDist(atM)} along the route`}
+          aria-valuetext={`${fmtDist(atM, units)} along the route`}
           onChange={(e) => setAtM(Number(e.target.value))}
         />
       </div>

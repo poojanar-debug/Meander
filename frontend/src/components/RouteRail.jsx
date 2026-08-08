@@ -28,7 +28,15 @@ function Skeleton() {
  * able to see *where* a route fails, not just be told it does, so a blocked
  * route stays in the list and stays selectable.
  */
-export default function RouteRail({ routes, selected, theme, loading, expected, onSelect }) {
+export default function RouteRail({
+  routes,
+  selected,
+  theme,
+  loading,
+  expected,
+  units,
+  onSelect,
+}) {
   const showSkeletons = loading && routes.length === 0
 
   if (routes.length === 0 && !showSkeletons) return null
@@ -50,6 +58,7 @@ export default function RouteRail({ routes, selected, theme, loading, expected, 
                 route={route}
                 selected={route.id === selected}
                 theme={theme}
+                units={units}
                 onSelect={onSelect}
               />
             ))}

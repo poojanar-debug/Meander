@@ -57,7 +57,7 @@ function Barriers({ blockers }) {
  * The blocked notice is placed **above** Along the way rather than at the end,
  * because it changes whether any of the rest matters.
  */
-export default function RouteDetail({ route, theme, stepList, onStart, children }) {
+export default function RouteDetail({ route, theme, units, stepList, onStart, children }) {
   if (!route) return null
 
   const style = styleFor(route.id)
@@ -80,7 +80,7 @@ export default function RouteDetail({ route, theme, stepList, onStart, children 
           {route.label}
         </h3>
         <p className="detail__figures tabular">
-          {fmtDur(route.duration_min)} · {fmtDist(route.distance_m)}
+          {fmtDur(route.duration_min)} · {fmtDist(route.distance_m, units)}
         </p>
       </header>
 
@@ -117,7 +117,7 @@ export default function RouteDetail({ route, theme, stepList, onStart, children 
             {route.rest_stops.map((stop, i) => (
               <li className="stop" key={`${stop.type}-${stop.lat}-${stop.lon}-${i}`}>
                 <span aria-hidden="true">◦</span>
-                {restStopName(stop.type, 1)} · {fmtDist(stop.at_m)}
+                {restStopName(stop.type, 1)} · {fmtDist(stop.at_m, units)}
               </li>
             ))}
           </ul>
@@ -126,7 +126,7 @@ export default function RouteDetail({ route, theme, stepList, onStart, children 
 
       <section className="detail__section">
         <h4 className="detail__h">Climb</h4>
-        <ElevationProfile profile={route.elevation} />
+        <ElevationProfile profile={route.elevation} units={units} />
       </section>
 
       <section className="detail__section">
@@ -185,7 +185,7 @@ export default function RouteDetail({ route, theme, stepList, onStart, children 
           standing at a barrier the map has never heard of. Collapsed until
           asked for, because it is also the only thing here that publishes. */}
       <section className="detail__section">
-        <ReportBarrier route={route} />
+        <ReportBarrier route={route} units={units} />
       </section>
 
       {/* No Share or Save. Save is §6.8, which is deferred; Share has no

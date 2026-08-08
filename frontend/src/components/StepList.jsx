@@ -12,7 +12,7 @@ import { fmtDist } from '../lib/format.js'
  * Nothing is invented. Every word except the connective comes from the router;
  * where it gives no street name, the sentence simply does not name one.
  */
-function sentence(step) {
+function sentence(step, units) {
   const text = step.text.trim().replace(/\.$/, '')
   const far = step.distance_m >= 1
 
@@ -20,8 +20,8 @@ function sentence(step) {
   if (!far) return `${text}.`
   const followable = /\bonto\b|\balong\b|\bon\b/i.test(text)
   return followable
-    ? `${text} and follow it for ${fmtDist(step.distance_m)}.`
-    : `${text}, then continue for ${fmtDist(step.distance_m)}.`
+    ? `${text} and follow it for ${fmtDist(step.distance_m, units)}.`
+    : `${text}, then continue for ${fmtDist(step.distance_m, units)}.`
 }
 
 /**
@@ -69,7 +69,7 @@ function barriersByStep(steps, blockers, geometry) {
  * this answers "how do I walk it", which is a question you only ask once you
  * have chosen.
  */
-export default function StepList({ route, onHighlight }) {
+export default function StepList({ route, units, onHighlight }) {
   const steps = route?.steps ?? []
 
   if (steps.length === 0) {
@@ -101,11 +101,11 @@ export default function StepList({ route, onHighlight }) {
             onBlur={() => onHighlight?.(null)}
             tabIndex={0}
           >
-            <p className="step__text">{sentence(step)}</p>
+            <p className="step__text">{sentence(step, units)}</p>
             {step.street_name && (
               <p className="step__meta">
                 {step.street_name}
-                {step.distance_m >= 1 && ` · ${fmtDist(step.distance_m)}`}
+                {step.distance_m >= 1 && ` · ${fmtDist(step.distance_m, units)}`}
               </p>
             )}
             {barriers.get(i)?.map((b, j) => (

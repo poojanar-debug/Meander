@@ -45,7 +45,7 @@ const prefersReducedMotion = () =>
  * Permission denied drops back to the detail panel with the step list open.
  * Follow mode is never the only way to read a route.
  */
-export default function FollowMode({ route, onExit, onAnnounce }) {
+export default function FollowMode({ route, units, onExit, onAnnounce }) {
   const geometry = route.geometry ?? []
   const cumulative = useMemo(() => cumulativeDistances(geometry), [geometry])
   const totalM = cumulative[cumulative.length - 1] ?? route.distance_m ?? 0
@@ -187,7 +187,7 @@ export default function FollowMode({ route, onExit, onAnnounce }) {
 
       {closest && (
         <div className="follow__alert" role="alert">
-          <strong>{closest.blocker.type}</strong> {Math.round(closest.distanceM)} m ahead —{' '}
+          <strong>{closest.blocker.type}</strong> {fmtDist(closest.distanceM, units)} ahead —{' '}
           {closest.blocker.description}
         </div>
       )}
@@ -219,16 +219,16 @@ export default function FollowMode({ route, onExit, onAnnounce }) {
             </p>
             {toTurn != null && (
               <p className="sheet__metric tabular">
-                {fmtDist(toTurn)} <span className="sheet__metric-unit">to the next turn</span>
+                {fmtDist(toTurn, units)} <span className="sheet__metric-unit">to the next turn</span>
               </p>
             )}
             {rest && (
               <p className="sheet__row">
-                {restStopName(rest.stop.type, 1)} in {fmtDist(rest.inM)}
+                {restStopName(rest.stop.type, 1)} in {fmtDist(rest.inM, units)}
               </p>
             )}
             <p className="sheet__row tabular">
-              {fmtDist(totalM - remainingM)} of {fmtDist(totalM)}
+              {fmtDist(totalM - remainingM, units)} of {fmtDist(totalM, units)}
               {remainingMin != null && ` · about ${fmtDur(remainingMin)} left`}
             </p>
           </>

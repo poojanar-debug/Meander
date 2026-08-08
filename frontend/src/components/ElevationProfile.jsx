@@ -1,6 +1,7 @@
 import { useId } from 'react'
 
 import { fmtDist } from '../lib/format.js'
+import { formatElevation } from '../lib/units.js'
 
 /**
  * The route's climb.
@@ -31,7 +32,7 @@ import { fmtDist } from '../lib/format.js'
  * The SVG is aria-hidden and paired with a text summary, because a polyline is
  * not an accessible description of anything.
  */
-export default function ElevationProfile({ profile }) {
+export default function ElevationProfile({ profile, units }) {
   const gradientId = useId()
   const hatchId = useId()
 
@@ -68,8 +69,8 @@ export default function ElevationProfile({ profile }) {
 
   const hasSteep = steep.length > 0
   const summary =
-    `Climbs ${Math.round(profile.ascent_m)} m and descends ` +
-    `${Math.round(profile.descent_m)} m. Steepest gradient ` +
+    `Climbs ${formatElevation(profile.ascent_m, units)} and descends ` +
+    `${formatElevation(profile.descent_m, units)}. Steepest gradient ` +
     `${profile.max_gradient_pct}%` +
     (hasSteep
       ? `, which is over the ${limit}% limit this app treats as impassable — ` +
@@ -120,9 +121,9 @@ export default function ElevationProfile({ profile }) {
       </svg>
 
       <div className="profile__axis" aria-hidden="true">
-        <span className="tabular">{Math.round(minY)} m</span>
-        <span className="tabular">{fmtDist(maxX)}</span>
-        <span className="tabular">{Math.round(maxY)} m</span>
+        <span className="tabular">{formatElevation(minY, units)}</span>
+        <span className="tabular">{fmtDist(maxX, units)}</span>
+        <span className="tabular">{formatElevation(maxY, units)}</span>
       </div>
 
       <p className="profile__summary">{summary}</p>

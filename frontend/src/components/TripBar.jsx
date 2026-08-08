@@ -5,6 +5,7 @@ import ObjectiveChips from './ObjectiveChips.jsx'
 import PlaceInput from './PlaceInput.jsx'
 import TimeDial from './TimeDial.jsx'
 import TripDrawer from './TripDrawer.jsx'
+import UnitsControl from './UnitsControl.jsx'
 
 const MODES = [
   { value: 'auto', label: 'Choose for me' },
@@ -88,6 +89,9 @@ export default function TripBar({
   onOrigin,
   onDest,
   onLocate,
+  units,
+  onUnits,
+  onClearUnits,
 }) {
   const [open, setOpen] = useState(null)
   const toggle = (key) => setOpen((current) => (current === key ? null : key))
@@ -199,6 +203,12 @@ export default function TripBar({
             ))}
           </select>
         </div>
+        {/* The drawer that already owns "how long" and "how are you
+            travelling" is the honest home for "in what units". It also renders
+            whether or not any routes exist, which the results-head slot does
+            not — and with the locale defaulting a bare `en` to miles, this
+            control has to be findable before the first search. */}
+        <UnitsControl units={units} onUnits={onUnits} onClearUnits={onClearUnits} />
       </TripDrawer>
 
       <TripDrawer id="drawer-compare" labelledBy="seg-key-compare" open={open === 'compare'}>

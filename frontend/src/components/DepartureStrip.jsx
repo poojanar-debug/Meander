@@ -16,7 +16,14 @@ const CHIP_COUNT = 6
  * when it has nothing to measure — throwing that restraint away in the client
  * would defeat it.
  */
-export default function DepartureStrip({ bestDeparture, reason, origin, departAt, onDepartAt }) {
+export default function DepartureStrip({
+  bestDeparture,
+  reason,
+  origin,
+  departAt,
+  units,
+  onDepartAt,
+}) {
   const recommended = bestDeparture ? new Date(bestDeparture) : null
   if (!recommended || Number.isNaN(recommended.valueOf())) return null
 
@@ -26,7 +33,7 @@ export default function DepartureStrip({ bestDeparture, reason, origin, departAt
   // sentence and moon glyphs together — rather than showing half of a signal.
   const localClock = origin ? canStateLocalTime(origin.lon) : false
   const times = localClock && origin ? sunTimes(recommended, origin.lat, origin.lon) : null
-  const daylight = daylightSentence(times)
+  const daylight = daylightSentence(times, units)
 
   // Whole hours from the current hour. The recommendation is rarely on the
   // hour, so its own chip is included where it falls.
@@ -45,7 +52,10 @@ export default function DepartureStrip({ bestDeparture, reason, origin, departAt
   return (
     <section className="departure" aria-labelledby="departure-head">
       <p className="departure__head" id="departure-head">
-        Leave at <strong>{fmtClock(recommended)}</strong>
+        Leave at{' '}
+        <strong>
+          <time dateTime={recommended.toISOString()}>{fmtClock(recommended, units)}</time>
+        </strong>
         {/* §6.2: with no reason from the backend, the time and the word "best"
             and nothing more. The reason clause is not ours to invent. */}
         {reason ? ` — ${reason}` : ' — the best time in the next few hours.'}
@@ -73,7 +83,7 @@ export default function DepartureStrip({ bestDeparture, reason, origin, departAt
                   ☾
                 </span>
               )}
-              {fmtClock(hour)}
+              {fmtClock(hour, units)}
               {dark && <span className="visually-hidden"> — after dark</span>}
             </button>
           )

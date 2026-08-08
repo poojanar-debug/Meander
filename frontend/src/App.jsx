@@ -16,6 +16,13 @@ import Topbar from './components/Topbar.jsx'
 import TripBar from './components/TripBar.jsx'
 import { announceRoutes, announceSelection, effectiveMode } from './lib/format.js'
 import { applyTheme, initialTheme, readStoredTheme, storeTheme, systemTheme } from './lib/theme.js'
+import {
+  METRIC_24,
+  clearStoredUnits,
+  detectUnits,
+  initialUnits,
+  storeUnits,
+} from './lib/units.js'
 
 const prefersReducedMotion = () =>
   window.matchMedia?.('(prefers-reduced-motion: reduce)').matches === true
@@ -57,6 +64,9 @@ const initialState = {
   // A display preference, not an input to the route request. It deliberately
   // does not live in `withRefetch`.
   theme: 'light',
+  // The same, and for the same reason. The wire format is always metric; this
+  // only decides how a distance is spelled on the way to the screen.
+  units: METRIC_24,
   // Bumped by anything that should trigger a refetch; the effect keys on it.
   nonce: 0,
   debounceMs: 0,
@@ -65,7 +75,7 @@ const initialState = {
 /** Resolved at mount rather than at module load, so the read is not a side
  *  effect of importing this file. */
 function init(state) {
-  return { ...state, theme: initialTheme() }
+  return { ...state, theme: initialTheme(), units: initialUnits() }
 }
 
 function withRefetch(state, patch, debounceMs) {
@@ -168,6 +178,13 @@ function reducer(state, action) {
     case 'theme':
       return { ...state, theme: action.value }
 
+    // Neither of these goes through withRefetch: units are a display
+    // preference, so changing them must never cost a request.
+    case 'units':
+      return { ...state, units: { ...state.units, ...action.value, chosen: true } }
+    case 'unitsCleared':
+      return { ...state, units: detectUnits() }
+
     // Follow mode reads geometry the app already has. It does not fetch, and it
     // must not run through the nonce effect.
     case 'follow':
@@ -186,6 +203,9 @@ export default function App() {
   // mousemove across a list and has no business triggering the fetch effect.
   const [highlight, setHighlight] = useState(null)
   const abortRef = useRef(null)
+  // Read by the nonce-keyed effect below. A ref, not a dependency: adding
+  // state.units to that dep array would re-fire every fetch on a unit change.
+  const unitsRef = useRef(initialState.units)
   const announceTimer = useRef(null)
   const aboutRef = useRef(null)
 
@@ -243,7 +263,7 @@ export default function App() {
           reason: payload?.reason,
           bestDeparture: payload?.best_departure,
         })
-        announce(announceRoutes(payload?.routes ?? arrived))
+        announce(announceRoutes(payload?.routes ?? arrived, unitsRef.current))
       } catch (err) {
         if (err?.name === 'AbortError') return
         dispatch({ type: 'error', value: err })
@@ -256,6 +276,10 @@ export default function App() {
     // debounce, and reading the other values here would double-fire.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [state.nonce])
+
+  useEffect(() => {
+    unitsRef.current = state.units
+  }, [state.units])
 
   useEffect(() => () => abortRef.current?.abort(), [])
 
@@ -293,6 +317,23 @@ export default function App() {
     dispatch({ type: 'theme', value })
   }, [])
 
+  // Persist on the way in, exactly as onTheme does. `patch` is one field, so
+  // the stored object is rebuilt from current state rather than from the patch.
+  const onUnits = useCallback(
+    (patch) => {
+      const next = { ...state.units, ...patch, chosen: true }
+      storeUnits(next)
+      dispatch({ type: 'units', value: patch })
+    },
+    [state.units],
+  )
+
+  // The escape hatch: drop the key and fall back to what the device implies.
+  const onClearUnits = useCallback(() => {
+    clearStoredUnits()
+    dispatch({ type: 'unitsCleared' })
+  }, [])
+
   // --- handlers ------------------------------------------------------------
 
   const onLocate = useCallback(() => {
@@ -326,9 +367,9 @@ export default function App() {
     (id) => {
       dispatch({ type: 'select', value: id })
       const route = state.routes.find((r) => r.id === id)
-      announce(announceSelection(route))
+      announce(announceSelection(route, state.units))
     },
-    [state.routes, announce],
+    [state.routes, state.units, announce],
   )
 
   const onToggleObjective = useCallback(
@@ -406,6 +447,9 @@ export default function App() {
             onOrigin={(value) => dispatch({ type: 'origin', value })}
             onDest={(value) => dispatch({ type: 'dest', value })}
             onLocate={onLocate}
+            units={state.units}
+            onUnits={onUnits}
+            onClearUnits={onClearUnits}
           />
 
           <DepartureStrip
@@ -413,6 +457,7 @@ export default function App() {
             reason={state.reason}
             origin={state.origin}
             departAt={state.departAt}
+            units={state.units}
             onDepartAt={(value) => dispatch({ type: 'departAt', value })}
           />
 
@@ -438,19 +483,24 @@ export default function App() {
               theme={state.theme}
               loading={state.phase === 'loading'}
               expected={state.objectives.length}
+              units={state.units}
               onSelect={onSelect}
             />
 
             <RouteDetail
               route={selectedRoute}
               theme={state.theme}
-              stepList={<StepList route={selectedRoute} onHighlight={setHighlight} />}
+              units={state.units}
+              stepList={
+                <StepList route={selectedRoute} units={state.units} onHighlight={setHighlight} />
+              }
               onStart={(id) => dispatch({ type: 'follow', value: id })}
             >
               <DaylightGuard
                 route={selectedRoute}
                 origin={state.origin}
                 departAt={state.departAt}
+                units={state.units}
                 onMinutes={(value) => dispatch({ type: 'minutes', value })}
                 onDepartAt={(value) => dispatch({ type: 'departAt', value })}
               />
@@ -479,6 +529,7 @@ export default function App() {
           {followRoute && (
             <FollowMode
               route={followRoute}
+              units={state.units}
               onExit={() => dispatch({ type: 'follow', value: null })}
               onAnnounce={announce}
             />

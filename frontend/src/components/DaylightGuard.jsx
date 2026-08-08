@@ -12,7 +12,14 @@ import { canStateLocalTime, daylightGuard, minutesToFinishBySunset, sunTimes } f
  * "start at sunrise" would ask the user to compare two fixes for a problem they
  * have only just been told about.
  */
-export default function DaylightGuard({ route, origin, departAt, onMinutes, onDepartAt }) {
+export default function DaylightGuard({
+  route,
+  origin,
+  departAt,
+  units,
+  onMinutes,
+  onDepartAt,
+}) {
   if (!route || !origin || typeof route.duration_min !== 'number') return null
   // Every sentence this component can produce names a clock time or is about
   // to. If the viewer's timezone and the route's longitude disagree, none of
@@ -23,7 +30,7 @@ export default function DaylightGuard({ route, origin, departAt, onMinutes, onDe
   if (Number.isNaN(start.valueOf())) return null
   const end = new Date(start.getTime() + route.duration_min * 60000)
 
-  const guard = daylightGuard({ start, end, lat: origin.lat, lon: origin.lon })
+  const guard = daylightGuard({ start, end, lat: origin.lat, lon: origin.lon, units })
   if (!guard) return null
 
   const times = sunTimes(start, origin.lat, origin.lon)

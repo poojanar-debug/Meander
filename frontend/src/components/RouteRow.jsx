@@ -32,7 +32,7 @@ const SCORE_ROWS = [
  * that varies in length — narration, barrier lists, the full confidence
  * sentence — lives in the detail panel for the selected route.
  */
-export default function RouteRow({ route, selected, theme, onSelect }) {
+export default function RouteRow({ route, selected, theme, units, onSelect }) {
   const style = styleFor(route.id)
   const blocked = route.status !== 'ok'
   const hasShape = route.geometry?.length > 1
@@ -88,7 +88,7 @@ export default function RouteRow({ route, selected, theme, onSelect }) {
               'not drawn on the map'
             )}
             {' · '}
-            {fmtDist(route.distance_m)}
+            {fmtDist(route.distance_m, units)}
             {' · '}
             {restStopSummary(route.rest_stops)}
             {blocked && ' · cannot be completed'}
