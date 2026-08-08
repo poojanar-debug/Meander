@@ -43,17 +43,29 @@ lists the seven pieces of it that have to come back, and why each one is wanted.
 
 ### What is proven
 
-**632 backend tests and 46 frontend tests pass offline**, at 87.55% statement coverage against an
+**645 backend tests and 46 frontend tests pass offline**, at 87.64% statement coverage against an
 85% floor. The suite never opens a socket, and a job in CI runs it under `unshare -n` to prove
 that rather than trust it. The deploy image imports with torch absent, checked against the real
-requirements file. The frontend reports no WCAG 2.1 AA violations in an automated pass at light
-desktop, dark desktop and 390 px.
+requirements file, and `backend.main` is imported in that environment to prove absence is not the
+only thing being measured.
 
-All three presets route, against a self-hosted server carrying Sri Lanka + the Netherlands + Great
-Britain in one graph. `scripts/verify_selfhosted.py` asserts it at four points, one per imported
-region: all three presets answer, their geometries differ from each other, and `smoothness` comes
-back as a path detail — which is the fifth hard accessibility constraint, and the one the hosted
-API cannot supply at all.
+The WCAG 2.1 AA line that used to sit here is withdrawn rather than restated. It was produced by
+`scripts/gate.mjs`, running axe-core at light desktop, dark desktop and 390 px — and that gate left
+the tree in the reconciliation merge along with the frontend it graded. `axe-core` is still a
+devDependency and nothing runs it. [BLOCKED.md](BLOCKED.md) §5 tracks bringing it back re-targeted
+at the component tree that actually shipped; until then there is no automated accessibility pass to
+report, and claiming one would be the easiest lie in this file to tell.
+
+All three presets route against a self-hosted server. `scripts/verify_selfhosted.py` asserts it at
+**three** of its four locations under the default `demo` region set: all three presets answer, their
+geometries differ from each other, and `smoothness` comes back as a path detail — which is the fifth
+hard accessibility constraint, and the one the hosted API cannot supply at all.
+
+The fourth, Edinburgh, is skipped rather than failed, and `scripts/verify_selfhosted.py:43-55`
+explains why. `demo` imports three bounding boxes — Sri Lanka, Greater London, Noord-Holland — while
+Edinburgh exists only under the `countries` set, which builds Great Britain entire and needs a 20 GB
+serve heap. "You did not import Scotland" is a fact about the region set, not a defect in the router,
+so the script asks the running graph what it covers instead of assuming.
 
 **The frontend answers "when should I go?" and "which way, exactly?"** — a best-departure window,
 sunrise and sunset computed in the browser, turn-by-turn directions with a barrier rendered inside
