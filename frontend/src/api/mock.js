@@ -383,3 +383,25 @@ export async function mockGeocode(q, { signal } = {}) {
   if (!needle) return []
   return PLACES.filter((p) => p.name.toLowerCase().includes(needle)).slice(0, 6)
 }
+
+/**
+ * The mock counterpart of POST /api/report-barrier.
+ *
+ * It does not send anything anywhere — that is the point of the mock — but it
+ * has to exercise both outcomes, because the failure path is the one carrying
+ * the honest message and an unexercised error branch is how that message rots.
+ *
+ * A description containing "fail" returns the error shape, which is also how
+ * the branch gets checked by hand without editing this file.
+ */
+export async function mockReportBarrier(report, { signal } = {}) {
+  await sleep(600, signal)
+  if (/fail/i.test(report?.description ?? '')) {
+    const err = new Error(
+      'The OpenStreetMap development server did not accept that. Nothing was filed.',
+    )
+    err.kind = 'upstream_unavailable'
+    throw err
+  }
+  return { note_id: 4471 }
+}

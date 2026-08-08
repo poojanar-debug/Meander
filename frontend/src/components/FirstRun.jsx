@@ -109,9 +109,13 @@ export default function FirstRun({ minutes, origin, locating, geoDenied, onMinut
           Leave the destination empty and you get a loop that brings you back.
         </p>
 
+        {/* Two sentences, because this is the entry screen and not the terms.
+            The second exists because the first is no longer true on its own:
+            reporting a barrier publishes. About.jsx carries the full version. */}
         <p className="firstrun__privacy">
           <span aria-hidden="true">⛉</span> Nothing is stored. Your coordinates answer this one
-          request and are then discarded.
+          request and are then discarded. The only thing Meander ever publishes is a barrier
+          report, and only when you ask it to.
         </p>
       </div>
     </div>

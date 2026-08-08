@@ -1475,6 +1475,89 @@ fieldset.chips legend {
 }
 
 
+/* ------------------------------------------------------ report a barrier */
+
+/* The only control in the application that publishes anything. It is collapsed
+   until asked for, and the warning sits above the button rather than below it. */
+.report__open {
+  width: 100%;
+  min-height: var(--target);
+}
+
+.report {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s3);
+  padding: var(--s4);
+  background: var(--sunken);
+  border: 1px solid var(--rule);
+  border-radius: var(--r-md);
+}
+
+.report__title {
+  font: var(--t-h3);
+  margin: 0;
+}
+
+.report__lede {
+  font-size: var(--t-small);
+  color: var(--ink-2);
+  margin: 0;
+}
+
+.report__select,
+.report__text {
+  width: 100%;
+  min-height: var(--target);
+  padding: var(--s2) var(--s3);
+  font: inherit;
+  color: var(--ink);
+  background: var(--paper);
+  border: 1px solid var(--rule-strong);
+  border-radius: var(--r-sm);
+}
+
+.report__text {
+  resize: vertical;
+}
+
+.report__range {
+  width: 100%;
+  min-height: var(--target);
+}
+
+/* Warning colours, and a rule down the side so it is not colour alone. */
+.report__warn {
+  font-size: var(--t-small);
+  color: var(--warn-ink);
+  background: var(--warn-ground);
+  border-inline-start: 3px solid var(--warn-rule);
+  border-radius: var(--r-sm);
+  padding: var(--s3);
+  margin: 0;
+}
+
+.report__actions {
+  display: flex;
+  gap: var(--s3);
+  flex-wrap: wrap;
+}
+
+.report__actions .button {
+  min-height: var(--target);
+}
+
+.report__status:empty {
+  display: none;
+}
+
+.report__status {
+  font-size: var(--t-small);
+  color: var(--ink);
+  margin: 0;
+}
+
+
 /* ----------------------------------------------------------- responsive */
 
 /* Below 900px the map moves ABOVE the panel and the page scrolls as one

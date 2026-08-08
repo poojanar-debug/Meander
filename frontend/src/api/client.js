@@ -158,3 +158,37 @@ export async function geocode(q, options = {}) {
   }
   return realGeocode(q, options)
 }
+
+/**
+ * File an obstruction as an OpenStreetMap note.
+ *
+ * ⚠ **The only write this application makes, and it is to a public database.**
+ * Everything else here is a read that leaves no trace; this leaves a permanent,
+ * publicly visible note carrying a coordinate and whatever the person typed.
+ * About.jsx and FirstRun.jsx both say so, because a privacy promise that has an
+ * exception must name it.
+ *
+ * The target is api06.dev.openstreetmap.org — the OSM *development* server,
+ * whose data is disposable — and backend/main.py asserts that host at call time
+ * rather than only configuring it, because a copy-paste that repointed it at
+ * production would put junk into the map everyone else relies on.
+ *
+ * OSM_DEV_TOKEN is optional: backend/osm_report.py:60 notes that anonymous
+ * notes are permitted, so a missing token means an unattributed note, not a
+ * broken feature. Callers must therefore key their failure handling on the
+ * response, never on whether a token is configured.
+ */
+export async function reportBarrier(report, { signal } = {}) {
+  if (isMock) {
+    const { mockReportBarrier } = await import('./mock.js')
+    return mockReportBarrier(report, { signal })
+  }
+  const res = await fetch(url('/api/report-barrier'), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(report),
+    signal,
+  })
+  if (!res.ok) throw await toApiError(res)
+  return res.json()
+}

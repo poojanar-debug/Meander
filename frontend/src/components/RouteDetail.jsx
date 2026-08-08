@@ -10,6 +10,7 @@ import {
   restStopName,
 } from '../lib/format.js'
 import ElevationProfile from './ElevationProfile.jsx'
+import ReportBarrier from './ReportBarrier.jsx'
 
 const SCORE_ROWS = [
   { key: 'nature', label: 'Nature' },
@@ -179,6 +180,13 @@ export default function RouteDetail({ route, theme, stepList, onStart, children 
           injected by App rather than imported here, so this component stays
           about layout and the phases stay separable. */}
       {children}
+
+      {/* The one loop that can improve the data underneath the app: a person
+          standing at a barrier the map has never heard of. Collapsed until
+          asked for, because it is also the only thing here that publishes. */}
+      <section className="detail__section">
+        <ReportBarrier route={route} />
+      </section>
 
       {/* No Share or Save. Save is §6.8, which is deferred; Share has no
           specification and the app holds no state in the URL, so a share link

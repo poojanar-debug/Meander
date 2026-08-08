@@ -45,6 +45,47 @@ export function cumulativeDistances(geometry) {
 }
 
 /**
+ * The inverse of `locateOnRoute`: a distance along the line to a point on it.
+ *
+ * Interpolates inside the segment rather than snapping to the nearest vertex.
+ * Consecutive vertices on a long straight stretch can be hundreds of metres
+ * apart, and snapping would move a reported barrier that far from where the
+ * person actually stood.
+ *
+ * ⚠ Geometry is `[lon, lat]` — GeoJSON order — and this returns named
+ * `{ lat, lon }`, because the API's BarrierReport takes named fields. Getting
+ * that backwards files a report in the wrong hemisphere of a public database,
+ * and nothing downstream would catch it. The axis order is pinned by test.
+ *
+ * Returns null for a degenerate geometry rather than a point at [0, 0], which
+ * is a real place in the Gulf of Guinea.
+ */
+export function pointAtDistance(geometry, metres, cumulative) {
+  if (!Array.isArray(geometry) || geometry.length < 2) return null
+
+  const cum = cumulative ?? cumulativeDistances(geometry)
+  const total = cum[cum.length - 1]
+  if (!(total > 0)) return null
+
+  const target = Math.min(Math.max(metres, 0), total)
+
+  let i = 1
+  while (i < cum.length - 1 && cum[i] < target) i += 1
+
+  const segStart = cum[i - 1]
+  const segLength = cum[i] - segStart
+  const t = segLength > 0 ? (target - segStart) / segLength : 0
+
+  const [lon1, lat1] = geometry[i - 1]
+  const [lon2, lat2] = geometry[i]
+
+  return {
+    lat: lat1 + (lat2 - lat1) * t,
+    lon: lon1 + (lon2 - lon1) * t,
+  }
+}
+
+/**
  * Where a position falls on the line.
  *
  * Returns the perpendicular distance to the nearest segment (`offRouteM`), how

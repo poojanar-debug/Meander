@@ -7,6 +7,7 @@ import {
   locateOnRoute,
   metresToNextTurn,
   nextRestStop,
+  pointAtDistance,
   stepAt,
   trackOffRoute,
 } from './follow.js'
@@ -181,5 +182,60 @@ describe('trackOffRoute', () => {
 
   it('treats exactly the threshold distance as on-route', () => {
     expect(trackOffRoute(null, 40, t0).since).toBeNull()
+  })
+})
+
+describe('pointAtDistance', () => {
+  // The inverse of locateOnRoute. It exists so a barrier report can say "about
+  // 400 m along this route" and turn that into a coordinate a mapper can visit.
+
+  it('returns the axes the API expects, not the ones the geometry uses', () => {
+    // ⚠ The failure this pins is not a crash. Geometry is [lon, lat]; the
+    // BarrierReport model takes named lat/lon. Swapping them files a note in the
+    // wrong hemisphere of a public database and nothing downstream notices.
+    // A point 22 m north of the equator on the prime meridian, so lat and lon
+    // are unmistakably different numbers.
+    const north = [
+      [0, 0],
+      [0, 0.0002],
+    ]
+    const at = pointAtDistance(north, 11.1)
+
+    expect(at.lat).toBeGreaterThan(0)
+    expect(at.lon).toBeCloseTo(0, 9)
+  })
+
+  it('interpolates inside a segment rather than snapping to a vertex', () => {
+    // LINE's vertices are ~111 m apart. Asking for 55 m must land between the
+    // first two, not on either of them.
+    const at = pointAtDistance(LINE, 55)
+    expect(at.lon).toBeGreaterThan(0)
+    expect(at.lon).toBeLessThan(0.001)
+  })
+
+  it('clamps rather than extrapolating past either end', () => {
+    const total = cumulativeDistances(LINE).at(-1)
+    const past = pointAtDistance(LINE, total + 5000)
+    const before = pointAtDistance(LINE, -5000)
+
+    expect(past.lon).toBeCloseTo(LINE.at(-1)[0], 9)
+    expect(before.lon).toBeCloseTo(LINE[0][0], 9)
+  })
+
+  it('agrees with locateOnRoute — a round trip returns the distance it was given', () => {
+    const cum = cumulativeDistances(LINE)
+    const at = pointAtDistance(LINE, 200, cum)
+    const back = locateOnRoute([at.lon, at.lat], LINE, cum)
+
+    expect(back.alongM).toBeCloseTo(200, 0)
+    expect(back.offRouteM).toBeCloseTo(0, 3)
+  })
+
+  it('returns null for a degenerate geometry instead of a point off Africa', () => {
+    // [0, 0] is the Gulf of Guinea, and a barrier filed there is worse than no
+    // barrier filed at all.
+    expect(pointAtDistance([], 10)).toBeNull()
+    expect(pointAtDistance([[0, 0]], 10)).toBeNull()
+    expect(pointAtDistance([[5, 5], [5, 5]], 10)).toBeNull()
   })
 })

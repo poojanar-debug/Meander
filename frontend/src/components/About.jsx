@@ -32,6 +32,17 @@ const About = forwardRef(function About({ cache }, ref) {
           is whether you chose the light or the dark theme.
         </p>
 
+        {/* The paragraph above has exactly one exception, so it names it rather
+            than quietly acquiring one. Reporting a barrier is the only thing in
+            this application that writes anywhere, and it is opt-in, one press
+            at a time. */}
+        <p>
+          There is one exception, and only if you ask for it. If you report a barrier, that report
+          is published — the point you picked and the words you wrote become a public note on the
+          OpenStreetMap development server, and it stays there. The form says so above the send
+          button. Nothing else you do here leaves the browser.
+        </p>
+
         {cache && (
           <p>
             {cache.segments_scored.toLocaleString()} map segments scored,{' '}
