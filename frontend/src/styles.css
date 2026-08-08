@@ -463,7 +463,10 @@ h3 {
   display: inline-flex;
   align-items: center;
   gap: var(--s2);
-  min-height: 36px;
+  /* Was 36px. The rule is 44 and there is no exemption for a control that
+     happens to be small — the gate that now measures this would have shipped
+     red, and a gate that ships red gets skipped. */
+  min-height: var(--target);
   padding: var(--s2) var(--s4);
   border: 1px solid var(--rule-strong);
   border-radius: var(--r-pill);
@@ -584,7 +587,9 @@ h3 {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  min-height: 36px;
+  /* Was 36px, and on the first-run path at that: the presets are the first
+     controls a new user touches. */
+  min-height: var(--target);
   padding: var(--s2) var(--s4);
   border: 1px solid var(--rule-strong);
   border-radius: var(--r-pill);

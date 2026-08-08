@@ -22,7 +22,7 @@ MOCK_PORT   ?= 5199
 .DEFAULT_GOAL := help
 .PHONY: help venv install install-ci test test-frontend lint coverage build \
         check run run-mock router infra-lint images compose-up compose-down \
-        scrub clean dupes colour test-sandboxed torch-free
+        scrub clean dupes colour test-sandboxed torch-free gate
 
 help:  ## Show this list
 	@grep -hE '^[a-z-]+:.*?## ' $(MAKEFILE_LIST) \
@@ -109,7 +109,22 @@ torch-free: $(VENV_DEPLOY)/.stamp  ## backend.main must import with no torch pre
 # Deleted rather than left pointing at absent files. A make target that fails
 # with "No such file or directory" teaches people to skip the gates.
 
-check: lint dupes coverage test-frontend build colour infra-lint torch-free test-sandboxed  ## Everything CI runs, fastest failure first
+gate:  ## Headless-Chrome layout and a11y gate (needs Chrome; says so when skipped)
+	@CHROME="$${CHROME_PATH:-/Applications/Google Chrome.app/Contents/MacOS/Google Chrome}" ; \
+	if [ ! -x "$$CHROME" ] && ! command -v google-chrome >/dev/null 2>&1; then \
+	    echo "  SKIPPED gate — no Chrome found. Set CHROME_PATH." ; \
+	    echo "           The ci.yml frontend job covers it." ; \
+	else \
+	    VITE_MOCK_API=1 npm --prefix frontend run build >/dev/null && \
+	    (npx --prefix frontend vite preview --port 4173 --strictPort --host 127.0.0.1 \
+	        --outDir frontend/dist >/dev/null 2>&1 & echo $$! > /tmp/meander-gate.pid) && \
+	    sleep 4 && \
+	    node frontend/scripts/gate.mjs http://127.0.0.1:4173/ ; \
+	    status=$$? ; kill `cat /tmp/meander-gate.pid` 2>/dev/null ; rm -f /tmp/meander-gate.pid ; \
+	    exit $$status ; \
+	fi
+
+check: lint dupes coverage test-frontend build colour infra-lint torch-free test-sandboxed gate  ## Everything CI runs, fastest failure first
 	@echo
 	@echo "  Green."
 	@echo

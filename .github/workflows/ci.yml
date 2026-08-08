@@ -146,6 +146,24 @@ jobs:
       - run: npm run build
         working-directory: frontend
 
+      # The layout and accessibility gate. It drives the built app in headless
+      # Chrome, which every ubuntu-latest runner already has, and it proves its
+      # own selectors match something before it grades anything — the version
+      # this replaced had four checks that found zero elements and passed, and
+      # one whose pass value was the literal `true`.
+      - name: Layout and accessibility gate
+        working-directory: frontend
+        env:
+          CHROME_PATH: /usr/bin/google-chrome
+        run: |
+          VITE_MOCK_API=1 npm run build
+          npx vite preview --port 4173 --strictPort --host 127.0.0.1 &
+          for i in $(seq 1 30); do
+            curl -sf http://127.0.0.1:4173/ >/dev/null && break
+            sleep 1
+          done
+          node scripts/gate.mjs http://127.0.0.1:4173/
+
   no-hard-coded-colour:
     # DESIGN-HANDOFF §2 requires every colour to be declared once, in the two
     # :root blocks. That is a checkable property, so it is checked rather than
