@@ -38,6 +38,33 @@ python3 -m venv .venv && source .venv/bin/activate && pip install -r backend/req
 cd frontend && npm install
 ```
 
+### Install the hooks. This is not automatic on clone.
+
+```bash
+scripts/install-hooks.sh
+```
+
+Nothing installs them for you, and this repository has already leaked a
+`data/cache.db` carrying route history for exactly that reason. The hook refuses
+two commits: a `cache.db` with `route_cache` rows in it, and a fixture that is
+not already tracked.
+
+The second one will stop you at some point, and the message it prints is the
+whole explanation. The short version: before `70891eb`, production wrote one
+fixture per upstream call, so a live session left dozens of files holding real
+requested coordinates in tracked directories. 71 of them were found sitting in
+this repository. If you are recording deliberately, say so and it gets out of
+your way:
+
+```bash
+MEANDER_ALLOW_NEW_FIXTURES=1 git commit ...
+```
+
+Read `BLOCKED.md:228` before re-recording anything in bulk — the filenames are
+hashes of the outgoing request body, so changing what the request looks like
+misses *every* fixture at once and the suite fails wholesale with `no_fixture`
+503s.
+
 ## Tests
 
 ```bash

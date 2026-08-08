@@ -5,11 +5,18 @@
 #
 #     scripts/install-hooks.sh
 #
-# It refuses one specific commit: a data/cache.db that carries route_cache rows.
-# Those rows are whole /api/routes payloads with real coordinate arrays, and the
-# file is tracked, so committing one publishes location history. See
-# scripts/scrub_cache_db.py for why this cannot be spotted by eye.
+# It refuses two commits, both of which would publish location history in a
+# tracked file:
+#
+#   1. a data/cache.db carrying route_cache rows — whole /api/routes payloads
+#      with real coordinate arrays. scripts/scrub_cache_db.py explains why this
+#      cannot be spotted by eye.
+#   2. a fixture nobody meant to add. scripts/check_new_fixtures.py explains why
+#      the discriminator is "not already tracked" and not coordinate precision.
 
 set -e
 
-python3 "$(git rev-parse --show-toplevel)/scripts/scrub_cache_db.py" --check
+root="$(git rev-parse --show-toplevel)"
+
+python3 "$root/scripts/scrub_cache_db.py" --check
+python3 "$root/scripts/check_new_fixtures.py"
