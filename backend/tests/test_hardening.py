@@ -223,3 +223,58 @@ def test_the_token_never_reaches_a_fixture_signature() -> None:
     without = signature("POST", "https://api06.dev.openstreetmap.org/api/0.6/notes",
                         headers={"Accept": "application/json"})
     assert with_token == without
+
+
+# ---------------------------------------------------------------------------
+# .env.example is documentation that goes stale silently
+# ---------------------------------------------------------------------------
+
+
+def _env_example_values() -> dict[str, str]:
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parent.parent.parent
+    out: dict[str, str] = {}
+    for line in (root / ".env.example").read_text().splitlines():
+        line = line.strip()
+        if line and not line.startswith("#") and "=" in line:
+            key, value = line.split("=", 1)
+            out[key.strip()] = value.strip()
+    return out
+
+
+def test_env_example_matches_the_code_defaults() -> None:
+    """A number in .env.example that no longer matches the code is a trap.
+
+    This is not hypothetical in this repository. MEANDER_DAILY_ROUTE_CEILING sat
+    at 120 with a comment explaining it in terms of the hosted GraphHopper quota,
+    long after the router became self-hosted. infra/20-services.yaml:288 still
+    describes MEANDER_HTTP_TIMEOUT_S as 12 when config.py:218 has said 20 for a
+    while. Both are the same failure: prose that was true once, describing a
+    default nobody re-read.
+
+    Only the numeric knobs are checked. Keys and origins are deployment-specific
+    and are empty here on purpose.
+    """
+    from backend import config
+
+    settings = config.Settings()
+    documented = _env_example_values()
+
+    expected = {
+        "MEANDER_DAILY_ROUTE_CEILING": settings.global_daily_route_ceiling,
+        "MEANDER_RATE_CAPACITY": settings.per_ip_bucket_capacity,
+        "MEANDER_RATE_REFILL_PER_MIN": settings.per_ip_refill_per_min,
+        "MEANDER_ROUTE_CACHE_TTL_S": settings.route_cache_ttl_s,
+    }
+
+    drifted = []
+    for key, code_value in expected.items():
+        if key not in documented:
+            drifted.append(f"{key}: absent from .env.example, code default {code_value}")
+        elif float(documented[key]) != float(code_value):
+            drifted.append(
+                f"{key}: .env.example says {documented[key]}, code default is {code_value}"
+            )
+
+    assert not drifted, "\n".join(drifted)

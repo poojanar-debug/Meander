@@ -257,7 +257,20 @@ class Settings:
     allowed_origins: tuple[str, ...] = ()
     per_ip_bucket_capacity: int = 12
     per_ip_refill_per_min: float = 3.0
-    global_daily_route_ceiling: int = 120
+    # 120 was sized against the *hosted* GraphHopper's 500-credit day. The router
+    # is self-hosted now and that quota is gone, but the ceiling is not
+    # redundant: fixtures.budget_applies() skips the per-service budgets entirely
+    # in live mode (see the note above _DEV_LIVE_CALL_BUDGET), so this number is
+    # the only thing standing between a public URL and the shared upstreams.
+    #
+    # Measured, one uncached 3-objective request: 8 router calls, 4 Open-Meteo,
+    # 1 Overpass. Open-Meteo's free tier is 10,000 calls/day, so it saturates at
+    # ~2,500 requests — well before the machine does, which at the recorded 14.0 s
+    # per uncached request and no --workers tops out near 6,100 a day.
+    #
+    # 2,000 keeps a fifth of Open-Meteo's allowance in reserve and is still an
+    # order of magnitude above anything a demonstration link will see.
+    global_daily_route_ceiling: int = 2000
     route_cache_ttl_s: int = 6 * 60 * 60
 
     log_level: str = "INFO"
@@ -346,7 +359,7 @@ def load_settings() -> Settings:
         # int(), hit ValueError, and silently returned the default of 3 — a
         # six-fold difference from what the operator asked for, with no error.
         per_ip_refill_per_min=_env_float("MEANDER_RATE_REFILL_PER_MIN", 3.0),
-        global_daily_route_ceiling=_env_int("MEANDER_DAILY_ROUTE_CEILING", 120),
+        global_daily_route_ceiling=_env_int("MEANDER_DAILY_ROUTE_CEILING", 2000),
         route_cache_ttl_s=_env_int("MEANDER_ROUTE_CACHE_TTL_S", 6 * 60 * 60),
         log_level=os.environ.get("MEANDER_LOG_LEVEL", "INFO").upper(),
     )
