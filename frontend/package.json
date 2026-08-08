@@ -11,7 +11,8 @@
     "build": "vite build",
     "preview": "vite preview",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "icons": "node scripts/make-icons.mjs"
   },
   "dependencies": {
     "maplibre-gl": "^5.6.1",

@@ -9,6 +9,22 @@
       content="Meander finds three routes from where you are and how long you have: the fastest, the greenest, and one that holds to real accessibility constraints."
     />
     <title>Meander — routes for the time you have</title>
+
+    <!--
+      The manifest and the icons. These are added together with frontend/public/
+      deliberately: a <link rel="manifest"> pointing at a 404 is worse than no
+      manifest at all, because the browser reports an installable app and then
+      cannot install it.
+
+      theme_color is duplicated here and in the manifest because they are read
+      by different things — the browser chrome reads this tag, the installed app
+      reads the manifest — and they must agree. Both are --brand.
+    -->
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <meta name="theme-color" content="#1c4633" />
+    <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+
     <!--
       Resolve the theme before first paint.
 
