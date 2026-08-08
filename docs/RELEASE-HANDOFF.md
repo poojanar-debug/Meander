@@ -204,3 +204,33 @@ asked, and chose to ship it with the promise amended to name its exception.
 3. The last two entries of `PROGRESS.md` — Act III and Act II phase 2.
 4. `RELEASE-SPECS.md`, the section for whichever capability you are starting.
 5. `RELEASE-PROMPT.md` §§2–3 and the Act you are in. Skip Act I entirely.
+
+---
+
+## 8 · The prompt to start the next session with
+
+Everything above is the detail. This is the thing to paste into a fresh
+`claude` session opened from the repository root.
+
+```
+Continue the Meander public release. Read docs/RELEASE-HANDOFF.md in full
+first — it supersedes the stale parts of docs/RELEASE-PROMPT.md, lists five
+claims in that brief that were verified wrong, and records that Acts I and III
+are already complete. Do not re-run them.
+
+Your job is Act II phases 3-6: the seven dropped capabilities still missing, in
+the order listed in §2 of the handoff. docs/RELEASE-SPECS.md has a written
+integration spec for each; read the one for a capability before starting it.
+Where a spec contradicts the code in front of you, the code wins — say so in the
+commit. Then tag v1.0.0-rc1.
+
+Make every gate you restore fail once, deliberately, before you trust it. Verify
+in a browser rather than by reading; port 5173 is held by another worktree's
+stale server, and .claude/launch.json has a working preview config on 5175.
+
+make check green at every commit, not at the end. Push after every phase.
+```
+
+Nothing else needs saying, because the handoff carries the rest: the machine's
+state, the guards that will refuse a commit, the decisions the owner has already
+made, and the non-negotiable project rules by way of `RELEASE-PROMPT.md` §1.
