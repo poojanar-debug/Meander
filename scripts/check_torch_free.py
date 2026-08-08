@@ -63,7 +63,7 @@ def main() -> int:
 
     try:
         import backend.main  # noqa: F401
-    except Exception as exc:  # pragma: no cover - the failure is the point
+    except Exception as exc:  # noqa: BLE001 — any failure to import is the finding
         print(
             f"\nbackend.main does not import without torch: {exc!r}\n"
             "Absence of torch is not enough — the API has to actually start in the\n"
