@@ -1,9 +1,11 @@
 # Meander — the commands, in one place.
 #
 # Everything here is something that was previously a paragraph in a README or a
-# line somebody had to remember. `make check` is the one that matters: it is
-# exactly what CI runs, so "it passed locally" and "it passed in CI" mean the
-# same thing.
+# line somebody had to remember. `make check` is the one that matters: it runs
+# every job CI runs, so "it passed locally" and "it passed in CI" mean the same
+# thing — with one honest exception. `test-sandboxed` needs a Linux network
+# namespace and prints a skip line on anything else. That skip is the only gap,
+# and it is loud.
 #
 #   make check    everything, in the order that fails fastest
 #   make help     this list
@@ -20,7 +22,7 @@ MOCK_PORT   ?= 5199
 .DEFAULT_GOAL := help
 .PHONY: help venv install install-ci test test-frontend lint coverage build \
         check run run-mock router infra-lint images compose-up compose-down \
-        scrub clean
+        scrub clean dupes colour test-sandboxed torch-free
 
 help:  ## Show this list
 	@grep -hE '^[a-z-]+:.*?## ' $(MAKEFILE_LIST) \
@@ -59,6 +61,44 @@ build:  ## Frontend build
 infra-lint:  ## CloudFormation templates. Nothing is deployed; see infra/README.md
 	$(VENV)/bin/cfn-lint infra/*.yaml && echo "infra ok"
 
+dupes:  ## Duplicate top-level definitions — the damage a clean merge hides
+	$(PY) scripts/check_duplicate_defs.py
+
+colour:  ## Every colour declared once, in the two :root blocks
+	@bash scripts/check_palette.sh
+
+# The suite with no network at all. conftest.py blocks sockets and a meta-test
+# proves the guard is active; this is the second line of defence, because if the
+# guard were ever removed the suite would still pass on a machine with a network
+# and would silently start depending on it.
+#
+# Needs a Linux network namespace. There is no macOS equivalent — `sandbox-exec`
+# cannot revoke the network for a child process the way `unshare -n` can — so on
+# anything else this says so out loud rather than passing quietly. A gate that
+# cannot fail must not look like a gate that passed.
+test-sandboxed:  ## The suite with no network (Linux only; says so when skipped)
+	@if [ "$$(uname -s)" = "Linux" ] && command -v unshare >/dev/null 2>&1; then \
+	    sudo unshare -n "$(abspath $(PY))" -m pytest backend/tests -q ; \
+	else \
+	    echo "  SKIPPED test-sandboxed — needs a Linux network namespace (unshare -n)." ; \
+	    echo "           Not verified on $$(uname -s). The ci.yml job covers it." ; \
+	fi
+
+# A virtualenv built from the deploy requirements only, cached until that file
+# changes. The development venv has torch in it, so it cannot answer this
+# question — that is the entire point of asking.
+VENV_DEPLOY ?= .venv-deploy
+
+$(VENV_DEPLOY)/.stamp: backend/requirements-deploy.txt
+	@rm -rf $(VENV_DEPLOY)
+	python3.13 -m venv $(VENV_DEPLOY)
+	@$(VENV_DEPLOY)/bin/pip install -q -U pip
+	$(VENV_DEPLOY)/bin/pip install -q -r backend/requirements-deploy.txt
+	@touch $@
+
+torch-free: $(VENV_DEPLOY)/.stamp  ## backend.main must import with no torch present
+	$(VENV_DEPLOY)/bin/python scripts/check_torch_free.py
+
 # The two browser gates — `gate` and `pwa-gate`, driving headless Chrome over
 # CDP — used to live here. They went in the reconciliation merge along with the
 # frontend they graded: gate.mjs measures a layout this branch does not have,
@@ -69,9 +109,14 @@ infra-lint:  ## CloudFormation templates. Nothing is deployed; see infra/README.
 # Deleted rather than left pointing at absent files. A make target that fails
 # with "No such file or directory" teaches people to skip the gates.
 
-check: lint coverage test-frontend build infra-lint  ## Everything CI runs, fastest failure first
+check: lint dupes coverage test-frontend build colour infra-lint torch-free test-sandboxed  ## Everything CI runs, fastest failure first
 	@echo
-	@echo "  Green — and this is the whole of CI now, not most of it."
+	@echo "  Green."
+	@echo
+	@echo "  This target used to claim it was 'the whole of CI', and stopped being"
+	@echo "  true when three jobs were added outside it. It now runs all of them —"
+	@echo "  except test-sandboxed on a non-Linux machine, which prints its own"
+	@echo "  skip line above rather than passing silently. Read it."
 
 # --- running it -------------------------------------------------------------
 
