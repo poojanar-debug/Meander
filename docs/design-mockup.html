@@ -1,0 +1,803 @@
+<!doctype html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Meander — redesign</title>
+<style>
+/* ============================================================================
+   MEANDER — redesign tokens
+   Same constraints as the current build: no third-party font requests, colour
+   is never the only signal, every target >= 44px.
+   ========================================================================= */
+
+:root {
+  /* --- type ------------------------------------------------------------- */
+  --font-display: 'Newsreader', 'Iowan Old Style', 'Palatino Linotype', Palatino, Georgia, 'Times New Roman', serif;
+  --font-body: 'IBM Plex Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', system-ui, sans-serif;
+
+  --t-display: 2rem;      --t-display-lh: 1.1;
+  --t-h2: 1.375rem;       --t-h3: 1.0625rem;
+  --t-body: 0.9375rem;    --t-small: 0.8125rem;   --t-micro: 0.75rem;
+  --t-metric: 1.75rem;
+
+  /* --- space (4px base) -------------------------------------------------- */
+  --s1:4px; --s2:8px; --s3:12px; --s4:16px; --s5:20px; --s6:24px; --s8:32px; --s10:40px;
+
+  /* --- shape ------------------------------------------------------------- */
+  --r-sm:8px; --r-md:12px; --r-lg:16px; --r-pill:999px;
+  --target:44px;
+
+  /* --- route identity (graphics only, never text on paper) ---------------- */
+  --route-fastest:#C2703D; --route-nature:#2F7D53; --route-accessible:#5B6ECF;
+  --route-quiet:#8A5CB4;   --route-shade:#1E7A78;  --route-air:#B0455F;
+}
+
+/* --- light -------------------------------------------------------------- */
+:root, [data-theme="light"] {
+  color-scheme: light;
+  --paper:#F6F3EC; --raised:#FFFEFA; --sunken:#EDE9DF;
+  --rule:#DCD5C6; --rule-strong:#C4BCA8;
+  --ink:#16241C; --ink-2:#55645A;
+  --brand:#1C4633; --brand-hover:#122E21; --brand-on:#F6F3EC; --brand-tint:#E4EDE5;
+  --accent:#2F7D53;
+  --warn-ink:#8A2C14; --warn-ground:#F7E9E1; --warn-rule:#D3A184;
+  --ok-ink:#1C5E3C;
+  --shadow-1:0 1px 2px rgb(22 36 28 / 6%), 0 2px 8px rgb(22 36 28 / 6%);
+  --shadow-2:0 2px 4px rgb(22 36 28 / 8%), 0 8px 24px rgb(22 36 28 / 10%);
+  --map-land:#E9E5D8; --map-park:#CFE0C9; --map-water:#C6DAE4; --map-road:#FBFAF6;
+}
+/* --- dark --------------------------------------------------------------- */
+[data-theme="dark"] {
+  color-scheme: dark;
+  --paper:#0C1611; --raised:#132019; --sunken:#080F0B;
+  --rule:#26362C; --rule-strong:#3A4E42;
+  --ink:#E8EFE8; --ink-2:#9BAEA1;
+  --brand:#7FC79B; --brand-hover:#9AD6B0; --brand-on:#0A1710; --brand-tint:#17281E;
+  --accent:#8FD3A9;
+  --warn-ink:#F5B49B; --warn-ground:#2A1811; --warn-rule:#6B3A24;
+  --ok-ink:#8FD3A9;
+  --shadow-1:0 1px 2px rgb(0 0 0 / 40%); --shadow-2:0 8px 28px rgb(0 0 0 / 50%);
+  --route-fastest:#E8A46F; --route-nature:#6FC38E; --route-accessible:#95A4F0;
+  --route-quiet:#C2A0E8;  --route-shade:#63C4BE;  --route-air:#EE8AA0;
+  --map-land:#16221B; --map-park:#1D3527; --map-water:#152A33; --map-road:#24332B;
+}
+
+*,*::before,*::after{box-sizing:border-box}
+html,body{height:100%}
+body{
+  margin:0;background:var(--paper);color:var(--ink);
+  font-family:var(--font-body);font-size:var(--t-body);line-height:1.55;
+  -webkit-font-smoothing:antialiased;
+}
+h1,h2,h3{font-family:var(--font-display);font-weight:500;margin:0;line-height:1.15}
+p{margin:0}
+*:focus-visible{outline:3px solid var(--accent);outline-offset:2px;border-radius:4px}
+.vh{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap;border:0}
+.tabular{font-variant-numeric:tabular-nums}
+
+/* ============================================================ shell ====== */
+.shell{display:flex;flex-direction:column;height:100%;min-height:100vh}
+
+.topbar{
+  display:flex;align-items:center;gap:var(--s4);
+  padding:0 var(--s5);height:56px;flex:none;
+  background:var(--raised);border-bottom:1px solid var(--rule);
+  position:sticky;top:0;z-index:40;
+}
+.wordmark{font-family:var(--font-display);font-size:1.375rem;letter-spacing:-.01em;color:var(--brand)}
+[data-theme="dark"] .wordmark{color:var(--brand)}
+.wordmark span{color:var(--ink-2);font-family:var(--font-body);font-size:.75rem;margin-left:var(--s3);letter-spacing:0}
+.topbar__spacer{flex:1}
+.iconbtn{
+  display:inline-grid;place-items:center;width:var(--target);height:var(--target);
+  border:1px solid transparent;border-radius:var(--r-sm);background:none;color:var(--ink);
+  cursor:pointer;font:inherit;
+}
+.iconbtn:hover{background:var(--sunken);border-color:var(--rule)}
+.pillbtn{
+  display:inline-flex;align-items:center;gap:var(--s2);min-height:36px;padding:0 var(--s3);
+  border:1px solid var(--rule-strong);border-radius:var(--r-pill);background:var(--raised);
+  color:var(--ink);font:inherit;font-size:var(--t-small);cursor:pointer;
+}
+.pillbtn:hover{background:var(--sunken)}
+
+/* demo ribbon — single, unmissable, dismissible */
+.ribbon{
+  display:flex;align-items:center;gap:var(--s3);flex:none;
+  background:var(--warn-ground);color:var(--warn-ink);
+  border-bottom:1px solid var(--warn-rule);
+  padding:var(--s2) var(--s5);font-size:var(--t-small);font-weight:600;
+}
+.ribbon svg{flex:none}
+
+/* ============================================================ layout ==== */
+.layout{
+  flex:1;display:grid;grid-template-columns:minmax(360px,420px) minmax(0,1fr);
+  min-height:0;min-width:0;
+}
+.panel{
+  display:flex;flex-direction:column;min-height:0;min-width:0;
+  border-right:1px solid var(--rule);background:var(--paper);
+  overflow-y:auto;
+}
+.stage{position:relative;min-width:0;background:var(--sunken)}
+
+/* ============================================================ trip bar == */
+.trip{
+  position:sticky;top:0;z-index:20;flex:none;
+  background:var(--raised);border-bottom:1px solid var(--rule);
+  padding:var(--s3) var(--s4);
+}
+.trip__row{display:grid;grid-template-columns:1fr 1fr;gap:var(--s2)}
+.seg{
+  display:flex;align-items:center;gap:var(--s3);width:100%;
+  min-height:var(--target);padding:var(--s2) var(--s3);
+  background:var(--paper);border:1px solid var(--rule);border-radius:var(--r-md);
+  font:inherit;color:var(--ink);text-align:left;cursor:pointer;
+}
+.seg:hover{border-color:var(--rule-strong);background:var(--sunken)}
+.seg[aria-expanded="true"]{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent)}
+.seg__dot{flex:none;display:grid;place-items:center;width:22px;height:22px;color:var(--brand)}
+.seg__text{min-width:0;flex:1;overflow:hidden}
+.seg__k{display:block;font-size:var(--t-micro);color:var(--ink-2);letter-spacing:.04em;text-transform:uppercase;line-height:1.3}
+.seg__v{display:block;font-size:var(--t-body);font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;line-height:1.35}
+.seg__v--soft{font-weight:400;color:var(--ink-2)}
+.seg--wide{grid-column:1 / -1}
+
+.drawer{
+  margin-top:var(--s2);padding:var(--s4);
+  background:var(--paper);border:1px solid var(--rule);border-radius:var(--r-md);
+}
+.drawer[hidden]{display:none}
+.field{display:flex;flex-direction:column;gap:var(--s2)}
+.label{font-size:var(--t-small);font-weight:600}
+.hint{font-size:var(--t-small);color:var(--ink-2)}
+input[type=text],select{
+  font:inherit;color:var(--ink);background:var(--raised);
+  border:1px solid var(--rule-strong);border-radius:var(--r-sm);
+  padding:10px var(--s3);min-height:var(--target);width:100%;
+}
+.btn{
+  display:inline-flex;align-items:center;justify-content:center;gap:var(--s2);
+  font:inherit;font-weight:600;font-size:var(--t-body);
+  min-height:var(--target);padding:0 var(--s4);
+  border:1px solid var(--rule-strong);border-radius:var(--r-sm);
+  background:var(--raised);color:var(--ink);cursor:pointer;
+}
+.btn:hover{background:var(--sunken)}
+.btn--primary{background:var(--brand);color:var(--brand-on);border-color:var(--brand)}
+.btn--primary:hover{background:var(--brand-hover);border-color:var(--brand-hover)}
+.btn--block{width:100%}
+
+/* time dial */
+.dial__read{display:flex;align-items:baseline;gap:var(--s2);margin-bottom:var(--s1)}
+.dial__num{font-family:var(--font-display);font-size:2.25rem;line-height:1;font-variant-numeric:tabular-nums}
+.dial__unit{color:var(--ink-2)}
+input[type=range]{width:100%;height:var(--target);margin:0;accent-color:var(--brand);cursor:pointer}
+.ticks{display:flex;justify-content:space-between;font-size:var(--t-micro);color:var(--ink-2);font-variant-numeric:tabular-nums}
+.presets{display:flex;gap:var(--s2);flex-wrap:wrap}
+.preset{
+  min-height:36px;padding:0 var(--s3);border:1px solid var(--rule-strong);
+  border-radius:var(--r-pill);background:var(--raised);color:var(--ink);
+  font:inherit;font-size:var(--t-small);cursor:pointer
+}
+.preset[aria-pressed=true]{background:var(--brand-tint);border-color:var(--accent);font-weight:600}
+
+/* objective chips */
+.chips{display:flex;flex-wrap:wrap;gap:var(--s2);border:0;padding:0;margin:0}
+.chip{
+  display:inline-flex;align-items:center;gap:var(--s2);
+  min-height:var(--target);padding:0 var(--s4);
+  border:1px solid var(--rule-strong);border-radius:var(--r-pill);
+  background:var(--raised);color:var(--ink);font:inherit;font-size:var(--t-small);cursor:pointer;
+}
+.chip[aria-pressed=true]{background:var(--brand-tint);border-color:var(--accent);font-weight:600;box-shadow:inset 0 0 0 1px var(--accent)}
+.chip__swatch{width:22px;height:4px;border-radius:2px;flex:none}
+.chip__check{width:14px;height:14px;flex:none;color:var(--accent);opacity:0}
+.chip[aria-pressed=true] .chip__check{opacity:1}
+
+/* ============================================================ results === */
+.results{padding:var(--s4);display:flex;flex-direction:column;gap:var(--s4)}
+.results__head{display:flex;align-items:baseline;justify-content:space-between;gap:var(--s3);flex-wrap:wrap}
+.results__title{font-size:var(--t-h2)}
+.results__meta{font-size:var(--t-small);color:var(--ink-2)}
+
+.routes{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:var(--s2)}
+.route{
+  position:relative;display:block;width:100%;text-align:left;
+  background:var(--raised);border:1px solid var(--rule);border-radius:var(--r-md);
+  padding:var(--s3) var(--s3) var(--s3) var(--s4);
+  font:inherit;color:inherit;cursor:pointer;overflow:hidden;
+}
+.route:hover{border-color:var(--rule-strong);box-shadow:var(--shadow-1)}
+.route[aria-pressed=true]{
+  border-color:var(--accent);box-shadow:0 0 0 1px var(--accent),var(--shadow-1);
+  background:var(--raised);
+}
+.route__edge{position:absolute;left:0;top:0;bottom:0;width:4px}
+.route__top{display:flex;align-items:center;gap:var(--s3)}
+.route__name{font-family:var(--font-display);font-size:var(--t-h3);font-weight:500;flex:1;min-width:0}
+.route__dur{font-family:var(--font-display);font-size:var(--t-metric);line-height:1;font-variant-numeric:tabular-nums}
+.route__sub{display:flex;align-items:center;gap:var(--s2);margin-top:2px;font-size:var(--t-small);color:var(--ink-2);flex-wrap:wrap;min-width:0}
+.route__pattern{display:inline-flex;align-items:center;gap:6px}
+.route__line{width:26px;height:3px;border-radius:2px;flex:none}
+.route__scores{display:grid;grid-template-columns:repeat(3,1fr);gap:var(--s3);margin-top:var(--s3)}
+.mini{display:flex;flex-direction:column;gap:3px}
+.mini__k{font-size:var(--t-micro);color:var(--ink-2);display:flex;justify-content:space-between;gap:var(--s1)}
+.mini__track{height:5px;border-radius:3px;background:var(--sunken);overflow:hidden;border:1px solid var(--rule)}
+.mini__fill{display:block;height:100%;background:var(--accent);border-radius:3px}
+.mini--none .mini__track{background:repeating-linear-gradient(45deg,var(--sunken) 0 3px,var(--rule) 3px 6px)}
+
+/* verification meter */
+.verify{display:flex;align-items:center;gap:var(--s2);margin-top:var(--s3);font-size:var(--t-micro)}
+.verify__bars{display:flex;gap:2px}
+.verify__b{width:12px;height:6px;border-radius:1px;background:var(--rule)}
+.verify__b--on{background:var(--ok-ink)}
+.verify--low .verify__b--on{background:var(--warn-ink)}
+.verify__t{color:var(--ink-2)}
+.verify--low .verify__t{color:var(--warn-ink);font-weight:600}
+
+.badge{
+  display:inline-flex;align-items:center;gap:5px;
+  padding:2px 8px;border-radius:var(--r-pill);
+  font-size:var(--t-micro);font-weight:700;letter-spacing:.02em;
+}
+.badge--blocked{background:var(--warn-ground);color:var(--warn-ink);border:1px solid var(--warn-rule)}
+.badge--best{background:var(--brand-tint);color:var(--ok-ink);border:1px solid var(--accent)}
+.route--blocked .route__dur{color:var(--ink-2)}
+
+/* ------------------------------------------------------------ detail --- */
+.detail{
+  background:var(--raised);border:1px solid var(--rule);border-radius:var(--r-lg);
+  padding:var(--s5);display:flex;flex-direction:column;gap:var(--s4);
+  box-shadow:var(--shadow-1);
+}
+.detail__head{display:flex;align-items:center;gap:var(--s3);flex-wrap:wrap}
+.detail__title{font-size:var(--t-h2)}
+.narration{font-family:var(--font-display);font-size:1.0625rem;line-height:1.55}
+.detail__actions{display:flex;gap:var(--s2);flex-wrap:wrap}
+
+.alongrow{display:flex;flex-wrap:wrap;gap:var(--s2)}
+.stop{
+  display:inline-flex;align-items:center;gap:6px;
+  padding:5px 10px;border:1px solid var(--rule);border-radius:var(--r-pill);
+  background:var(--paper);font-size:var(--t-small);
+}
+.stop svg{color:var(--accent)}
+
+.meters{display:flex;flex-direction:column;gap:var(--s3)}
+.meter{display:grid;grid-template-columns:5.5rem 1fr 2.5rem;align-items:center;gap:var(--s3);font-size:var(--t-small)}
+.meter__track{height:8px;border-radius:4px;background:var(--sunken);border:1px solid var(--rule);overflow:hidden}
+.meter__fill{display:block;height:100%;background:var(--accent)}
+.meter__v{text-align:right;font-variant-numeric:tabular-nums;color:var(--ink-2)}
+.meter__none{grid-column:2/-1;color:var(--ink-2);font-style:italic}
+
+.note{
+  display:flex;gap:var(--s3);padding:var(--s3);border-radius:var(--r-sm);
+  background:var(--paper);border:1px solid var(--rule);font-size:var(--t-small);
+}
+.note svg{flex:none;margin-top:2px;color:var(--ink-2)}
+.note--warn{background:var(--warn-ground);border-color:var(--warn-rule);color:var(--warn-ink)}
+.note--warn svg{color:var(--warn-ink)}
+.note strong{display:block;margin-bottom:2px}
+.note ul{margin:var(--s2) 0 0;padding-left:18px}
+.note li+li{margin-top:var(--s1)}
+
+.section__h{font-size:var(--t-micro);text-transform:uppercase;letter-spacing:.06em;color:var(--ink-2);font-weight:700;margin-bottom:var(--s2)}
+
+/* about disclosure replaces the wall-of-text footer */
+.about{border-top:1px solid var(--rule);padding:var(--s4);margin-top:auto}
+.about summary{
+  cursor:pointer;list-style:none;display:flex;align-items:center;gap:var(--s2);
+  min-height:var(--target);font-size:var(--t-small);color:var(--ink-2);font-weight:600;
+}
+.about summary::-webkit-details-marker{display:none}
+.about__body{font-size:var(--t-small);color:var(--ink-2);display:flex;flex-direction:column;gap:var(--s3);padding-bottom:var(--s2)}
+.about__body a{color:inherit}
+
+/* ============================================================ map ======= */
+.map{position:absolute;inset:0}
+.map svg{width:100%;height:100%;display:block}
+.mapctl{position:absolute;right:var(--s4);top:var(--s4);display:flex;flex-direction:column;gap:var(--s2);z-index:5}
+.mapctl .iconbtn{background:var(--raised);border:1px solid var(--rule);box-shadow:var(--shadow-1)}
+.legend{
+  position:absolute;left:var(--s4);bottom:var(--s4);z-index:5;
+  background:var(--raised);border:1px solid var(--rule);border-radius:var(--r-md);
+  padding:var(--s3);box-shadow:var(--shadow-1);font-size:var(--t-small);
+  display:flex;flex-direction:column;gap:6px;
+}
+.legend__row{display:flex;align-items:center;gap:var(--s2)}
+.legend__line{width:28px;height:3px;border-radius:2px;flex:none}
+.attrib{position:absolute;right:var(--s2);bottom:var(--s2);z-index:5;font-size:11px;color:var(--ink-2);background:color-mix(in srgb,var(--raised) 80%,transparent);padding:2px 6px;border-radius:4px}
+
+/* ============================================================ empty ===== */
+.empty{
+  display:grid;place-items:center;padding:var(--s10) var(--s5);height:100%;
+}
+.empty__card{
+  width:100%;max-width:460px;background:var(--raised);border:1px solid var(--rule);
+  border-radius:var(--r-lg);padding:var(--s8) var(--s6);box-shadow:var(--shadow-2);
+  display:flex;flex-direction:column;gap:var(--s5);
+}
+.empty__title{font-size:var(--t-display);line-height:var(--t-display-lh)}
+.empty__lede{color:var(--ink-2)}
+.orline{display:flex;align-items:center;gap:var(--s3);color:var(--ink-2);font-size:var(--t-small)}
+.orline::before,.orline::after{content:"";height:1px;background:var(--rule);flex:1}
+
+/* ============================================================ demo bar == */
+.demobar{
+  position:fixed;right:var(--s4);bottom:64px;z-index:60;
+  display:flex;gap:var(--s1);padding:var(--s1);border-radius:var(--r-pill);
+  background:var(--raised);border:1px solid var(--rule-strong);box-shadow:var(--shadow-2);
+}
+.demobar button{
+  min-height:36px;padding:0 var(--s3);border:0;border-radius:var(--r-pill);
+  background:none;color:var(--ink);font:inherit;font-size:var(--t-small);cursor:pointer;
+}
+.demobar button[aria-pressed=true]{background:var(--brand);color:var(--brand-on);font-weight:600}
+
+/* ============================================================ mobile ==== */
+@media (max-width: 900px){
+  .layout{grid-template-columns:minmax(0,1fr);grid-template-rows:auto 1fr}
+  .stage{order:-1;height:36vh;min-height:230px;position:relative}
+  .panel{border-right:0;overflow:visible}
+  .wordmark span{display:none}
+  .topbar{padding:0 var(--s3);gap:var(--s2)}
+  .ribbon{padding:6px var(--s3);font-size:var(--t-micro);line-height:1.4}
+  .trip{padding:var(--s2) var(--s3)}
+  .seg{padding:6px var(--s3)}
+  .seg__dot{width:18px;height:18px}
+  .seg__dot svg{width:16px;height:16px}
+  .results{padding:var(--s3)}
+  .legend{display:none}
+  .mapctl{right:var(--s2);top:var(--s2)}
+  .detail{padding:var(--s4)}
+  .demobar{right:var(--s2);bottom:var(--s2)}
+}
+@media (max-width: 380px){
+  .trip__row{grid-template-columns:minmax(0,1fr)}
+  .route__scores{gap:var(--s2)}
+  .meter{grid-template-columns:4.5rem 1fr 2.2rem;gap:var(--s2)}
+}
+@media (prefers-reduced-motion:reduce){
+  *,*::before,*::after{animation-duration:.001ms!important;transition-duration:.001ms!important}
+}
+</style>
+</head>
+<body>
+
+<div class="shell">
+
+  <!-- ------------------------------------------------------------ topbar -->
+  <header class="topbar">
+    <div class="wordmark">Meander<span>routes that are worth the walk</span></div>
+    <div class="topbar__spacer"></div>
+    <button class="pillbtn" id="themeBtn" type="button">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 3a9 9 0 1 0 9 9 7 7 0 0 1-9-9Z"/></svg>
+      <span id="themeLbl">Dark</span>
+    </button>
+    <button class="iconbtn" type="button" aria-label="About Meander">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 7.6v.2"/></svg>
+    </button>
+  </header>
+
+  <!-- ------------------------------------------------------------ ribbon -->
+  <div class="ribbon" id="ribbon">
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 9v4M12 17v.2"/><path d="M10.3 3.9 2.6 17.4A2 2 0 0 0 4.3 20.4h15.4a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0Z"/></svg>
+    Demonstration data — routes come from fixtures, not live routing. Do not follow them.
+  </div>
+
+  <div class="layout">
+
+    <!-- ========================================================== panel -->
+    <div class="panel">
+
+      <!-- trip bar -->
+      <div class="trip">
+        <div class="trip__row">
+          <button class="seg" type="button" aria-expanded="false" data-drawer="d-from">
+            <span class="seg__dot"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="4" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="8.5"/></svg></span>
+            <span class="seg__text"><span class="seg__k">From</span><span class="seg__v">Viharamahadevi Park</span></span>
+          </button>
+          <button class="seg" type="button" aria-expanded="false" data-drawer="d-to">
+            <span class="seg__dot"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 21s7-6.4 7-11a7 7 0 1 0-14 0c0 4.6 7 11 7 11Z"/><circle cx="12" cy="10" r="2.4"/></svg></span>
+            <span class="seg__text"><span class="seg__k">To</span><span class="seg__v seg__v--soft">Round trip</span></span>
+          </button>
+          <button class="seg" type="button" aria-expanded="false" data-drawer="d-time">
+            <span class="seg__dot"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 1.8"/></svg></span>
+            <span class="seg__text"><span class="seg__k">Time &amp; travel</span><span class="seg__v">35 min · walk</span></span>
+          </button>
+          <button class="seg" type="button" aria-expanded="false" data-drawer="d-obj">
+            <span class="seg__dot"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 7h16M4 12h16M4 17h16"/><circle cx="9" cy="7" r="2" fill="var(--raised)"/><circle cx="15" cy="12" r="2" fill="var(--raised)"/><circle cx="7" cy="17" r="2" fill="var(--raised)"/></svg></span>
+            <span class="seg__text"><span class="seg__k">Compare</span><span class="seg__v">3 types</span></span>
+          </button>
+        </div>
+
+        <!-- drawers -->
+        <div class="drawer" id="d-from" hidden>
+          <div class="field">
+            <label class="label" for="from">Starting point</label>
+            <input id="from" type="text" value="Viharamahadevi Park, Colombo" />
+            <button class="btn btn--block" type="button">
+              <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/><circle cx="12" cy="12" r="5"/></svg>
+              Use my location
+            </button>
+          </div>
+        </div>
+
+        <div class="drawer" id="d-to" hidden>
+          <div class="field">
+            <label class="label" for="to">Destination</label>
+            <input id="to" type="text" placeholder="Leave empty and you get a loop back to the start" />
+            <p class="hint">Empty means a round trip — Meander brings you back to where you started.</p>
+          </div>
+        </div>
+
+        <div class="drawer" id="d-time" hidden>
+          <div class="field">
+            <span class="label" id="tlab">How long have you got?</span>
+            <div class="dial__read"><span class="dial__num" id="tval">35</span><span class="dial__unit">minutes · walking</span></div>
+            <input id="time" type="range" min="20" max="360" step="5" value="35" aria-labelledby="tlab" aria-valuetext="35 minutes, walking" />
+            <div class="ticks"><span>20 min</span><span>2 hr</span><span>6 hr</span></div>
+            <div class="presets" style="margin-top:4px">
+              <button class="preset" type="button" aria-pressed="false">20 min</button>
+              <button class="preset" type="button" aria-pressed="true">35 min</button>
+              <button class="preset" type="button" aria-pressed="false">1 hr</button>
+              <button class="preset" type="button" aria-pressed="false">2 hr</button>
+            </div>
+          </div>
+          <div class="field" style="margin-top:16px">
+            <label class="label" for="mode">How are you travelling?</label>
+            <select id="mode">
+              <option>Choose for me (walking at 35 min)</option><option>On foot</option><option>By bike</option><option>By car</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="drawer" id="d-obj" hidden>
+          <fieldset class="field" style="border:0;padding:0;margin:0">
+            <legend class="label" style="padding:0;margin-bottom:8px">Which routes should Meander work out?</legend>
+            <div class="chips">
+              <button class="chip" type="button" aria-pressed="true"><span class="chip__swatch" style="background:var(--route-fastest)"></span>Fastest<svg class="chip__check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><path d="m5 13 4 4L19 7"/></svg></button>
+              <button class="chip" type="button" aria-pressed="true"><span class="chip__swatch" style="background:repeating-linear-gradient(90deg,var(--route-nature) 0 9px,transparent 9px 15px)"></span>Nature<svg class="chip__check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><path d="m5 13 4 4L19 7"/></svg></button>
+              <button class="chip" type="button" aria-pressed="true"><span class="chip__swatch" style="background:repeating-linear-gradient(90deg,var(--route-accessible) 0 3px,transparent 3px 9px)"></span>Accessible<svg class="chip__check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><path d="m5 13 4 4L19 7"/></svg></button>
+              <button class="chip" type="button" aria-pressed="false"><span class="chip__swatch" style="background:repeating-linear-gradient(90deg,var(--route-quiet) 0 18px,transparent 18px 27px)"></span>Quiet<svg class="chip__check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><path d="m5 13 4 4L19 7"/></svg></button>
+              <button class="chip" type="button" aria-pressed="false"><span class="chip__swatch" style="background:repeating-linear-gradient(90deg,var(--route-shade) 0 15px,transparent 15px 21px)"></span>Shade<svg class="chip__check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><path d="m5 13 4 4L19 7"/></svg></button>
+              <button class="chip" type="button" aria-pressed="false"><span class="chip__swatch" style="background:repeating-linear-gradient(90deg,var(--route-air) 0 6px,transparent 6px 12px)"></span>Clean air<svg class="chip__check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><path d="m5 13 4 4L19 7"/></svg></button>
+            </div>
+            <p class="hint" style="margin-top:10px">Up to three at a time. Each one gets its own colour and line pattern on the map.</p>
+          </fieldset>
+        </div>
+      </div>
+
+      <!-- results -->
+      <div class="results">
+        <div class="results__head">
+          <h2 class="results__title">Three ways back</h2>
+          <span class="results__meta">35 min · walking</span>
+        </div>
+
+        <ul class="routes">
+          <!-- NATURE (selected, recommended) -->
+          <li>
+            <button class="route" type="button" aria-pressed="true">
+              <span class="route__edge" style="background:var(--route-nature)"></span>
+              <span class="route__top">
+                <span class="route__name">Nature</span>
+                <span class="badge badge--best">
+                  <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><path d="m5 13 4 4L19 7"/></svg>Showing
+                </span>
+                <span class="route__dur tabular">26<span style="font-size:.9375rem;font-family:var(--font-body);color:var(--ink-2)"> min</span></span>
+              </span>
+              <span class="route__sub">
+                <span class="route__pattern"><span class="route__line" style="background:repeating-linear-gradient(90deg,var(--route-nature) 0 9px,transparent 9px 15px)"></span>dashed</span>
+                <span>·</span><span>2.1 km</span><span>·</span><span>3 rest stops</span>
+              </span>
+              <span class="route__scores">
+                <span class="mini"><span class="mini__k"><span>Green</span><span class="tabular">79%</span></span><span class="mini__track"><span class="mini__fill" style="width:79%"></span></span></span>
+                <span class="mini"><span class="mini__k"><span>Air</span><span class="tabular">71%</span></span><span class="mini__track"><span class="mini__fill" style="width:71%"></span></span></span>
+                <span class="mini"><span class="mini__k"><span>Shade</span><span class="tabular">58%</span></span><span class="mini__track"><span class="mini__fill" style="width:58%"></span></span></span>
+              </span>
+              <span class="verify">
+                <span class="verify__bars" aria-hidden="true"><i class="verify__b verify__b--on"></i><i class="verify__b verify__b--on"></i><i class="verify__b verify__b--on"></i><i class="verify__b"></i></span>
+                <span class="verify__t">Mostly verified · 72% of the route checked</span>
+              </span>
+            </button>
+          </li>
+
+          <!-- FASTEST -->
+          <li>
+            <button class="route" type="button" aria-pressed="false">
+              <span class="route__edge" style="background:var(--route-fastest)"></span>
+              <span class="route__top">
+                <span class="route__name">Fastest</span>
+                <span class="route__dur tabular">18<span style="font-size:.9375rem;font-family:var(--font-body);color:var(--ink-2)"> min</span></span>
+              </span>
+              <span class="route__sub">
+                <span class="route__pattern"><span class="route__line" style="background:var(--route-fastest)"></span>solid</span>
+                <span>·</span><span>1.5 km</span><span>·</span><span>1 rest stop</span>
+              </span>
+              <span class="route__scores">
+                <span class="mini"><span class="mini__k"><span>Green</span><span class="tabular">31%</span></span><span class="mini__track"><span class="mini__fill" style="width:31%"></span></span></span>
+                <span class="mini"><span class="mini__k"><span>Air</span><span class="tabular">62%</span></span><span class="mini__track"><span class="mini__fill" style="width:62%"></span></span></span>
+                <span class="mini"><span class="mini__k"><span>Shade</span><span class="tabular">20%</span></span><span class="mini__track"><span class="mini__fill" style="width:20%"></span></span></span>
+              </span>
+              <span class="verify">
+                <span class="verify__bars" aria-hidden="true"><i class="verify__b verify__b--on"></i><i class="verify__b verify__b--on"></i><i class="verify__b verify__b--on"></i><i class="verify__b verify__b--on"></i></span>
+                <span class="verify__t">Well verified · 88% of the route checked</span>
+              </span>
+            </button>
+          </li>
+
+          <!-- ACCESSIBLE (blocked) -->
+          <li>
+            <button class="route route--blocked" type="button" aria-pressed="false">
+              <span class="route__edge" style="background:repeating-linear-gradient(180deg,var(--route-accessible) 0 4px,transparent 4px 9px)"></span>
+              <span class="route__top">
+                <span class="route__name">Accessible</span>
+                <span class="badge badge--blocked">
+                  <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M6 18 18 6"/></svg>2 barriers
+                </span>
+                <span class="route__dur tabular">22<span style="font-size:.9375rem;font-family:var(--font-body);color:var(--ink-2)"> min</span></span>
+              </span>
+              <span class="route__sub">
+                <span class="route__pattern"><span class="route__line" style="background:repeating-linear-gradient(90deg,var(--route-accessible) 0 3px,transparent 3px 9px)"></span>dotted</span>
+                <span>·</span><span>1.7 km</span><span>·</span><span>cannot be completed</span>
+              </span>
+              <span class="route__scores">
+                <span class="mini"><span class="mini__k"><span>Green</span><span class="tabular">44%</span></span><span class="mini__track"><span class="mini__fill" style="width:44%"></span></span></span>
+                <span class="mini"><span class="mini__k"><span>Air</span><span class="tabular">65%</span></span><span class="mini__track"><span class="mini__fill" style="width:65%"></span></span></span>
+                <span class="mini"><span class="mini__k"><span>Shade</span><span class="tabular">31%</span></span><span class="mini__track"><span class="mini__fill" style="width:31%"></span></span></span>
+              </span>
+              <span class="verify verify--low">
+                <span class="verify__bars" aria-hidden="true"><i class="verify__b verify__b--on"></i><i class="verify__b verify__b--on"></i><i class="verify__b"></i><i class="verify__b"></i></span>
+                <span class="verify__t">Partly verified · only 41% checked</span>
+              </span>
+            </button>
+          </li>
+        </ul>
+
+        <!-- selected route detail -->
+        <section class="detail" aria-label="Nature route detail">
+          <div class="detail__head">
+            <span class="route__line" style="width:32px;height:4px;background:repeating-linear-gradient(90deg,var(--route-nature) 0 9px,transparent 9px 15px)"></span>
+            <h3 class="detail__title">Nature</h3>
+            <span style="flex:1"></span>
+            <span class="results__meta tabular">26 min · 2.1 km</span>
+          </div>
+
+          <p class="narration">Cuts east into the park after four minutes and stays under trees almost to the end. Two benches on the way, and a water fountain roughly half way.</p>
+
+          <div>
+            <p class="section__h">Along the way</p>
+            <div class="alongrow">
+              <span class="stop"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 10h16M5 10v8M19 10v8M7 14h10"/></svg>Bench · 340 m</span>
+              <span class="stop"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 3s5 6 5 9.5A5 5 0 0 1 7 12.5C7 9 12 3 12 3Z"/></svg>Water · 910 m</span>
+              <span class="stop"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 10h16M5 10v8M19 10v8M7 14h10"/></svg>Bench · 1.6 km</span>
+            </div>
+          </div>
+
+          <div>
+            <p class="section__h">What this route scores</p>
+            <div class="meters">
+              <div class="meter"><span>Greenery</span><span class="meter__track"><span class="meter__fill" style="width:79%"></span></span><span class="meter__v">79%</span></div>
+              <div class="meter"><span>Clean air</span><span class="meter__track"><span class="meter__fill" style="width:71%"></span></span><span class="meter__v">71%</span></div>
+              <div class="meter"><span>Shade</span><span class="meter__track"><span class="meter__fill" style="width:58%"></span></span><span class="meter__v">58%</span></div>
+            </div>
+          </div>
+
+          <div class="note">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 7.6v.2"/></svg>
+            <span><strong>Mostly verified — 72% of this route was checked.</strong>Scored from street-level imagery. Treat the remaining 28% as unverified: where OpenStreetMap has no tag, Meander says unknown rather than guessing.</span>
+          </div>
+
+          <div class="detail__actions">
+            <button class="btn btn--primary" type="button">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 12h13M12 6l6 6-6 6"/></svg>Start this route
+            </button>
+            <button class="btn" type="button">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 14v5h16v-5M12 4v11M8 8l4-4 4 4"/></svg>Share
+            </button>
+            <button class="btn" type="button" aria-label="Save this route">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 4h12v16l-6-4-6 4Z"/></svg>Save
+            </button>
+          </div>
+        </section>
+      </div>
+
+      <details class="about">
+        <summary>
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="m6 9 6 6 6-6"/></svg>
+          Where these numbers come from · privacy · credits
+        </summary>
+        <div class="about__body">
+          <p><strong>Accessibility answers are only as good as OpenStreetMap tagging where you are.</strong> A missing tag is reported as unknown, never as accessible. Every route states how much of it was actually checked.</p>
+          <p><strong>Nothing is stored.</strong> No cookies, no analytics, no location history — your coordinates answer this one request and are then discarded.</p>
+          <p>18,402 map segments scored, 64% served from cache. Map data © <a href="#">OpenStreetMap</a> contributors · tiles by <a href="#">OpenFreeMap</a> · imagery from <a href="#">Mapillary</a> · weather and air quality from <a href="#">Open-Meteo</a>.</p>
+        </div>
+      </details>
+    </div>
+
+    <!-- ========================================================== stage -->
+    <div class="stage">
+      <div class="map" role="img" aria-label="Map of three routes from Viharamahadevi Park. The Nature route is selected.">
+        <svg viewBox="0 0 1000 800" preserveAspectRatio="xMidYMid slice">
+          <rect width="1000" height="800" fill="var(--map-land)"/>
+          <!-- water -->
+          <path d="M0 640 C160 600 300 690 420 660 C560 626 700 700 1000 650 L1000 800 L0 800Z" fill="var(--map-water)"/>
+          <!-- parks -->
+          <ellipse cx="560" cy="300" rx="230" ry="165" fill="var(--map-park)"/>
+          <ellipse cx="215" cy="560" rx="120" ry="82" fill="var(--map-park)"/>
+          <ellipse cx="880" cy="150" rx="130" ry="95" fill="var(--map-park)"/>
+          <!-- roads -->
+          <g stroke="var(--map-road)" fill="none" stroke-linecap="round">
+            <path d="M-20 470 H1020" stroke-width="11"/>
+            <path d="M300 -20 V820" stroke-width="9"/>
+            <path d="M760 -20 V620" stroke-width="9"/>
+            <path d="M-20 205 H820" stroke-width="6"/>
+            <path d="M-20 690 H1020" stroke-width="6"/>
+            <path d="M120 -20 V560" stroke-width="5"/>
+            <path d="M430 120 V820" stroke-width="5"/>
+            <path d="M900 60 V700" stroke-width="5"/>
+            <path d="M60 340 H430" stroke-width="4"/>
+            <path d="M300 120 L430 205" stroke-width="4"/>
+            <path d="M760 470 L1020 330" stroke-width="4"/>
+            <path d="M120 560 L300 690" stroke-width="4"/>
+          </g>
+
+          <!-- unselected routes: thin, muted -->
+          <path d="M250 640 C 340 600 470 560 560 470 C 640 390 700 300 760 230" fill="none"
+                stroke="var(--route-fastest)" stroke-width="5" opacity=".45" stroke-linecap="round"/>
+          <path d="M250 640 C 300 560 300 470 380 430 C 470 385 520 500 640 430 C 720 383 730 290 760 230" fill="none"
+                stroke="var(--route-accessible)" stroke-width="5" opacity=".45" stroke-dasharray="3 9" stroke-linecap="round"/>
+
+          <!-- selected route: casing + colour, thick -->
+          <path d="M250 640 C 300 520 380 470 470 430 C 560 388 560 300 620 250 C 668 210 725 220 760 230" fill="none"
+                stroke="var(--raised)" stroke-width="13" stroke-linecap="round"/>
+          <path d="M250 640 C 300 520 380 470 470 430 C 560 388 560 300 620 250 C 668 210 725 220 760 230" fill="none"
+                stroke="var(--route-nature)" stroke-width="7" stroke-dasharray="20 11" stroke-linecap="round"/>
+
+          <!-- rest stops on selected route -->
+          <g>
+            <circle cx="358" cy="481" r="9" fill="var(--raised)" stroke="var(--route-nature)" stroke-width="3"/>
+            <circle cx="540" cy="352" r="9" fill="var(--raised)" stroke="var(--route-nature)" stroke-width="3"/>
+            <circle cx="668" cy="228" r="9" fill="var(--raised)" stroke="var(--route-nature)" stroke-width="3"/>
+          </g>
+          <!-- barrier marker on the blocked route -->
+          <g transform="translate(452,447)">
+            <circle r="14" fill="var(--warn-ink)" stroke="var(--raised)" stroke-width="3"/>
+            <path d="M-5 -5 L5 5 M5 -5 L-5 5" stroke="var(--raised)" stroke-width="2.6" stroke-linecap="round"/>
+          </g>
+          <!-- origin / destination -->
+          <g transform="translate(250,640)">
+            <circle r="17" fill="var(--brand)" stroke="var(--raised)" stroke-width="4"/>
+            <circle r="5" fill="var(--brand-on)"/>
+          </g>
+          <g transform="translate(760,230)">
+            <circle r="17" fill="var(--brand)" stroke="var(--raised)" stroke-width="4"/>
+            <path d="M-5 0 L-1 4 L6 -4" stroke="var(--brand-on)" stroke-width="3" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+          </g>
+        </svg>
+      </div>
+
+      <div class="mapctl">
+        <button class="iconbtn" type="button" aria-label="Zoom in"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg></button>
+        <button class="iconbtn" type="button" aria-label="Zoom out"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M5 12h14"/></svg></button>
+        <button class="iconbtn" type="button" aria-label="Recentre on your location"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/></svg></button>
+      </div>
+
+      <div class="legend">
+        <div class="legend__row"><span class="legend__line" style="background:repeating-linear-gradient(90deg,var(--route-nature) 0 9px,transparent 9px 15px)"></span><strong>Nature</strong> · dashed</div>
+        <div class="legend__row"><span class="legend__line" style="background:var(--route-fastest)"></span>Fastest · solid</div>
+        <div class="legend__row"><span class="legend__line" style="background:repeating-linear-gradient(90deg,var(--route-accessible) 0 3px,transparent 3px 9px)"></span>Accessible · dotted</div>
+      </div>
+      <p class="attrib">© OpenStreetMap contributors</p>
+    </div>
+  </div>
+</div>
+
+<div class="demobar">
+  <button type="button" aria-pressed="true" data-view="results">Results</button>
+  <button type="button" aria-pressed="false" data-view="empty">First run</button>
+</div>
+
+<!-- =============================================== empty / first-run view -->
+<template id="emptyView">
+  <div class="empty">
+    <div class="empty__card">
+      <div>
+        <h1 class="empty__title">Where are you,<br/>and how long have you got?</h1>
+        <p class="empty__lede" style="margin-top:10px">Meander works out three ways back: the fastest, the greenest, and one that holds to real accessibility constraints.</p>
+      </div>
+
+      <button class="btn btn--primary btn--block" type="button" style="min-height:52px">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/><circle cx="12" cy="12" r="5"/></svg>
+        Use my location
+      </button>
+
+      <div class="orline">or</div>
+
+      <div class="field">
+        <label class="label" for="e-from">Search for a starting point</label>
+        <input id="e-from" type="text" placeholder="A park, a station, a street name…" />
+      </div>
+
+      <div class="field">
+        <span class="label">How long have you got?</span>
+        <div class="presets">
+          <button class="preset" type="button" aria-pressed="false">20 min</button>
+          <button class="preset" type="button" aria-pressed="true">35 min</button>
+          <button class="preset" type="button" aria-pressed="false">1 hr</button>
+          <button class="preset" type="button" aria-pressed="false">2 hr</button>
+          <button class="preset" type="button" aria-pressed="false">Other</button>
+        </div>
+        <p class="hint">Leave the destination empty and you get a loop that brings you back.</p>
+      </div>
+
+      <p class="hint" style="display:flex;gap:8px;align-items:flex-start">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" style="flex:none;margin-top:3px"><path d="M12 3 4 6.5v5c0 4.4 3.2 8.3 8 9.5 4.8-1.2 8-5.1 8-9.5v-5Z"/></svg>
+        Nothing is stored. Your coordinates answer this one request and are then discarded.
+      </p>
+    </div>
+  </div>
+</template>
+
+<script>
+// theme toggle
+const root = document.documentElement, tb = document.getElementById('themeBtn'), tl = document.getElementById('themeLbl');
+tb.addEventListener('click', () => {
+  const dark = root.dataset.theme === 'dark';
+  root.dataset.theme = dark ? 'light' : 'dark';
+  tl.textContent = dark ? 'Dark' : 'Light';
+});
+
+// trip-bar drawers (one open at a time)
+document.querySelectorAll('.seg').forEach(seg => {
+  seg.addEventListener('click', () => {
+    const id = seg.dataset.drawer, open = seg.getAttribute('aria-expanded') === 'true';
+    document.querySelectorAll('.seg').forEach(s => s.setAttribute('aria-expanded','false'));
+    document.querySelectorAll('.drawer').forEach(d => d.hidden = true);
+    if (!open) { seg.setAttribute('aria-expanded','true'); document.getElementById(id).hidden = false; }
+  });
+});
+
+// route selection
+document.querySelectorAll('.route').forEach(r => r.addEventListener('click', () => {
+  document.querySelectorAll('.route').forEach(x => x.setAttribute('aria-pressed','false'));
+  r.setAttribute('aria-pressed','true');
+}));
+
+// chips / presets
+document.querySelectorAll('.chip,.preset').forEach(c => c.addEventListener('click', () => {
+  if (c.classList.contains('preset')) {
+    c.parentElement.querySelectorAll('.preset').forEach(p => p.setAttribute('aria-pressed','false'));
+    c.setAttribute('aria-pressed','true');
+  } else {
+    c.setAttribute('aria-pressed', c.getAttribute('aria-pressed') === 'true' ? 'false' : 'true');
+  }
+}));
+
+// time readout
+const time = document.getElementById('time'), tval = document.getElementById('tval');
+time?.addEventListener('input', e => { tval.textContent = e.target.value; });
+
+// demo view switch
+const layout = document.querySelector('.layout');
+const original = layout.innerHTML;
+document.querySelectorAll('.demobar button').forEach(b => b.addEventListener('click', () => {
+  document.querySelectorAll('.demobar button').forEach(x => x.setAttribute('aria-pressed','false'));
+  b.setAttribute('aria-pressed','true');
+  if (b.dataset.view === 'empty') {
+    layout.style.gridTemplateColumns = '1fr';
+    layout.innerHTML = '';
+    layout.appendChild(document.getElementById('emptyView').content.cloneNode(true));
+  } else {
+    layout.style.gridTemplateColumns = '';
+    layout.innerHTML = original;
+    location.reload();
+  }
+}));
+</script>
+</body>
+</html>
