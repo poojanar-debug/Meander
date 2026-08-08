@@ -2066,3 +2066,133 @@ Sydney was outside. Paris never was.
 
 **Live API calls this phase:** GraphHopper self-hosted ~30 (unmetered), all
 others zero. 640 -> 645 backend tests.
+
+## Release phase 0/1 — Landing 84 commits, and four things the brief got wrong · 2026-08-08
+
+The fast-forward itself was a non-event, exactly as the brief promised: `main`
+was a strict ancestor of `feat/ios`, zero conflicts, 84 commits in one move. All
+four ancestry claims checked before running it, all four true.
+
+Everything interesting was around it.
+
+### The tree was locked, and had been for four days
+
+`git restore` failed on `Unable to create '.git/index.lock': File exists`. The
+lock was **zero bytes, dated 4 August, 23:01** — four days stale, no git process
+running, left behind by something that died mid-operation. Every
+index-modifying git command in this repository had been failing since then,
+which is a large part of why the working tree was in the state the brief
+describes: 17 route rows in `cache.db`, 71 stray fixtures, five untracked docs.
+Nobody was ignoring the mess. Git had stopped letting anyone clean it up.
+
+### Four corrections to the brief
+
+The brief is unusually accurate — every defect it names in Appendix B is real
+and at the line number given. These are the places it is not.
+
+| | the brief says | what is true |
+|---|---|---|
+| Phase 0 commits | "Commits: 3–4", before Phase 1 | Any commit on `main` at 867e8e2 makes it diverge and `merge --ff-only` refuses. Phase 0 has to be working-tree cleanup only; the commits come after. |
+| Phase 0.2 | run `scripts/scrub_cache_db.py --check --worktree` | That script does not exist on `main`. It arrives *with* the fast-forward. |
+| Phase 0.1 | "Four `docs/` files are untracked", three unique | Five, four unique. `RELEASE-PROMPT.md` postdates its own inventory. |
+| Phase 0.5 | guard fixtures on coordinate precision | Does not work. See below. |
+
+The cache.db instruction still lands correctly by accident: restoring from
+`main`'s HEAD gives a 4 KB file with no tables at all — the 146 pre-warmed
+segments live on `feat/ios`, not on `main` — and the fast-forward then replaces
+it with the real one. 57,344 bytes, 146 segments, 27 with a NULL score, 0 route
+rows, matching Appendix C exactly.
+
+### The precision guard cannot work, and the reason is worth keeping
+
+Phase 0.5 asks for a fourth privacy guard refusing "a fixture whose coordinates
+carry more precision than the cache key rounds to". I spot-checked a stray
+fixture, found `79.89860148780478` at 14 decimal places against a 4-decimal
+segment grid, and nearly wrote it.
+
+Then I measured the committed corpus. **283 of the 322 tracked fixtures already
+exceed six decimal places. Some carry eighteen.** They are verbatim recordings
+of upstream responses, so they carry upstream's precision by definition. The
+rule would have rejected almost the entire existing corpus and still said
+nothing about whether any particular file belonged there.
+
+Compared against the 71 strays, every intrinsic property was identical:
+`_meander_provenance: recorded`, same envelope, same shape, same precision. The
+only real difference is that **nobody decided to add them**. So that is what the
+guard checks — a fixture that is not already tracked cannot be committed —
+with `MEANDER_ALLOW_NEW_FIXTURES=1` for deliberate recording. Verified failing,
+passing, and passing-with-opt-in, because a guard nobody has watched fail is a
+guard nobody knows works.
+
+### The gate found two bugs in the commit that added it
+
+Wiring the three CI-only jobs into `make check` was supposed to be plumbing. It
+caught two real things immediately.
+
+Extracting the torch-free check out of ci.yml broke it. CI ran it as a heredoc
+on stdin, where `sys.path[0]` is the working directory and `import backend.main`
+resolved by luck; a script file puts its own directory there instead, so the
+check failed on `No module named 'backend'` — a false negative with nothing to
+do with torch. It had been passing in CI for the right answer by the wrong
+mechanism.
+
+Then ruff's BLE001 rejected the blind `except Exception` in that same new file,
+on the first run of the target that now runs ruff before it.
+
+### The coverage number moved while I was correcting it
+
+I committed a README saying 87.64%, measured twice. It is 87.67%.
+
+The first gate run of the session was killed part-way — vitest was declared in
+`package.json` at `^4.1.10` and simply absent from `node_modules`, so
+`test-frontend` exited 127 — and pytest-cov had already scattered **sixteen
+`.coverage.*` files** into the repository root. coverage combines those on the
+next run. The 87.64% figure was therefore computed partly from statement data
+recorded by code that had since been deleted.
+
+With them gone: 2960 statements, 365 missed, 87.67%, three consecutive runs
+identical. One statement of difference, and it does not matter. What matters is
+that an invisible untracked file silently changed what the coverage gate
+reported, while I was mid-way through correcting that very paragraph for being
+stale. `.coverage.*` is gitignored now for that reason rather than for tidiness.
+
+### Measured
+
+| | |
+|---|---|
+| backend tests | **645** passed, 13.5 s (README said 632) |
+| coverage | **87.67%**, 2960 statements, 365 missed, floor 85% |
+| frontend tests | 46 passed, 2 files |
+| build | 61 modules, 1.4 s |
+| duplicate-definition scan | clean, 31 files |
+| palette gate | clean |
+| cfn-lint | clean, 4 templates |
+| torch-free | torch, open_clip, torchvision all absent; `backend.main` imports |
+| test-sandboxed | **skipped — macOS has no `unshare -n`.** CI covers it. |
+| `data/cache.db` | 57,344 bytes, 146 segments, 27 NULL, 0 route rows |
+| fixtures | 322 tracked, all four directories matching `git ls-files` exactly |
+
+### What surprised me
+
+That `make check` had been claiming, in its own success message, to be "the
+whole of CI now, not most of it" — while three jobs sat outside it. The line was
+true when written. Nothing about adding a CI job makes that line stop being
+printed, and nobody reading a green gate has any reason to go and count.
+
+The second one: a duplicate-definition scan on a tree that merged cleanly and
+passed 645 tests found real damage on the first run. Two `_instructions` in
+`make_synthetic_fixtures.py`, one from each branch, identical signatures — which
+is precisely why nothing broke. The shadowed copy generated street names from a
+real-sounding pool ("Market Street", "Station Road"); the surviving one
+deliberately does not, and says why: a person reading a *direction* is being
+told where to walk. That safety property had been one definition order away from
+being switched off for 84 commits, and the test suite could not see it.
+
+### What is not done
+
+The three CI-only jobs are in `make check` now, but `test-sandboxed` cannot run
+on this machine and says so rather than passing. It has not been verified here.
+
+**Live API calls this phase:** zero. Everything offline, every upstream from a
+committed fixture. 645 backend tests, unchanged in count — nothing added, one
+dead function removed.
