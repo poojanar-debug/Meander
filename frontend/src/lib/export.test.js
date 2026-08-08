@@ -124,25 +124,21 @@ describe('provenanceNote', () => {
     expect(note).not.toContain('Accessibility data covers')
   })
 
-  it('says exactly what the screen says about unknown coverage', () => {
-    // The spec asks for "no 0% when confidence is null". The code disagrees and
-    // the code wins: confidenceSentence renders both null and 0 as "covers only
-    // 0% … do not rely on it", and RouteDetail shows that same sentence on
-    // screen. Special-casing null *here* would be worse than the imprecision —
-    // it would break the property this whole delegation exists for, which is
-    // that the file and the screen cannot drift apart.
-    //
-    // The conflation of "unmeasured" with "measured zero" is real but
-    // pre-existing, shared, and errs conservatively ("do not rely on it").
-    // Fixing it belongs in format.js, where it changes an accessibility claim
-    // on screen too, and is therefore not this capability's call to make.
+  it('does not turn unknown coverage into 0%', () => {
+    // Carried as a known deviation for exactly one commit. Special-casing it
+    // here would have broken the property the delegation exists for, so it was
+    // fixed in format.js instead — which corrects the sentence on screen at the
+    // same time. The file and the screen still cannot drift apart, and neither
+    // of them now reports a measurement of nought for a route nobody measured.
     const note = provenanceNote(unknown)
     expect(note).toContain(confidenceSentence(unknown.confidence, unknown.scoring_method).text)
-    expect(note).toContain('do not rely on it')
+    expect(note).not.toMatch(/\d+%/)
+    expect(note).toContain('unknown')
   })
 
-  it('reports GeoJSON coverage as null even though the sentence says 0%', () => {
-    // The machine-readable field is where the distinction survives.
+  it('still reports GeoJSON coverage as null rather than zero', () => {
+    // The machine-readable field always carried the distinction; now the prose
+    // does too.
     expect(JSON.parse(toGeoJson(unknown)).features[0].properties.accessibility_coverage).toBeNull()
   })
 

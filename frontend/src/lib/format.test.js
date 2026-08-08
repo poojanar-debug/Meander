@@ -3,10 +3,12 @@ import { describe, expect, it } from 'vitest'
 import {
   announceRoutes,
   announceSelection,
+  confidenceSentence,
   durationParts,
   fmtDur,
   fmtDurSpoken,
   restStopSentence,
+  verificationTier,
 } from './format.js'
 import { METRIC_24 } from './units.js'
 
@@ -82,5 +84,81 @@ describe('durations are identical in both systems', () => {
     expect(fmtDur.length).toBe(1)
     expect(fmtDurSpoken.length).toBe(1)
     expect(durationParts.length).toBe(1)
+  })
+})
+
+describe('unknown coverage is not zero coverage', () => {
+  // Rule 1, at the one place it is easiest to lose: `null < 0.3` is true in
+  // JavaScript, so an unknown coverage used to fall straight through the
+  // numeric ladder and render as "covers only 0%" — a measurement claim about a
+  // route nobody measured. models.py declares `confidence: float`, so this is
+  // the defensive path, which is exactly why nothing else was watching it.
+  const UNKNOWN = [
+    ['null', null],
+    ['undefined', undefined],
+    ['NaN', Number.NaN],
+    ['a numeric string', '0.8'],
+  ]
+
+  it.each(UNKNOWN)('says so, rather than 0%%, for %s', (_name, value) => {
+    const { text, severity } = confidenceSentence(value, 'clip')
+    expect(text).not.toMatch(/\d+%/)
+    expect(text).toMatch(/unknown/i)
+    expect(severity).toBe('warning')
+  })
+
+  it.each(UNKNOWN)('fills no segment and says "Not measured" for %s', (_name, value) => {
+    expect(verificationTier(value, 'clip')).toEqual({
+      filled: 0,
+      word: 'Not measured',
+      tone: 'warn',
+    })
+  })
+
+  it('still reports a real, measured zero as zero', () => {
+    // The other half of the distinction, and the one a fix like this can
+    // quietly break: 0 is a measurement. It has to keep reading as one.
+    const { text, severity } = confidenceSentence(0, 'clip')
+    expect(text).toContain('0%')
+    expect(severity).toBe('warning')
+    expect(verificationTier(0, 'clip')).toMatchObject({ filled: 1, word: 'Barely verified' })
+  })
+
+  it('leaves every measured tier exactly as it was', () => {
+    expect(confidenceSentence(0.2, 'clip').text).toContain('20%')
+    expect(confidenceSentence(0.44, 'clip').severity).toBe('caution')
+    expect(confidenceSentence(0.88, 'clip').severity).toBe('ok')
+    expect(verificationTier(0.44, 'clip')).toMatchObject({ filled: 2 })
+    expect(verificationTier(0.88, 'clip')).toMatchObject({ filled: 4 })
+  })
+
+  it.each(UNKNOWN)('keeps the server’s wording but not its severity, for %s', (_name, value) => {
+    // serverNote wins on the text — that is the whole point of it — but a
+    // missing coverage figure must not read as 'ok' underneath it.
+    //
+    // All four forms, not just null, and that is not thoroughness for its own
+    // sake: the unknown branch below hard-codes its own severity, so the guard
+    // in the ternary is load-bearing *only* on this path. With null it is a
+    // no-op, because `null < 0.3` is true by coercion. With undefined, NaN or a
+    // string, every comparison is false and the severity falls through to 'ok'
+    // — a confident-looking sentence about a route with no coverage figure.
+    const { text, severity } = confidenceSentence(value, 'clip', 'Checked on foot last Tuesday.')
+    expect(text).toBe('Checked on foot last Tuesday.')
+    expect(severity).toBe('warning')
+  })
+
+  it('carries the distinction into the live region', () => {
+    const route = {
+      id: 'nature',
+      label: 'The green way',
+      status: 'ok',
+      duration_min: 26,
+      distance_m: 2400,
+      confidence: null,
+      scoring_method: 'clip',
+    }
+    const spoken = announceSelection(route, METRIC_24)
+    expect(spoken).not.toMatch(/\d+%/)
+    expect(spoken).toMatch(/unknown/i)
   })
 })

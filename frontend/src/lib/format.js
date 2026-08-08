@@ -72,9 +72,26 @@ export function fmtPct(fraction) {
  * accessibility answer that reads like a high-coverage one is the exact failure
  * this project exists to avoid.
  */
+/**
+ * A coverage figure we actually have, as opposed to one we can infer.
+ *
+ * `null < 0.3` is `true` in JavaScript, so an unknown coverage used to fall
+ * through the numeric ladder below and render as "covers only 0%" — a
+ * measurement claim about a route nobody measured. `models.py` declares
+ * `confidence: float`, so a well-formed response never carries null; this is the
+ * defensive path, and it is the one that has to be right, because the cases
+ * that reach it are exactly the ones nothing else is watching.
+ *
+ * Deliberately not coercing a numeric string either: if something upstream
+ * starts sending `"0.8"`, "unknown" is the honest answer and a silent parse is
+ * not.
+ */
+const measured = (confidence) => typeof confidence === 'number' && Number.isFinite(confidence)
+
 export function confidenceSentence(confidence, scoringMethod, serverNote) {
+  const unknown = !measured(confidence)
   const severity =
-    scoringMethod === 'placeholder' || confidence < 0.3
+    scoringMethod === 'placeholder' || unknown || confidence < 0.3
       ? 'warning'
       : confidence < 0.6
         ? 'caution'
@@ -90,7 +107,19 @@ export function confidenceSentence(confidence, scoringMethod, serverNote) {
       severity: 'warning',
     }
   }
-  const pct = Math.round((confidence ?? 0) * 100)
+
+  // Unknown is not zero. "Covers only 0%" says a measurement was taken and came
+  // back empty; this says no measurement is available. The instruction is the
+  // same either way, which is why the difference is easy to lose and worth
+  // keeping.
+  if (unknown) {
+    return {
+      text: 'How much of this route was checked is unknown. Treat all of it as unverified.',
+      severity: 'warning',
+    }
+  }
+
+  const pct = Math.round(confidence * 100)
   if (confidence < 0.3) {
     return {
       text: `Accessibility data covers only ${pct}% of this route. Most of it is unverified — do not rely on it.`,
@@ -122,7 +151,15 @@ export function verificationTier(confidence, scoringMethod) {
   if (scoringMethod === 'placeholder') {
     return { filled: 0, word: 'Not measured', tone: 'warn' }
   }
-  const c = typeof confidence === 'number' ? confidence : 0
+  // Same answer as placeholder, for the same reason: an unknown coverage was
+  // filling one segment and reading "Barely verified", which is a measurement
+  // this route does not have. VerificationMeter already suppresses the
+  // percentage for a non-number confidence — it knew the difference before this
+  // function did.
+  if (!measured(confidence)) {
+    return { filled: 0, word: 'Not measured', tone: 'warn' }
+  }
+  const c = confidence
   if (c < 0.3) return { filled: 1, word: 'Barely verified', tone: 'warn' }
   if (c < 0.6) return { filled: 2, word: 'Partly verified', tone: 'warn' }
   if (c < 0.8) return { filled: 3, word: 'Mostly verified', tone: 'ok' }
