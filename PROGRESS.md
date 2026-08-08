@@ -2458,3 +2458,116 @@ Make each one fail once, on purpose, before trusting it.
 
 **Live API calls this phase:** zero. Everything against the mock and the replay
 fixtures.
+
+## Act II, phase 3 — the notch, and units
+
+Two capabilities. Neither needed a decision I could not make from the code,
+except one, which is recorded below because it was the owner's to make.
+
+### `env(safe-area-inset-*)`
+
+The urgency was not the one the brief describes. It presents this as a fresh
+opt-in; `index.html:5` has set `viewport-fit=cover` all along. So this app was
+already drawing under the notch with not a single inset handled — the state the
+launch branch's own comment calls "strictly worse than not opting in at all".
+No `index.html` change was needed, which the brief does not say.
+
+The brief names three targets. There are eight. The five it misses are the ones
+that actually bite: `.skip-link:focus` landed at `top: 8px`, inside the status
+bar, so the first thing a keyboard user reached was the one thing they could not
+see. `.firstrun` replaces `div.layout` rather than nesting inside it, so it
+touches three viewport edges. `.map__controls`, `.legend` and MapLibre's compact
+attribution sit in corners that above 900px are the viewport's corners.
+
+Two of the thirteen edits are not new padding but clobber fixes. `.panel {
+padding: var(--s3) }` at the 420px breakpoint and `.map__controls {
+inset-inline-end }` at 899px are shorthands landing after the base rules, and
+each would have deleted the longhand above it with no error and no visible
+change on any desktop. The three width-scoped rules go at the **end** of the
+file rather than in the responsive block, because `.follow` is declared after
+that block and a media-query rule placed there loses to it on source order.
+That one would also have failed silently.
+
+⚠ The anchors in the spec had drifted — `styles.css` is 1872 lines now, not the
+1720 it was written against, and three of the twelve anchors pointed at
+unrelated lines. The *reasoning* survived intact; only the numbers moved. Worth
+saying because the next spec will have drifted further.
+
+`height: 56px` on the topbar became `min-height`. With the global border-box,
+leaving `height` alone would have subtracted the 59px inset from the content box
+and clipped the 44px icon button — a 44×44 violation introduced by the fix meant
+to make things safe.
+
+Verified by substitution in a real browser, since headless Chrome reports zero
+insets and always will: measure at 0, push iPhone 15 Pro values into the four
+tokens, assert the deltas. Seventeen checks, portrait and landscape, at 390px
+and 1200px, including the deliberate asymmetry — above 900px the panel does
+*not* take a right inset, because its trailing edge is the border it shares with
+the stage. Every rule reads a token rather than calling `env()` inline, which is
+the only reason that substitution is faithful.
+
+What it cannot prove is that the UA reports the right numbers. Only a device can,
+and no device has run this.
+
+### `lib/units.js` + `UnitsControl`
+
+Not a port. The source branch published units through a module singleton and
+`useSyncExternalStore`, subscribed by exactly one component — the control. Every
+route distance went through a `fmtDist` that read the singleton without
+subscribing, so **choosing miles re-rendered four chips and left every distance
+on screen in kilometres** until something unrelated forced a render. Porting it
+faithfully would have ported that. Units went into the App reducer beside
+`theme` and are threaded as a prop; about 40 of the source's 159 lines were
+deleted rather than carried across.
+
+The spec enumerates 20 call sites. There are **24** — `ElevationProfile` and
+`ReportBarrier` landed after it was written. Two of the 24 are hand-formatted
+and so appear in no grep for `fmtDist`: `FollowMode`'s barrier-proximity alert,
+which is the most safety-relevant number in the app and would have gone on
+saying "180 m ahead" while everything around it changed; and
+`ElevationProfile`, which hard-codes `" m"` at four sites and never called
+`formatElevation` — the exact dead-code trap the spec predicted for the source
+branch, reproduced here because the profile was ported before units existed.
+
+ICU decides the clock, not folklore: `en-GB` resolves to `hour12: false`, so the
+UK gets miles and a 24-hour clock. The source branch's comment claims the
+opposite and its own code disagrees. `'en'` with no region maximises to `US` and
+therefore to miles, which is why the control has to be findable rather than
+tucked behind an empty state.
+
+**The one thing I asked about.** Persisting the choice adds `meander:units`,
+which made About's "The only thing kept in this browser is whether you chose the
+light or the dark theme" false. Same shape as the `ReportBarrier` decision last
+phase, and the same answer: ship it, and amend the promise to say what is
+actually true. About now names both words; FirstRun's "Nothing is stored"
+narrows to "No location is stored", which is the strongest true claim at the
+moment it is made.
+
+### Making the gates fail
+
+Nineteen deliberate mutations across the two capabilities, every one caught:
+eight against the safe-area suite, eleven against the units gates.
+
+The units call-site scanner is the one that earns its place. There is no ESLint
+anywhere in this repo and `units` is a defaulted parameter, so an un-threaded
+call site compiles, renders, and lies quietly. Nothing else in the build can see
+it.
+
+One honest note on process: the first run reported the metric-parity check as
+vacuous. It was not — my mutation script's escaping was wrong and the edit never
+landed. Applying it properly, the test failed as it should. A falsification
+harness needs falsifying too.
+
+### Measured
+
+| | |
+|---|---|
+| backend tests | 652, unchanged this phase |
+| coverage | 87.71% |
+| frontend tests | 51 → **170** |
+| frontend test files | 2 → 6 |
+| deliberate mutations caught | 19 of 19 |
+| capabilities restored | **4 of 9** |
+
+**Live API calls this phase:** zero. Everything against the mock and the replay
+fixtures.
