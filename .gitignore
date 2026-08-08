@@ -16,6 +16,9 @@ venv/
 .mypy_cache/
 htmlcov/
 .coverage
+# pytest-cov writes one of these per worker into the repository root and merges
+# them at the end. A cancelled run leaves them behind, sixteen at a time.
+.coverage.*
 
 # Node
 node_modules/
@@ -45,6 +48,12 @@ graphhopper/graph-dist/
 # CLIP segment scores); these two are per-process journal state.
 *.db-wal
 *.db-shm
+
+# FUSE leaves these behind when a file is deleted while still open — four of
+# them had accumulated in data/ next to cache.db. They are orphaned copies of
+# whatever was open at the time, which for this directory means they can carry
+# exactly the route history the pre-commit hook exists to keep out.
+.fuse_hidden*
 
 # Agent tooling scratch. Nothing the project needs lives here — in particular
 # .claude/worktrees/ holds checkouts of this very repository, and committing it
