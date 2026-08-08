@@ -2196,3 +2196,156 @@ on this machine and says so rather than passing. It has not been verified here.
 **Live API calls this phase:** zero. Everything offline, every upstream from a
 committed fixture. 645 backend tests, unchanged in count — nothing added, one
 dead function removed.
+
+## Release Act III — The six live defects · 2026-08-08
+
+Five needed a fix. The sixth was already right, and saying so is the point of
+checking rather than assuming.
+
+### 1 · Strict startup refused to boot the documented production config
+
+`_check_startup()` raised on `missing_keys()`, the *completeness* list, which
+names MAPILLARY_TOKEN and ANTHROPIC_API_KEY whenever they are unset. Neither is
+needed to serve a route — `missing_required_keys()` exists to draw exactly that
+line and its docstring says so — and `/readyz` was already wired to the right
+one. Only the boot decision was not.
+
+The configurations that hit it are the recommended ones: `.env.example:75` tells
+you to set `MEANDER_STRICT_STARTUP` in production, `infra/20-services.yaml:272`
+does, and a free-tier deployment normally has neither optional key. So the
+documented production setup was a boot loop on an instance that could answer
+every request put to it.
+
+Both new tests were run against the unfixed code first. The boot case fails
+there with the real error, `RuntimeError: Missing API keys: GRAPHHOPPER_KEY,
+MAPILLARY_TOKEN, ANTHROPIC_API_KEY`.
+
+### 2 · 120 requests a day, for everybody
+
+Global, not per IP. The 121st visitor got "Meander has used up its routing
+allowance for today" until midnight UTC.
+
+The number was sized against the hosted GraphHopper's 500-credit day, and
+`.env.example` said so. The router is self-hosted now, so it was protecting a
+quota that no longer exists.
+
+**The ceiling itself is not redundant, and the brief slightly undersells why.**
+`fixtures.budget_applies()` skips the per-service call budgets *entirely* in live
+mode — the comment above `_DEV_LIVE_CALL_BUDGET` says production is protected by
+"the rate limiter and the daily route ceiling". This counter is the only guard
+left on the shared upstreams, so it is re-sized rather than removed.
+
+Measured rather than guessed. Instrumenting `fixtures.fetch` around one uncached
+3-objective request:
+
+| service | calls | limit |
+|---|---|---|
+| self-hosted router | 8 | free, unmetered |
+| Open-Meteo | 4 | 10,000/day free tier |
+| Overpass | 1 | shared community instance |
+
+Open-Meteo is the binding constraint now and saturates near **2,500 requests a
+day**. The machine gives out later — 14.0 s per uncached request with no
+`--workers` is about 6,100. **2000**, keeping a fifth of Open-Meteo's allowance
+in reserve.
+
+No test depended on the old default; every one passes an explicit
+`daily_ceiling`.
+
+### 3 · An unconfigured production allowlisted the dev server
+
+`_env_flag("MEANDER_ALLOW_LOCAL_ORIGINS", not origins)`. An empty
+`MEANDER_ALLOWED_ORIGINS` is exactly what a deployment that forgot to configure
+one looks like, and "forgot" resolved to "allow a page on somebody's laptop to
+call production".
+
+The previous pass documented this rather than changing it, and closed it in
+CloudFormation only — which a compose deploy does not inherit, and compose is
+how this is being deployed.
+
+**The property that had to survive** is the test titled *"Local development must
+need no configuration at all"*. Any fix that makes a developer configure CORS
+before `make run` works has traded away the wrong thing.
+
+So the default keys off fixture mode. `replay`/`record` are a laptop — and
+`MEANDER_FIXTURES` defaults to `replay`, so someone who has configured nothing
+still gets localhost. `live` is the only mode that talks to real upstreams, so it
+is the honest signal for "not a laptop", and never adds localhost implicitly.
+
+**All four tests that pinned the old behaviour pass unchanged**, because the
+suite runs in replay (`conftest.py:26`). Nothing was traded. The fix is scoped to
+the case they never covered.
+
+### A bug found by writing documentation
+
+`.env.example` lists every key with an empty value, because it is a template you
+copy and fill in selectively. `_env_flag` treated an empty string as **false**
+rather than as unset — unlike `_env_int` and `_env_float`, which have always
+treated blank as absent.
+
+So copying the example to `.env` and filling in only what you need set
+`MEANDER_ALLOW_LOCAL_ORIGINS=''` and switched off the dev-server origins that
+the same file promises need no configuration. Demonstrated both ways before
+fixing:
+
+```
+replay, MEANDER_ALLOW_LOCAL_ORIGINS unset  -> ('http://localhost:5173', 'http://127.0.0.1:5173')
+replay, MEANDER_ALLOW_LOCAL_ORIGINS=''     -> ()
+```
+
+An explicit `0` still overrides. Empty is not the same as zero, and only zero
+should be able to beat a default.
+
+### 4 · Eight variables with no entry, one described wrongly
+
+"localhost:5173 is always allowed in addition to these" had already stopped
+being true and is now the opposite of true in live mode.
+
+Three of the eight are what a single-VM deploy actually turns on:
+`MEANDER_ALLOW_LOCAL_ORIGINS`, `MEANDER_TRUSTED_PROXY_HOPS` (0 direct, 1 behind
+Caddy, 2 behind Cloudflare and Caddy — too low and every client shares one
+bucket and the app self-DoSes), and `MEANDER_CACHE_DB`, documented as *do not
+set this*, because pointing it away from the committed database drops every
+route to `geometry_only` and nothing reports an error.
+
+Added a test asserting `.env.example`'s numbers against the code's. It
+deliberately does not cover `infra/20-services.yaml:288`, which still calls the
+HTTP timeout 12 against a real default of 20 — the templates are a portfolio
+artifact the brief is explicit about not editing.
+
+### 5 · README
+
+Folded into Act I. 632 → 645 tests, 87.55% → 87.67%, "four verification points"
+→ three, and the WCAG claim withdrawn rather than restated.
+
+### 6 · The three score states — nothing to fix
+
+`data/cache.db` has 27 of its 146 segments recorded with a NULL score, which is
+correct behaviour: too little imagery is *no score*, not a low one. The question
+was whether the UI keeps that distinct from a real 0 and from a route that was
+never scored.
+
+It does, and this was checked in a browser rather than read. Against the mock
+API at 390 px and desktop, reading the live DOM:
+
+| | rendered as |
+|---|---|
+| a real score | percentage + filled track (`hasFill: true`) |
+| a null score | **hatched** track, no fill, the words "not measured" |
+| never scored | "Scored from route shape only — no imagery available here" |
+
+Eight score cells came back `hatched: false, hasFill: true` with percentages;
+the ninth came back `hatched: true, hasFill: false, "not measured"`. The mock
+carries a deliberate `shade: null` fixture *and* an all-zero route, and the
+comment beside them says they exist for exactly this comparison.
+
+Every one of the three is distinguished **by words**, so the distinction
+survives a greyscale screenshot. The route identities in the same view were
+`solid`, `dashed`, `dotted` — also not colour.
+
+Verified against the real backend too: one replayed 3-objective request returned
+`scores={'nature': 0.3751, 'air': 0.7343, 'shade': None}` with
+`scoring_method='clip'`, so a real score and a null arrive together in one
+payload and the hatch fires on live data, not only on the fixture built for it.
+
+**Live API calls this phase:** zero. 645 → 652 backend tests, coverage 87.67% → 87.71%.
