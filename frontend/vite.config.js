@@ -1,12 +1,78 @@
+import { createHash } from 'node:crypto'
+import { existsSync, readFileSync, readdirSync } from 'node:fs'
+import { dirname, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
+
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 
-export default defineConfig({
-  plugins: [react()],
-  server: {
-    proxy: {
-      '/api': { target: 'http://localhost:8000', changeOrigin: true },
+const here = dirname(fileURLToPath(import.meta.url))
+
+// docker-compose sets this and nothing read it, so the compose frontend
+// resolved localhost:8000 inside its own container and every /api call was a
+// connection refused that presented as the backend being down.
+const API_PROXY = {
+  '/api': {
+    target: process.env.VITE_API_PROXY_TARGET || 'http://localhost:8000',
+    changeOrigin: true,
+  },
+}
+
+/**
+ * Emit sw.js with a real precache list and a version derived from the build.
+ *
+ * `enforce: 'post'` is load-bearing: without it the plugin runs before the
+ * bundle is assembled and the precache ends up with no document in it.
+ *
+ * The version is derived from the file list, never stamped with a clock. A
+ * timestamp changes the worker's bytes on every build and evicts every user's
+ * shell whether or not anything actually changed.
+ */
+function meanderServiceWorker() {
+  return {
+    name: 'meander-service-worker',
+    apply: 'build',
+    enforce: 'post',
+    generateBundle(_options, bundle) {
+      const assets = Object.keys(bundle).map((name) => `/${name}`)
+      // public/ is copied verbatim and never appears in the bundle. It may not
+      // exist yet — the icons are a separate capability.
+      const publicDir = join(here, 'public')
+      const extras = existsSync(publicDir)
+        ? readdirSync(publicDir).map((name) => `/${name}`)
+        : []
+      const precache = ['/', ...assets, ...extras].filter(
+        (url) => !url.endsWith('/sw.js') && !url.endsWith('.map'),
+      )
+      const version = createHash('sha256').update(precache.join('\n')).digest('hex').slice(0, 12)
+
+      const source = readFileSync(join(here, 'sw.js'), 'utf8')
+      // replaceAll, not replace: a non-global replace hits only the first
+      // mention and ships the placeholder that appears in sw.js's own header.
+      const out = source
+        .replaceAll('__PRECACHE_MANIFEST__', JSON.stringify(precache))
+        .replaceAll('__PRECACHE_VERSION__', version)
+
+      // Assert rather than hope. A shipped placeholder is a worker that throws
+      // on install, and the symptom is "the app just does not update".
+      if (out.includes('__PRECACHE_')) {
+        throw new Error('sw.js still contains a __PRECACHE_ placeholder after substitution')
+      }
+
+      this.emitFile({ type: 'asset', fileName: 'sw.js', source: out })
     },
+  }
+}
+
+export default defineConfig({
+  plugins: [react(), meanderServiceWorker()],
+  server: {
+    proxy: API_PROXY,
+  },
+  // `vite preview` is the only way to exercise the worker at all, and it had no
+  // /api proxy — so every route request 404'd there.
+  preview: {
+    proxy: API_PROXY,
   },
   build: {
     // MapLibre is large and rarely changes; keeping it in its own chunk means a
