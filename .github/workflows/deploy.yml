@@ -51,8 +51,9 @@ jobs:
         with: { node-version: '22', cache: npm, cache-dependency-path: frontend/package-lock.json }
       - name: Build the frontend
         working-directory: frontend
-        # `npm run build` runs check:palette, check:permalink and check:offline
-        # first; a failure in any of them fails the deploy before anything ships.
+        # The permalink contract and the sun/follow/units suites run in ci.yml's
+        # `frontend` job (npm test) and in `make check`. This step only builds.
+        # It has never run those checks — the scripts it named do not exist.
         run: npm ci && npm run build
 
       - name: Assume the deploy role

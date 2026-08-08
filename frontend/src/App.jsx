@@ -13,9 +13,11 @@ import StepList from './components/StepList.jsx'
 import Ribbon from './components/Ribbon.jsx'
 import StatusBanner from './components/StatusBanner.jsx'
 import Topbar from './components/Topbar.jsx'
+import ShareButton from './components/ShareButton.jsx'
 import TripBar from './components/TripBar.jsx'
 import { announceRoutes, announceSelection, effectiveMode } from './lib/format.js'
 import { applyTheme, initialTheme, readStoredTheme, storeTheme, systemTheme } from './lib/theme.js'
+import { GEOLOCATED, decodeState, writeUrl } from './lib/permalink.js'
 import {
   METRIC_24,
   clearStoredUnits,
@@ -70,16 +72,39 @@ const initialState = {
   // Bumped by anything that should trigger a refetch; the effect keys on it.
   nonce: 0,
   debounceMs: 0,
+  // One sentence explaining something an incoming link could not be honoured
+  // verbatim. Null in every other case.
+  linkNote: null,
 }
 
 /** Resolved at mount rather than at module load, so the read is not a side
  *  effect of importing this file. */
 function init(state) {
-  return { ...state, theme: initialTheme(), units: initialUnits() }
+  const seeded = { ...state, theme: initialTheme(), units: initialUnits() }
+  const shared = decodeState()
+  if (!shared) return seeded
+
+  const { expiredDeparture, ...fields } = shared
+  // nonce 1 rather than 0: the fetch effect ignores 0, because nothing has been
+  // asked for yet — and a link *is* a request. Seeding it here rather than
+  // dispatching from an effect is what keeps the fetch effect untouched; the
+  // alternative routes the defaults first and then routes again, spending two
+  // requests and briefly showing the wrong answer. phase is seeded so the rail
+  // shows the right number of skeletons instead of one empty paint.
+  return {
+    ...seeded,
+    ...fields,
+    phase: 'loading',
+    nonce: 1,
+    debounceMs: 0,
+    linkNote: expiredDeparture
+      ? 'That link asked to leave at a time that has already passed. These routes are for leaving now.'
+      : null,
+  }
 }
 
 function withRefetch(state, patch, debounceMs) {
-  return { ...state, ...patch, nonce: state.nonce + 1, debounceMs, error: null }
+  return { ...state, ...patch, nonce: state.nonce + 1, debounceMs, error: null, linkNote: null }
 }
 
 function reducer(state, action) {
@@ -283,6 +308,22 @@ export default function App() {
 
   useEffect(() => () => abortRef.current?.abort(), [])
 
+  // The address bar follows the controls. replaceState, never pushState — a
+  // slider drag would otherwise put fifty entries behind the back button.
+  // Deliberately its own effect: folding it into the fetch effect would mean
+  // adding these six values to that dependency array, which is exactly what the
+  // comment there forbids.
+  useEffect(() => {
+    writeUrl({
+      origin: state.origin,
+      dest: state.dest,
+      minutes: state.minutes,
+      mode: state.mode,
+      objectives: state.objectives,
+      departAt: state.departAt,
+    })
+  }, [state.origin, state.dest, state.minutes, state.mode, state.objectives, state.departAt])
+
   // --- theme ---------------------------------------------------------------
 
   // index.html already painted the right theme before React existed; this keeps
@@ -348,7 +389,7 @@ export default function App() {
         dispatch({
           type: 'origin',
           value: {
-            name: 'Your location',
+            name: GEOLOCATED,
             lat: position.coords.latitude,
             lon: position.coords.longitude,
           },
@@ -461,6 +502,11 @@ export default function App() {
             onDepartAt={(value) => dispatch({ type: 'departAt', value })}
           />
 
+          {/* Outside DepartureStrip deliberately: that component returns null
+              whenever there is no best departure, which is the common case, so
+              anything mounted inside it disappears. */}
+          {state.linkNote && <p className="field__hint">{state.linkNote}</p>}
+
           <div id="results">
             <StatusBanner
               phase={state.phase}
@@ -505,6 +551,18 @@ export default function App() {
                 onDepartAt={(value) => dispatch({ type: 'departAt', value })}
               />
             </RouteDetail>
+
+            {hasRoutes && (
+              <ShareButton
+                origin={state.origin}
+                dest={state.dest}
+                minutes={state.minutes}
+                mode={state.mode}
+                objectives={state.objectives}
+                departAt={state.departAt}
+                onAnnounce={announce}
+              />
+            )}
           </div>
 
           <div className="panel__spacer" aria-hidden="true" />

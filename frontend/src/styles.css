@@ -133,6 +133,11 @@
   --r-lg: 16px;
   --r-pill: 999px;
 
+  /* A URL is checked character by character, and a proportional face makes 1/l
+   * and 0/O ambiguous. System stack only — a webfont would be a third-party
+   * request, which this file's header rules out. */
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+
   /* Every interactive target must be at least this in both dimensions. */
   --target: 44px;
 
@@ -1939,6 +1944,31 @@ fieldset.chips legend {
 .detail__actions .button--primary:disabled {
   opacity: 0.55;
   cursor: not-allowed;
+}
+
+/* ----------------------------------------------------------------- share */
+
+.share {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s2);
+  align-items: flex-start;
+  margin-top: var(--s4);
+}
+.share__status {
+  margin: 0;
+  font-size: var(--t-small);
+  color: var(--ink-2);
+}
+/* Nothing to say yet, so nothing takes up room. */
+.share__status:empty {
+  display: none;
+}
+.share__url {
+  align-self: stretch;
+  min-height: var(--target);
+  font-family: var(--font-mono);
+  font-size: var(--t-small);
 }
 
 /* ----------------------------------------------------------------- units */

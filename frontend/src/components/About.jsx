@@ -33,6 +33,15 @@ const About = forwardRef(function About({ cache }, ref) {
           distances in kilometres or miles.
         </p>
 
+        {/* The address bar is the one place a coordinate becomes visible, so it
+            is named here rather than left for someone to notice. A device fix
+            is never written there — only a place the user searched for. */}
+        <p>
+          One exception you can see: your search is kept in the address bar, so a reload keeps it
+          and the link is shareable. A place taken from your device is never written there — only a
+          place you searched for. Nothing is added to the back button either way.
+        </p>
+
         {/* The paragraph above has exactly one exception, so it names it rather
             than quietly acquiring one. Reporting a barrier is the only thing in
             this application that writes anywhere, and it is opt-in, one press

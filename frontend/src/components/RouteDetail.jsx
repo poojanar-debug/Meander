@@ -188,10 +188,10 @@ export default function RouteDetail({ route, theme, units, stepList, onStart, ch
         <ReportBarrier route={route} units={units} />
       </section>
 
-      {/* No Share or Save. Save is §6.8, which is deferred; Share has no
-          specification and the app holds no state in the URL, so a share link
-          would point at the front door and say nothing about the route. A
-          control that does nothing reads as broken rather than as unbuilt. */}
+      {/* Still no Save — §6.8 is deferred. Share is no longer here either, but
+          for a different reason now that the app does hold its search in the
+          URL: the link encodes the *search*, not the selected route, so it
+          belongs beside the rail rather than inside one route's detail. */}
       {onStart && route.steps?.length > 0 && (
         <div className="detail__actions">
           <button
