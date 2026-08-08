@@ -121,15 +121,33 @@ def clip_available() -> bool:
 
 
 def _check_startup() -> list[str]:
+    """Warn on the completeness list; refuse to boot only on the required one.
+
+    These are two different questions and this function used to answer both with
+    missing_keys(). That is the *completeness* list, and it names MAPILLARY_TOKEN
+    and ANTHROPIC_API_KEY whenever they are unset — neither of which is needed to
+    serve a route. CLIP is cache-read-only in the deploy image and narration is
+    skipped without a key, which is exactly what missing_required_keys() says in
+    its own docstring.
+
+    The consequence was a boot loop in the one configuration most likely to hit
+    it: .env.example:75 tells you to set MEANDER_STRICT_STARTUP in production and
+    infra/20-services.yaml:272 does, so a deployment with no Mapillary or
+    Anthropic key — the normal case, and the documented free-tier one — would
+    refuse to start while being perfectly able to answer.
+
+    /readyz already used the required list. Only the boot decision did not.
+    """
     missing = settings.missing_keys()
-    if missing:
-        message = (
-            "Missing API keys: " + ", ".join(missing) + ". "
+    required = settings.missing_required_keys()
+
+    if required and STRICT_STARTUP:
+        raise RuntimeError(
+            "Missing API keys: " + ", ".join(required) + ". "
             "Copy .env.example to .env and fill them in, or run with "
             "MEANDER_FIXTURES=replay to work entirely from recorded fixtures."
         )
-        if STRICT_STARTUP:
-            raise RuntimeError(message)
+    if missing:
         log.warning("startup_missing_keys", extra={"missing_keys": missing})
     return missing
 

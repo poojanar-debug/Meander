@@ -87,3 +87,61 @@ def test_a_hosted_deployment_still_demands_an_api_key(monkeypatch) -> None:
 
     monkeypatch.setattr(config, "GRAPHHOPPER_URL", "https://graphhopper.com/api/1/route")
     assert "GRAPHHOPPER_KEY" in config.Settings().missing_keys()
+
+
+# ---------------------------------------------------------------------------
+# strict startup boots on the required list, not the completeness list
+# ---------------------------------------------------------------------------
+
+
+def test_strict_startup_boots_without_the_optional_keys(monkeypatch) -> None:
+    """The configuration the documentation actually tells you to deploy.
+
+    .env.example:75 says to set MEANDER_STRICT_STARTUP in production and
+    infra/20-services.yaml:272 does. A free-tier deployment normally has neither
+    MAPILLARY_TOKEN nor ANTHROPIC_API_KEY — CLIP reads scores out of cache.db and
+    narration is skipped without a key — so both are in missing_keys() and
+    neither is in missing_required_keys().
+
+    _check_startup() used the first list, so that deployment refused to boot
+    while being perfectly able to answer.
+    """
+    from backend import config, main
+
+    settings = config.Settings()
+    object.__setattr__(settings, "mapillary_token", None)
+    object.__setattr__(settings, "anthropic_api_key", None)
+
+    monkeypatch.setattr(main, "settings", settings)
+    monkeypatch.setattr(main, "STRICT_STARTUP", True)
+
+    # Both optional keys are named as absent...
+    missing = main._check_startup()
+    assert "MAPILLARY_TOKEN" in missing
+    assert "ANTHROPIC_API_KEY" in missing
+    # ...and neither of them stopped the boot.
+    assert settings.missing_required_keys() == []
+
+
+def test_strict_startup_still_refuses_a_genuinely_unusable_config(monkeypatch) -> None:
+    """The guard has to keep working, or the fix has just switched it off.
+
+    A hosted GraphHopper with no key cannot serve a single route, so it is in
+    missing_required_keys() and strict startup must still refuse it.
+    """
+    import pytest
+
+    from backend import config, main
+
+    monkeypatch.setattr(config, "GRAPHHOPPER_URL", "https://graphhopper.com/api/1/route")
+    monkeypatch.delenv(config.SELF_HOSTED_ENV, raising=False)
+
+    settings = config.Settings()
+    object.__setattr__(settings, "graphhopper_key", None)
+    object.__setattr__(settings, "fixture_mode", "live")
+
+    monkeypatch.setattr(main, "settings", settings)
+    monkeypatch.setattr(main, "STRICT_STARTUP", True)
+
+    with pytest.raises(RuntimeError, match="GRAPHHOPPER_KEY"):
+        main._check_startup()
