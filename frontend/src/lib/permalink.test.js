@@ -1,0 +1,235 @@
+import { afterEach, describe, expect, it, vi } from 'vitest'
+
+import { buildRouteRequest } from '../api/client.js'
+import { GEOLOCATED, decodeState, encodeState, shareUrl, writeUrl } from './permalink.js'
+
+// This is the ported contract check. It lives in vitest rather than in a
+// standalone script so that it runs in `npm test`, in `make check` and in CI's
+// frontend job — the same run, not a fourth one wired into the build. It also
+// means buildRouteRequest can simply be imported instead of reconstructed by
+// slicing client.js as text and passing it to new Function, which is what the
+// script had to do and which breaks the moment that file is reordered.
+
+const FULL = {
+  origin: { lat: 6.933727, lon: 79.85008, name: 'Colombo Fort' },
+  dest: { lat: 51.507489, lon: -0.162207, name: 'Hyde Park' },
+  minutes: 65,
+  mode: 'bike',
+  objectives: ['nature', 'accessible'],
+  departAt: null,
+}
+
+const roundTrip = (state) => ({ ...state, ...decodeState(encodeState(state)) })
+
+describe('encode / decode round trip', () => {
+  it('preserves every field', () => {
+    const back = decodeState(encodeState(FULL))
+    expect(back.origin).toEqual(FULL.origin)
+    expect(back.dest).toEqual(FULL.dest)
+    expect(back.minutes).toBe(65)
+    expect(back.mode).toBe('bike')
+    expect(back.objectives).toEqual(['nature', 'accessible'])
+  })
+
+  it('produces the same request body on the other side — the contract', () => {
+    // The one that matters. If this fails, a shared link answers a different
+    // question than the one the sender was looking at.
+    expect(buildRouteRequest(roundTrip(FULL))).toEqual(buildRouteRequest(FULL))
+  })
+
+  it('carries coordinates to routing precision', () => {
+    const back = decodeState(encodeState(FULL))
+    expect(Math.abs(back.origin.lat - FULL.origin.lat)).toBeLessThan(1e-5)
+    expect(Math.abs(back.origin.lon - FULL.origin.lon)).toBeLessThan(1e-5)
+    expect(Math.abs(back.dest.lat - FULL.dest.lat)).toBeLessThan(1e-5)
+  })
+
+  it('gives a loop no destination rather than a null one', () => {
+    const loop = { ...FULL, dest: null }
+    const back = decodeState(encodeState(loop))
+    expect(back.dest).toBeUndefined()
+    expect('destination' in buildRouteRequest(roundTrip(loop))).toBe(false)
+  })
+
+  it('makes no link at all without an origin', () => {
+    expect(encodeState({ ...FULL, origin: null })).toBe('')
+    expect(shareUrl({ ...FULL, origin: null })).toBe('')
+  })
+
+  it('leaves an unset key absent rather than undefined', () => {
+    // This is what makes the spread in App's init() safe. A key present with
+    // value undefined would overwrite the default and then be dropped by
+    // JSON.stringify, changing the request without changing the UI.
+    const sparse = decodeState('?from=6.933727,79.850080')
+    for (const key of ['dest', 'minutes', 'mode', 'objectives', 'departAt']) {
+      expect(key in sparse, `${key} should be absent`).toBe(false)
+    }
+  })
+})
+
+describe('departure time', () => {
+  // All new. The branch this was ported from has no concept of departAt, so a
+  // faithful port would have broken its own headline contract for every user
+  // who touched the departure strip.
+  const hoursFromNow = (h) => new Date(Date.now() + h * 3600_000).toISOString()
+
+  it('round-trips a future departure into the request body', () => {
+    const state = { ...FULL, departAt: hoursFromNow(1) }
+    // Assert on the *decoded* object, not only on the merged one. roundTrip
+    // spreads the original state first, so a field the encoder drops entirely
+    // is masked by the original value and the body still looks right. That
+    // masking hid a dropped `at` until a deliberate mutation exposed it.
+    const decoded = decodeState(encodeState(state))
+    expect(decoded.departAt, 'the encoder dropped departAt').toBe(state.departAt)
+
+    const body = buildRouteRequest(roundTrip(state))
+    expect(body.depart_at).toBeDefined()
+    expect(body).toEqual(buildRouteRequest(state))
+  })
+
+  it('carries every optional field through the encoder itself', () => {
+    // The same masking applies to all of them, so each is checked on the
+    // decoded object rather than on the merge.
+    const state = { ...FULL, departAt: hoursFromNow(1) }
+    const decoded = decodeState(encodeState(state))
+    expect(decoded.dest).toEqual(state.dest)
+    expect(decoded.minutes).toBe(state.minutes)
+    expect(decoded.mode).toBe(state.mode)
+    expect(decoded.objectives).toEqual(state.objectives)
+    expect(decoded.departAt).toBe(state.departAt)
+  })
+
+  it('drops a departure that has already passed, and says so', () => {
+    const back = decodeState(`?from=6.933727,79.850080&at=${hoursFromNow(-2)}`)
+    expect(back.departAt).toBeUndefined()
+    expect(back.expiredDeparture).toBe(true)
+  })
+
+  it('keeps a departure inside the current hour', () => {
+    const topOfHour = new Date()
+    topOfHour.setMinutes(0, 0, 0)
+    const back = decodeState(`?from=6.933727,79.850080&at=${topOfHour.toISOString()}`)
+    expect(back.departAt).toBe(topOfHour.toISOString())
+  })
+
+  it('drops a garbage timestamp without claiming it expired', () => {
+    const back = decodeState('?from=6.933727,79.850080&at=yesterday')
+    expect(back.departAt).toBeUndefined()
+    expect(back.expiredDeparture).toBeUndefined()
+  })
+
+  it('normalises an offset timestamp to one representation', () => {
+    // +05:30 and Z forms must produce the same body, or two links that mean the
+    // same thing compare unequal.
+    const future = new Date(Date.now() + 7200_000)
+    const back = decodeState(`?from=6.933727,79.850080&at=${future.toISOString()}`)
+    expect(back.departAt).toBe(future.toISOString())
+  })
+})
+
+describe('hostile input: somebody else wrote this link', () => {
+  it.each(['?from=notacoord', '?from=999,999', '?from=51.5', '?from=', '?'])(
+    'rejects %s outright',
+    (query) => {
+      expect(decodeState(query)).toBeNull()
+    },
+  )
+
+  it('drops minutes the dial could never have shown', () => {
+    expect(decodeState('?from=6.9,79.8&min=99999').minutes).toBeUndefined()
+    expect(decodeState('?from=6.9,79.8&min=-5').minutes).toBeUndefined()
+    expect(decodeState('?from=6.9,79.8&min=63').minutes).toBe(65)
+  })
+
+  it('drops an unknown mode or objective instead of passing it through', () => {
+    expect(decodeState('?from=6.9,79.8&mode=teleport').mode).toBeUndefined()
+    expect(decodeState('?from=6.9,79.8&obj=nature,rm -rf,air').objectives).toEqual([
+      'nature',
+      'air',
+    ])
+  })
+
+  it('deduplicates objectives and caps them at three', () => {
+    const objectives = decodeState('?from=6.9,79.8&obj=nature,nature,air,shade,quiet,fastest')
+      .objectives
+    expect(objectives).toHaveLength(3)
+    expect(new Set(objectives).size).toBe(3)
+  })
+
+  it('leaves the defaults alone when every objective is unrecognised', () => {
+    // An empty array would render a rail with nothing in it and no way back.
+    expect('objectives' in decodeState('?from=6.9,79.8&obj=nonsense,more')).toBe(false)
+  })
+
+  it('bounds a hostile name', () => {
+    const long = 'x'.repeat(5000)
+    expect(decodeState(`?from=6.9,79.8&fromName=${long}`).origin.name.length).toBeLessThanOrEqual(
+      120,
+    )
+  })
+
+  it('degrades a missing name to the coordinates', () => {
+    expect(decodeState('?from=51.50749,-0.16221').origin.name).toMatch(/51\.5/)
+  })
+})
+
+describe('writeUrl and shareUrl', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
+  const stubWindow = () => {
+    const replaceState = vi.fn()
+    const pushState = vi.fn()
+    vi.stubGlobal('window', {
+      location: { origin: 'https://meander.example', pathname: '/', search: '' },
+      history: { replaceState, pushState },
+    })
+    return { replaceState, pushState }
+  }
+
+  it('writes a searched origin to the address bar', () => {
+    const { replaceState } = stubWindow()
+    writeUrl(FULL)
+    expect(replaceState).toHaveBeenCalledTimes(1)
+    expect(replaceState.mock.calls[0][2]).toContain('from=')
+  })
+
+  it('never writes a device fix to the address bar', () => {
+    // The address bar persists into browser history. This is "no location
+    // history" as an executable assertion rather than a promise in a comment.
+    const { replaceState } = stubWindow()
+    writeUrl({ ...FULL, origin: { lat: 6.9, lon: 79.8, name: GEOLOCATED } })
+    expect(replaceState).toHaveBeenCalledTimes(0)
+  })
+
+  it('still shares a device fix when the user asks it to', () => {
+    stubWindow()
+    const url = shareUrl({ ...FULL, origin: { lat: 6.9, lon: 79.8, name: GEOLOCATED } })
+    expect(url).toContain('from=6.900000%2C79.800000')
+    expect(url).toContain('https://meander.example/')
+  })
+
+  it('never calls pushState', () => {
+    const { pushState } = stubWindow()
+    writeUrl(FULL)
+    writeUrl({ ...FULL, minutes: 90 })
+    expect(pushState).toHaveBeenCalledTimes(0)
+  })
+
+  it('does nothing when the address bar is already right', () => {
+    const replaceState = vi.fn()
+    vi.stubGlobal('window', {
+      location: { origin: 'https://meander.example', pathname: '/', search: encodeState(FULL) },
+      history: { replaceState, pushState: vi.fn() },
+    })
+    writeUrl(FULL)
+    expect(replaceState).toHaveBeenCalledTimes(0)
+  })
+
+  it('never puts the geolocation sentinel in a link', () => {
+    expect(encodeState({ ...FULL, origin: { lat: 6.9, lon: 79.8, name: GEOLOCATED } })).not.toContain(
+      'fromName',
+    )
+  })
+})
