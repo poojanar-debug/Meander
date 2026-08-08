@@ -1406,6 +1406,75 @@ fieldset.chips legend {
 }
 
 
+/* -------------------------------------------------------- climb profile */
+
+/* Route.elevation has been on every response since the launch branch and
+   nothing read it. The stretches marked here are the same gradient the
+   accessible preset refuses to cross — the threshold arrives on the wire as
+   `limit_pct`, so the drawing cannot drift from the verdict. */
+.profile {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s2);
+}
+
+.profile__svg {
+  width: 100%;
+  height: 72px;
+  display: block;
+  background: var(--sunken);
+  border: 1px solid var(--rule);
+  border-radius: var(--r-sm);
+}
+
+.profile__line {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 1.5px;
+  stroke-linejoin: round;
+}
+
+.profile__fill-top {
+  stop-color: var(--brand-tint);
+  stop-opacity: 0.9;
+}
+.profile__fill-bottom {
+  stop-color: var(--brand-tint);
+  stop-opacity: 0.15;
+}
+
+/* Tint AND hatch. A tinted rectangle is colour as the only differentiator,
+   which this design system does not allow anywhere else either — the null
+   score track above solves the same problem the same way. */
+.profile__steep {
+  fill: var(--warn-ground);
+  opacity: 0.75;
+}
+.profile__hatch-line {
+  stroke: var(--warn-rule);
+  stroke-width: 1.5px;
+}
+
+.profile__axis {
+  display: flex;
+  justify-content: space-between;
+  font-size: var(--t-micro);
+  color: var(--ink-2);
+}
+
+.profile__summary {
+  font-size: var(--t-small);
+  color: var(--ink);
+  margin: 0;
+}
+
+.profile__warn {
+  font-size: var(--t-small);
+  color: var(--warn-ink);
+  margin: 0;
+}
+
+
 /* ----------------------------------------------------------- responsive */
 
 /* Below 900px the map moves ABOVE the panel and the page scrolls as one

@@ -9,6 +9,7 @@ import {
   fmtPct,
   restStopName,
 } from '../lib/format.js'
+import ElevationProfile from './ElevationProfile.jsx'
 
 const SCORE_ROWS = [
   { key: 'nature', label: 'Nature' },
@@ -120,6 +121,11 @@ export default function RouteDetail({ route, theme, stepList, onStart, children 
             ))}
           </ul>
         )}
+      </section>
+
+      <section className="detail__section">
+        <h4 className="detail__h">Climb</h4>
+        <ElevationProfile profile={route.elevation} />
       </section>
 
       <section className="detail__section">

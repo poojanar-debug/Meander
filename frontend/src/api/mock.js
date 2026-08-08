@@ -152,6 +152,41 @@ function buildRoutes(req) {
   const natureM = Math.round(lengthOf(natureGeom))
   const accessibleM = Math.round(lengthOf(accessibleGeom))
 
+  // Route.elevation, in the shape backend/models.py:99-116 defines. The three
+  // routes deliberately cover the three states the profile has to keep apart,
+  // the same way `shade: null` below covers them for scores:
+  //
+  //   fastest      measured, nothing over the limit
+  //   nature       measured, two stretches over it — the hatched case
+  //   accessible   null, meaning the router returned no elevation, which is
+  //                NOT the same statement as "this route is level"
+  //
+  // Without a null anywhere in the mock, the honest-absence branch would never
+  // render and the sentence that distinguishes it could rot unnoticed.
+  const profile = (totalM, relief, steepSpans) => {
+    const n = 60
+    const distances_m = Array.from({ length: n }, (_, i) => Math.round((totalM * i) / (n - 1)))
+    const elevations_m = distances_m.map(
+      (_, i) => Math.round((8 + relief * Math.sin((i / (n - 1)) * Math.PI * 1.7)) * 10) / 10,
+    )
+    let ascent = 0
+    let descent = 0
+    for (let i = 1; i < elevations_m.length; i += 1) {
+      const d = elevations_m[i] - elevations_m[i - 1]
+      if (d > 0) ascent += d
+      else descent -= d
+    }
+    return {
+      distances_m,
+      elevations_m,
+      ascent_m: Math.round(ascent * 10) / 10,
+      descent_m: Math.round(descent * 10) / 10,
+      max_gradient_pct: steepSpans.length ? 11.4 : 4.2,
+      steep_spans: steepSpans,
+      limit_pct: 8,
+    }
+  }
+
   const fastest = {
     id: 'fastest',
     label: 'Fastest',
@@ -161,6 +196,7 @@ function buildRoutes(req) {
     distance_m: fastestM,
     mode,
     scores: { nature: 0.31, air: 0.62, shade: 0.2 },
+    elevation: profile(fastestM, 6, []),
     scoring_method: 'clip',
     confidence: 0.88,
     rest_stops: [{ ...pointAt(fastestGeom, 0.12), type: 'bench', at_m: 180 }],
@@ -186,6 +222,7 @@ function buildRoutes(req) {
     distance_m: natureM,
     mode,
     scores: { nature: 0.79, air: 0.71, shade: 0.58 },
+    elevation: profile(natureM, 24, [[12, 19], [38, 44]]),
     scoring_method: 'clip',
     confidence: 0.72,
     rest_stops: [
@@ -233,6 +270,8 @@ function buildRoutes(req) {
     // measured", 0 gets a real, empty bar. Without a null anywhere in the mock
     // that branch was never seen.
     scores: { nature: 0.44, air: 0.65, shade: null },
+    // null, not a flat profile — see the note beside `profile` above.
+    elevation: null,
     scoring_method: 'geometry_only',
     confidence: 0.41,
     rest_stops: [{ ...pointAt(accessibleGeom, 0.3), type: 'bench', at_m: 520 }],
