@@ -2674,3 +2674,112 @@ correct. Dropping `at` survived the first run because of it.
 | capabilities restored | **6 of 9** |
 
 **Live API calls this phase:** zero.
+
+## Act II, phases 5 and 6 — offline, the icons, and a gate that can fail
+
+The last three capabilities, and the two that most needed rewriting rather than
+restoring.
+
+### The offline trio
+
+**The consent flag does not live where the brief guessed.** It is not IndexedDB
+and not CacheStorage — the source keeps it in `localStorage` under
+`meander.offline`, a **third** key, which this project does not allow. And the
+source already contains the evidence against itself: because a worker cannot
+read localStorage, it *mirrors* the flag into CacheStorage and re-pushes it on
+every page load, so an evicted worker cannot come back holding a permission the
+user withdrew.
+
+Deleting the mirror removed the whole class of problem. One source of truth, in
+the bucket the worker already reads; the worker's entire message channel — 21
+lines — went with it, and so did the "page is not yet controlled on first load"
+workaround. It also fails closed harder: wiping site data now takes the flag and
+the saved route together, where a localStorage mirror could outlive the cache it
+was granting permission for.
+
+One thing I added that the spec did not ask for: `setSaveResults` reads the flag
+back after writing it. If storage refuses, the worker reads "off" and saves
+nothing — so a control still showing "Yes, keep them" would be promising
+something no part of the system is doing. A test pins it.
+
+`X-Meander-Cached` (worker: "this is a replay") is one letter from
+`X-Meander-Cache` (server: "I had a warm cache, this answer is current"). They
+mean opposite things. There is a test for exactly that confusion, because
+reading the wrong one would label every fast answer stale.
+
+Verified with the network actually cut, at the CDP level, against the built
+bundle and a real registered worker: it opens. **What I did not verify
+end-to-end is the worker's write path** — this build runs the mock, so no
+`/api/routes` request is made, and the backend on this machine is in `live`
+fixture mode, so driving it would have meant real Overpass and Open-Meteo calls.
+The contract suite covers that path; the *sweep* — the half that protects
+someone — is exercised for real.
+
+### The icons
+
+**The five committed PNGs carry the old palette in their pixels.** `#1b2430` and
+`#3fae70`, written into the image data. Copying those blobs would have
+reintroduced the forbidden palette as *binary*: invisible to the stylesheet
+gate, which reads only `styles.css`; invisible to `git diff`; invisible to
+review. So they are drawn from the tokens instead, by a generator with no
+dependencies — Node's zlib is all a PNG needs.
+
+The test asserts pixels, not bytes, and it asserts them against the stylesheet:
+every opaque pixel must lie on the ramp between the two tokens, so a third
+colour anywhere fails. A single pixel repainted in the launch green is caught.
+
+### The gate
+
+The warning in this file was right and understated it. Seven selector families
+are dead, not three. Four of fourteen checks would find zero elements and pass —
+and one is literally `check(label, true)`, a pass value of the constant `true`,
+which cannot fail under any DOM at any viewport.
+
+So the rewrite proves its own selectors first, and the manifest earned its place
+on the first run: it refused to grade a page where the routes had never arrived.
+
+Two checks are deliberately **not** restored. "The page itself does not scroll at
+390×844" contradicts the shipped design — below 899px the document scrolls as
+one, on purpose. "Every route is visible without scrolling" was a bottom-sheet
+contract and there is no bottom sheet. Restoring either with a working selector
+would fail correctly-built code, which is its own kind of broken gate.
+
+**The most useful thing the gate taught me came from its own falsification.**
+Putting a 36px control back went *undetected* by the first version — because a
+control behind a closed drawer measures 0×0 and is filtered out as "not
+rendered". A single-pass sweep silently exempts most of this app's controls. The
+gate now opens each disclosure in turn (the trip-bar segments are mutually
+exclusive, so they cannot all be open at once), and the same mutation is caught
+by name.
+
+Two pre-existing 44×44 violations are fixed here rather than deferred again:
+`.theme-toggle` and `.preset` were both 36px, and `.preset` is on the first-run
+path. A correct gate lands red otherwise, and a gate that ships red gets skipped
+— the same failure as one that cannot fail.
+
+`dash-palette.test.js` closes what the spec calls its most valuable finding:
+fourteen hard-coded hexes in `dash.js` duplicate the stylesheet, the shell gate
+reads only `styles.css`, and nothing checked that the two agreed. The last pair
+is not a route colour at all — it is `--ink-2`, spelled out.
+
+### On the three privacy questions
+
+Each of these three phases changed what the app keeps, and each time the answer
+was the owner's rather than mine: the units key, the coordinates in the address
+bar, and now the shell cache plus the opt-in route. The pattern held all three
+times — ship it, and amend the promise to say what is actually true. The one
+thing I did not do was let any of them ship with the old sentence still standing.
+
+### Measured
+
+| | |
+|---|---|
+| backend tests | 652, unchanged across all four phases |
+| coverage | 87.71% |
+| frontend tests | 234 → **334** |
+| frontend test files | 8 → 14 |
+| gate checks | **25**, all green, five mutations caught |
+| deliberate mutations caught this phase | 20 of 20 |
+| capabilities restored | **9 of 9** |
+
+**Live API calls across the whole of Act II:** zero.
