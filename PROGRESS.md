@@ -2349,3 +2349,112 @@ Verified against the real backend too: one replayed 3-objective request returned
 payload and the hatch fires on live data, not only on the fixture built for it.
 
 **Live API calls this phase:** zero. 645 → 652 backend tests, coverage 87.67% → 87.71%.
+
+## Release Act II, phase 2 — The two nobody was tracking · 2026-08-08
+
+`BLOCKED.md` §5 lists seven dropped capabilities. There were nine. The two it
+never mentioned are the two where the *backend* shipped something the frontend
+never consumed, which is a different kind of gap from "the merge dropped a
+component we want back", and nothing was watching for it.
+
+Finding them again is mechanical and worth doing before anyone calls §5 closed:
+`git grep` every route in `main.py` and every field on every response model in
+`models.py`, and confirm something in `frontend/src` reads it.
+
+### ElevationProfile
+
+`Route.elevation` on every response, twelve tests, no reader.
+
+The threshold did not need importing from Python, which is what the brief
+assumed. `models.py:116` already ships `limit_pct` on the profile itself,
+carrying the same `MAX_INCLINE_PCT` the accessible preset rejects on — the
+comment beside it says the point is that the drawing and the verdict cannot be
+allowed to disagree. So nothing in the frontend restates 8.
+
+Two departures from the launch source, both deliberate:
+
+It no longer returns `null` when there is no profile. Absent elevation and a
+flat route are different statements — `models.py:100-105` says exactly that
+about the field — and a section that quietly disappears makes the second claim
+on behalf of the first. It says so instead, mirroring how `RouteDetail` already
+handles a null `rest_stops`.
+
+The steep stretches are hatched as well as tinted, because a tinted rectangle is
+colour as the only differentiator, which is not allowed anywhere else here
+either.
+
+The mock gained the field, covering all three branches the way it already covers
+them for scores. Verified in a browser against each:
+
+| route | rendered |
+|---|---|
+| fastest | "Climbs 7 m and descends 12 m. Steepest gradient 4.2%, within the 8% limit." 0 steep rects |
+| nature | "…11.4%, which is over the 8% limit this app treats as impassable — 2 stretches marked." 2 steep rects, 2 hatch rects |
+| accessible | "Climb was not measured for this route — that is not the same as it being level." no profile drawn |
+
+### ReportBarrier, and the privacy paragraph it would have falsified
+
+`POST /api/report-barrier`, ~16 tests, no caller.
+
+**The thing that nearly went wrong.** `About.jsx` and `FirstRun.jsx` both said
+"Nothing is stored". A barrier report is a permanent public note carrying a
+coordinate and free text. Shipping the form without touching those paragraphs
+would have converted a true privacy claim into a false one — the exact class of
+failure the rules at the top of this project exist to prevent, arriving as a
+side effect of restoring a feature rather than as a decision anybody made.
+
+So the promise now names its exception: one write, opt-in, one press at a time,
+public and permanent, said above the send button rather than below it.
+
+**A correction to the brief.** It says the feature "needs `OSM_DEV_TOKEN`,
+currently empty" and must degrade honestly when it is absent.
+`backend/osm_report.py:60` says anonymous notes are permitted, so the token is
+optional and an unset one produces an unattributed note, not a failure. Keying
+the UI off configuration would have disabled a capability that works. It keys
+off the response instead.
+
+`pointAtDistance` is new in `lib/follow.js`, the inverse of `locateOnRoute`.
+⚠ Its axis order is the dangerous part: geometry is `[lon, lat]`, `BarrierReport`
+takes named `lat`/`lon`, and swapping them files a note in the wrong hemisphere
+of a public database with nothing downstream to notice. Five tests, including a
+round trip against `locateOnRoute` and a null return for degenerate geometry
+rather than a point at `[0, 0]`, which is a real place in the Gulf of Guinea.
+
+Both outcomes checked in a browser: on success the note id comes back and the
+description clears; on failure the message says nothing was filed **and the
+description is kept**, so nobody retypes what they wrote.
+
+### The gate that had never been able to fail
+
+Found while reading an integration spec, not while looking for it.
+
+`no-hard-coded-colour` matched on `#[0-9a-fA-F]{3,8}\b`. `\b` is a GNU
+extension and means nothing in a POSIX awk ERE, so the pattern never matched an
+ordinary `color: #ff0000;`. Confirmed by running the old gate against a file
+containing exactly that: **exit 0**.
+
+It had been green in CI since it was written, against a stylesheet it was not
+reading, guarding the rule the design system states more often than any other.
+And it came across into `scripts/check_palette.sh` unchanged two commits earlier,
+because it was lifted verbatim.
+
+The pattern is fixed. More usefully, the gate now **proves it can fail before it
+is allowed to pass**: it feeds itself a known-bad file first and refuses to
+certify anything if that comes back clean. Reverting the pattern makes the script
+exit 1 with "the gate did not flag a bare hex".
+
+That is the lesson for the five gates still to be restored from `feat/launch`.
+Make each one fail once, on purpose, before trusting it.
+
+### Measured
+
+| | |
+|---|---|
+| backend tests | 652, unchanged this phase |
+| coverage | 87.71% |
+| frontend tests | 46 → **51** (five for `pointAtDistance`) |
+| interactive targets in the new form | 44, 44, 90, 46, 46 px — all ≥ 44 |
+| capabilities restored | 2 of 9 |
+
+**Live API calls this phase:** zero. Everything against the mock and the replay
+fixtures.

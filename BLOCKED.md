@@ -285,7 +285,11 @@ module-level `settings` is what reaches it, which is the idiom
 
 ## 5 · The reconciliation merge took main's frontend entirely
 
-**Status:** open, and deliberate. Not a defect — a deferral with a list.
+**Status:** open, and shrinking. Not a defect — a deferral with a list.
+
+**Updated 2026-08-08, during the release pass.** Two capabilities are back, and
+two more were found that this section never tracked at all. See "What has come
+back" below the table.
 
 `feat/ios` merged `feat/launch` for its backend, infrastructure, containers,
 scripts and documentation, and resolved `frontend/` to main's tree
@@ -304,6 +308,52 @@ into this frontend**, not copied next to it:
 | `lib/units.js` | miles and a 12-hour clock from the locale | — |
 | `public/` icons + `manifest.webmanifest` | the icon set Phase 7 extends | 7 |
 | `scripts/gate.mjs` | the Phase 5 layout gate, 14 checks | 5 |
+
+### What has come back
+
+| what | commit | note |
+|---|---|---|
+| `ElevationProfile` | `378beec` | **Was tracked by nothing.** `Route.elevation` is on every response with twelve tests behind it and no UI read a byte of it. The gradient threshold arrives on the wire as `limit_pct`, so the drawing cannot drift from the verdict. |
+| `ReportBarrier` | `898810f` | **Was tracked by nothing.** `POST /api/report-barrier` has ~16 tests and had no caller. Shipping it required amending the privacy paragraphs in `About.jsx` and `FirstRun.jsx`, because it is the only write this application makes. |
+
+Both were absent from the table above. The table was written from the iOS
+brief's list of what iOS needed, and these two are cases where the *backend*
+shipped a capability the frontend never consumed — a different kind of gap, and
+one nothing was watching for. `git grep`ing each endpoint and each `models.py`
+response field against `frontend/src` is what found them, and is worth repeating
+before calling this section closed.
+
+Two corrections to what was believed about them:
+
+- `ReportBarrier` was thought to require `OSM_DEV_TOKEN`. It does not.
+  `backend/osm_report.py:60` records that anonymous notes are permitted, so an
+  unset token yields an unattributed note rather than a broken feature. Keying
+  the UI off configuration would have disabled a working capability.
+- `ElevationProfile` was expected to need the 8% constant imported from
+  `accessibility.py` somehow. It does not: `models.py:116` already ships
+  `limit_pct` on every profile.
+
+### Still open
+
+`env(safe-area-inset-*)`, `lib/units.js`, `lib/permalink.js`, `lib/export.js`,
+the offline trio, `public/` icons + manifest, and `scripts/gate.mjs` — the seven
+rows in the table above.
+
+⚠ **`scripts/gate.mjs` is a rewrite, not a port, and for a sharper reason than
+recorded here.** It selects on `.row__button`, `.sheet__handle` and
+`.sheet__scroll`, none of which exist in this frontend, so roughly half its
+checks would find zero elements and pass vacuously — the same objection this
+section already raises against `pwa-gate.mjs`. Every selector has to be
+re-targeted, and the gate has to assert its selectors match something before
+asserting anything about them.
+
+That is not hypothetical here. The hard-coded-colour gate was found during this
+pass to have been **incapable of failing since it was written** — `\b` is not a
+word boundary in a POSIX awk ERE, so `#[0-9a-fA-F]{3,8}\b` never matched an
+ordinary `color: #ff0000;`. It had been green in CI against a stylesheet it was
+not reading. `01160fb` fixes the pattern and makes the gate self-test before it
+is allowed to certify anything. Any gate restored from `feat/launch` should be
+made to fail once, on purpose, before it is trusted.
 
 **`scripts/pwa-gate.mjs` is deliberately not on that list.** It drives headless
 Chrome with the server stopped and asserts a service worker serves the shell.
