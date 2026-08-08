@@ -14,6 +14,7 @@ import Ribbon from './components/Ribbon.jsx'
 import StatusBanner from './components/StatusBanner.jsx'
 import Topbar from './components/Topbar.jsx'
 import ShareButton from './components/ShareButton.jsx'
+import TakeItWithYou from './components/TakeItWithYou.jsx'
 import TripBar from './components/TripBar.jsx'
 import { announceRoutes, announceSelection, effectiveMode } from './lib/format.js'
 import { applyTheme, initialTheme, readStoredTheme, storeTheme, systemTheme } from './lib/theme.js'
@@ -537,6 +538,14 @@ export default function App() {
               route={selectedRoute}
               theme={state.theme}
               units={state.units}
+              takeaway={
+                <TakeItWithYou
+                  route={selectedRoute}
+                  origin={state.origin}
+                  dest={state.dest}
+                  onAnnounce={announce}
+                />
+              }
               stepList={
                 <StepList route={selectedRoute} units={state.units} onHighlight={setHighlight} />
               }

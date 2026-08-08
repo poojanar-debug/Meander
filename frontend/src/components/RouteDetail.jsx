@@ -57,7 +57,15 @@ function Barriers({ blockers }) {
  * The blocked notice is placed **above** Along the way rather than at the end,
  * because it changes whether any of the rest matters.
  */
-export default function RouteDetail({ route, theme, units, stepList, onStart, children }) {
+export default function RouteDetail({
+  route,
+  theme,
+  units,
+  stepList,
+  takeaway,
+  onStart,
+  children,
+}) {
   if (!route) return null
 
   const style = styleFor(route.id)
@@ -210,6 +218,8 @@ export default function RouteDetail({ route, theme, units, stepList, onStart, ch
           )}
         </div>
       )}
+
+      {takeaway}
 
       <p className="detail__pattern-note">
         Drawn as a {style.pattern} line{route.geometry?.length > 1 ? '' : ' — no geometry available'}.

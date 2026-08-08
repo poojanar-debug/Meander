@@ -133,6 +133,13 @@
   --r-lg: 16px;
   --r-pill: 999px;
 
+  /* Print is theme-invariant on purpose: a dark-theme sheet would either empty
+   * a cartridge or print as light grey on white. These sit here, not in either
+   * colour block, because they do not change with the theme. */
+  --print-paper: #ffffff;
+  --print-ink: #000000;
+  --print-rule: #999999;
+
   /* A URL is checked character by character, and a proportional face makes 1/l
    * and 0/O ambiguous. System stack only — a webfont would be a third-party
    * request, which this file's header rules out. */
@@ -1946,6 +1953,57 @@ fieldset.chips legend {
   cursor: not-allowed;
 }
 
+/* ------------------------------------------------------- take it with you */
+
+.takeaway {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s2);
+  padding-top: var(--s3);
+  border-top: 1px solid var(--rule);
+}
+.takeaway__row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s2);
+}
+/* .button sets min-height and min-width, but an <a> is inline and min-height
+   does not apply to it. This is what makes the two handoff links 44px tall
+   rather than about 20. */
+.takeaway__row .button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  text-decoration: none;
+}
+.takeaway__note {
+  margin: 0;
+  font-size: var(--t-small);
+  color: var(--ink-2);
+}
+.takeaway__warn {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s2);
+  padding: var(--s3);
+  background: var(--warn-ground);
+  border: 1px solid var(--warn-rule);
+  border-radius: var(--r-sm);
+  color: var(--warn-ink);
+  font-size: var(--t-small);
+}
+/* Without this the flex display beats `hidden` and the disclosure never closes. */
+.takeaway__warn[hidden] {
+  display: none;
+}
+.takeaway__warn p {
+  margin: 0;
+}
+
+.printsheet {
+  display: none;
+}
+
 /* ----------------------------------------------------------------- share */
 
 .share {
@@ -2034,3 +2092,121 @@ fieldset.chips legend {
  * Every rule above reads the token, never env() directly, precisely so this
  * substitution is faithful. It proves the arithmetic and the stacking. It
  * cannot prove the UA reports the right numbers — only a device can. */
+
+/* ------------------------------------------------------------------ print */
+
+/* One sheet: the numbers, the coverage sentence, the barriers, the directions,
+   the provenance block. The map is dropped — a WebGL canvas prints as a grey
+   rectangle at best — and this is only possible because the rail and the detail
+   have always been a complete text substitute for it.
+
+   Everything hidden below is chrome. Nothing hidden below is content: .ribbon,
+   .banner--warn, .rail and the About disclosure all stay, because each carries
+   something the reader needs rather than something they clicked. */
+@media print {
+  /* Both selectors, or a dark-theme user prints near-white ink on white paper —
+     the theme attribute is still set while printing. */
+  :root,
+  [data-theme='dark'] {
+    color-scheme: light;
+    --paper: var(--print-paper);
+    --raised: var(--print-paper);
+    --sunken: var(--print-paper);
+    --rule: var(--print-rule);
+    --rule-strong: var(--print-ink);
+    --ink: var(--print-ink);
+    --ink-2: var(--print-ink);
+    --warn-ground: var(--print-paper);
+    --warn-rule: var(--print-ink);
+    --warn-ink: var(--print-ink);
+    --shadow-1: none;
+    --shadow-2: none;
+  }
+
+  @page {
+    margin: 14mm;
+  }
+
+  .topbar,
+  .skip-link,
+  .tripbar,
+  .departure,
+  .stage,
+  .takeaway,
+  .share,
+  .panel__spacer,
+  .map__controls,
+  .legend {
+    display: none !important;
+  }
+
+  .app {
+    height: auto;
+    display: block;
+  }
+  .layout {
+    display: block;
+  }
+  .panel {
+    overflow: visible;
+    border-inline-end: 0;
+    padding: 0;
+  }
+
+  .printsheet {
+    display: block;
+    margin-top: var(--s4);
+    border-top: 2px solid var(--print-ink);
+    padding-top: var(--s3);
+  }
+  .printsheet__h {
+    margin: 0 0 var(--s1);
+    font-size: var(--t-micro);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+  .printsheet__note {
+    margin: 0;
+    font-size: var(--t-small);
+  }
+  .printsheet__stamp {
+    margin: var(--s1) 0 0;
+    font-size: var(--t-micro);
+  }
+
+  /* Backgrounds are not printed by default, so a tinted warning would come out
+     as plain text. Weight and a rule carry it instead — the same reason the
+     on-screen warn tier carries a glyph as well as a hue. */
+  .note--warn,
+  .banner--warn {
+    border: 2px solid var(--print-ink);
+    font-weight: 600;
+  }
+
+  .route,
+  .note,
+  .detail__section,
+  .step,
+  .printsheet {
+    break-inside: avoid;
+  }
+
+  .verify__seg {
+    box-shadow: inset 0 0 0 1px var(--print-ink);
+  }
+  .verify__seg.is-on {
+    background: var(--print-ink);
+    print-color-adjust: exact;
+  }
+
+  /* A printed link that only says "here" is a dead end on paper. */
+  a::after {
+    content: ' (' attr(href) ')';
+    font-size: 9pt;
+    word-break: break-all;
+  }
+  /* Except the credits, which are five links inside one sentence. */
+  .about a::after {
+    content: '';
+  }
+}

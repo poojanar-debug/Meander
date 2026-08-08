@@ -17,10 +17,30 @@ const html = readFileSync(fileURLToPath(new URL('../index.html', import.meta.url
 // prose can never satisfy — or break — a check about declarations.
 const code = css.replace(/\/\*[\s\S]*?\*\//g, '')
 
+/** Cut a balanced `@media <query> { … }` block out of the source. */
+function withoutAtRule(source, query) {
+  const start = source.indexOf(query)
+  if (start === -1) return source
+  let depth = 0
+  for (let i = source.indexOf('{', start); i < source.length; i += 1) {
+    if (source[i] === '{') depth += 1
+    else if (source[i] === '}') {
+      depth -= 1
+      if (depth === 0) return source.slice(0, start) + source.slice(i + 1)
+    }
+  }
+  return source
+}
+
+// Paper has no notch. `@media print` deliberately zeroes .panel's padding, and
+// requiring it to restate an inset there would be requiring a nonsense. Every
+// screen rule is still held to the rule below.
+const screen = withoutAtRule(code, '@media print')
+
 const SIDES = ['top', 'right', 'bottom', 'left']
 
 /** Every body of `selector { … }` in source order, comments already stripped. */
-const bodies = (sel) => [...code.matchAll(new RegExp(`\\${sel}\\s*\\{([^}]*)\\}`, 'g'))].map((m) => m[1])
+const bodies = (sel) => [...screen.matchAll(new RegExp(`\\${sel}\\s*\\{([^}]*)\\}`, 'g'))].map((m) => m[1])
 
 describe('safe-area tokens', () => {
   it('declares each inset exactly once, with an explicit 0px fallback', () => {
