@@ -43,7 +43,7 @@ lists the seven pieces of it that have to come back, and why each one is wanted.
 
 ### What is proven
 
-**645 backend tests and 46 frontend tests pass offline**, at 87.64% statement coverage against an
+**645 backend tests and 46 frontend tests pass offline**, at 87.67% statement coverage against an
 85% floor. The suite never opens a socket, and a job in CI runs it under `unshare -n` to prove
 that rather than trust it. The deploy image imports with torch absent, checked against the real
 requirements file, and `backend.main` is imported in that environment to prove absence is not the
