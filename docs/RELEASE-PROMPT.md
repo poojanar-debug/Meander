@@ -500,9 +500,14 @@ The production overlay does six things:
 
 1. **Drop the `frontend` service.** It is `node:22-slim` running `npm run dev` —
    a Vite dev server. Cloudflare Pages hosts the build. Drop the
-   `frontend_node_modules` volume with it. Also remove `VITE_API_PROXY_TARGET`
-   from the dev file entirely: `vite.config.js` hard-codes the proxy target and
-   reads no such variable, so it is dead config that reads as live.
+   `frontend_node_modules` volume with it. **Leave `VITE_API_PROXY_TARGET` in
+   the dev file.** This paragraph used to call it dead config on the grounds
+   that `vite.config.js` hard-coded its proxy target and read no such variable.
+   It reads it at `vite.config.js:16`, and the comment at `:11-13` records the
+   bug that reading it closed: without it the compose frontend resolves
+   `localhost:8000` inside its own container and every `/api` call is a
+   connection refused that presents as the backend being down. Removing it
+   re-opens that bug.
 2. **Stop publishing the API on `0.0.0.0`.** `"8000:8000"` →
    `"127.0.0.1:8000:8000"`. On a public VM the current setting puts an
    unauthenticated API straight on the internet, past any proxy and any
@@ -763,7 +768,7 @@ Also dropped and worth a look before you decide: `BetterLater.jsx` (renders
 | 8 | `frontend/package.json` | `axe-core` is a devDependency nothing runs; `a11y.html` is not in the build inputs |
 | 9 | `scripts/graphhopper.sh:61-62` | heap defaults sized for a region set that cannot run on the target VM |
 | 10 | `docker-compose.yml:60-61` | publishes the API on `0.0.0.0` |
-| 11 | `docker-compose.yml` | no TLS, no resource limits, `frontend` is a dev server, `VITE_API_PROXY_TARGET` is dead config |
+| 11 | `docker-compose.yml` | no TLS, no resource limits, `frontend` is a dev server. `VITE_API_PROXY_TARGET` is **live** config, not dead — `vite.config.js:16` reads it and `:11-13` records the compose bug that reading it closed (`827e0c3`); removing it re-opens that bug |
 | 12 | `frontend/` | no `public/`, no `_headers`, no `_redirects`; CSP holds a `REPLACE-WITH-YOUR-RENDER-HOST` placeholder |
 | 13 | `docs/adr/0004` | explicitly rejects the deployment shape this brief builds; needs superseding, not ignoring |
 
