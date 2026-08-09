@@ -2,7 +2,8 @@
 
 Things this run could not finish, what was tried, and what needs a human.
 
-**One entry is open — §5, a deliberate deferral with a list.**
+**Two entries are open — §5, a deliberate deferral with a list, and §6, which
+needs one command from a human.**
 
 | | |
 |---|---|
@@ -12,6 +13,7 @@ Things this run could not finish, what was tried, and what needs a human.
 | §3 prototype sources missing | **resolved** — worked around, nothing outstanding |
 | §4 two suites asserted things about the machine | **resolved** — TZ and the Mapillary token are now supplied by the harness |
 | §5 the merge took main's frontend entirely | **open** — deliberate; §5 lists what has to come back and when |
+| §6 the deployment VM cannot push to GitHub | **open** — needs a credential only a human can supply |
 
 ---
 
@@ -397,3 +399,54 @@ asserted by `frontend/src/lib/sw-contract.test.js`, which runs in `make check`
 rather than needing a browser at all.
 
 The CI jobs that graded the dropped code went with it. They come back with it.
+
+## 6 · The deployment VM has no credential for `git push`
+
+**Discovered:** 2026-08-09, on the first commit of the deployment session.
+
+The repository on this VM is a working clone on `main`, tracking
+`origin/main` at `https://github.com/poojanar-debug/Meander.git`. Commits work.
+Pushing does not:
+
+```
+$ git push origin main
+fatal: could not read Username for 'https://github.com': No such device or address
+```
+
+**What was tried, and what is actually absent.** This is a missing credential
+and nothing else — not a network fault, not a permissions problem on the remote:
+
+| | |
+|---|---|
+| `~/.git-credentials` | absent |
+| `credential.helper` | unset, in every scope (`git config --list --show-origin`) |
+| `gh` CLI | not installed, so `gh auth` cannot supply one either |
+| `GITHUB_TOKEN` / `GH_TOKEN` in the environment | unset |
+| `~/.ssh/` | holds `authorized_keys` only — no private key, so an SSH remote has nothing to offer either |
+
+DNS and egress are fine: the same box resolves and reaches `github.com`, and
+pulled `caddy:2.11.4` from Docker Hub during this session.
+
+**What the human has to do.** Either, once, from a shell on this VM:
+
+```bash
+# a fine-grained PAT with Contents: read and write on poojanar-debug/Meander
+git config --global credential.helper store
+git push origin main          # prompts for username + PAT, then remembers it
+```
+
+or, if an SSH key is preferred:
+
+```bash
+ssh-keygen -t ed25519 -C meander-vm -f ~/.ssh/id_ed25519 -N ''
+cat ~/.ssh/id_ed25519.pub     # add as a deploy key with write access
+git remote set-url origin git@github.com:poojanar-debug/Meander.git
+git push origin main
+```
+
+**Until then**, commits accumulate locally and are not lost — `git log
+origin/main..main` lists exactly what is waiting. Nothing in this file's
+resolution changes any code; the deployment itself does not depend on the push
+succeeding, only the visibility of the history does. The brief for this work
+asks for a push after every phase, and that is the one instruction this session
+could not carry out.
