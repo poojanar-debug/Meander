@@ -152,6 +152,51 @@ services:
     mem_limit: 1g
     logging: *logging
 
+  # TLS and the public edge. The only service on this VM with a port on
+  # 0.0.0.0, which is the point: everything public goes through it, and the
+  # path allowlist in ./Caddyfile decides what "public" means.
+  caddy:
+    build:
+      context: ./caddy
+    image: meander-caddy:2.11.4
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+      # 443/udp is deliberately absent. Caddy is configured for h1+h2 only
+      # (see the global block in ./Caddyfile) because neither firewall layer
+      # passes UDP, and advertising HTTP/3 that cannot connect costs a
+      # first-visit stall.
+    environment:
+      # `:?` and not `:-`. An unset token must stop the deployment here, with
+      # the variable's name in the error, rather than start a Caddy that
+      # cannot answer a DNS-01 challenge and fails minutes later inside a log
+      # nobody is reading. .env at the repository root is git-ignored.
+      DUCKDNS_TOKEN: ${DUCKDNS_TOKEN:?set DUCKDNS_TOKEN in .env — see BLOCKED.md}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      # Named, and load-bearing. /data holds the ACME account key and the
+      # issued certificate. On an anonymous volume every `up` is a fresh
+      # account requesting a fresh certificate, and Let's Encrypt allows five
+      # duplicates per week before it starts refusing — a rate limit that
+      # takes the site down for days and looks like a Caddy fault.
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      # service_started, not service_healthy. Caddy has nothing to wait for:
+      # it resolves `api` per request and returns 502 until the API answers.
+      # Gating on health would hold TLS issuance behind GraphHopper's 120 s
+      # start_period, so the first certificate would be minutes late for no
+      # reason.
+      api:
+        condition: service_started
+    mem_limit: 256m
+    logging: *logging
+
+volumes:
+  caddy_data:
+  caddy_config:
+
 # ---------------------------------------------------------------------------
 # On the memory limits, and why the numbers already in the repository do not
 # answer the question:
