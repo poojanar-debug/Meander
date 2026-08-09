@@ -36,6 +36,25 @@ meander-app.duckdns.org {
 		resolvers 1.1.1.1 8.8.8.8
 	}
 
+	# Site-scoped, and that placement is the whole point. These lived inside
+	# the allowlisted handler below, which meant every *denied* response — the
+	# 404s, which are the ones an attacker actually collects — carried no HSTS,
+	# no nosniff and no Referrer-Policy at all. Measured on the running
+	# deployment, not assumed: `curl -D- .../metrics` came back with exactly
+	# one header, `server: Caddy`.
+	#
+	# -Server and -Via are noise reduction rather than a control, and they go
+	# together or not at all: stripping Server while Via still announced
+	# "1.1 Caddy" on every proxied response was theatre with a measurement
+	# behind it saying so.
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "no-referrer"
+		-Server
+		-Via
+	}
+
 	# --- what the internet may reach -------------------------------------
 	#
 	# An allowlist, and it has to be. A bare `reverse_proxy api:8000` publishes
@@ -90,14 +109,6 @@ meander-app.duckdns.org {
 		# GZipMiddleware was measured gzipping a text/event-stream, and
 		# compression buffers. A second compressor here would re-introduce
 		# exactly that.
-
-		# Response headers for the API origin. See the ownership note below.
-		header {
-			Strict-Transport-Security "max-age=31536000"
-			X-Content-Type-Options "nosniff"
-			Referrer-Policy "no-referrer"
-			-Server
-		}
 	}
 
 	# --- everything else --------------------------------------------------
@@ -108,6 +119,24 @@ meander-app.duckdns.org {
 	handle {
 		respond 404
 	}
+}
+
+# Port 80 exists only to send people to port 443, and Caddy will generate that
+# redirect on its own — but its automatic version answers for *any* Host and
+# reflects it straight into the Location header, so
+# `curl -H 'Host: evil.example.com' http://<ip>/x` returns
+# `Location: https://evil.example.com/x`. Reproduced on the running deployment.
+#
+# Over HTTPS this cannot happen: an unknown name has no certificate and the
+# handshake fails before any request is parsed. Port 80 is the only place an
+# unknown Host gets an answer at all, so it is the only place worth closing.
+http://meander-app.duckdns.org {
+	redir https://meander-app.duckdns.org{uri} 308
+}
+
+# Any other Host arriving on port 80.
+:80 {
+	respond 404
 }
 
 # ---------------------------------------------------------------------------
