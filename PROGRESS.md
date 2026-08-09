@@ -2896,6 +2896,35 @@ container published on `0.0.0.0`. The loopback binding is doing the work, not
 the firewall. Anyone who reasons "iptables only allows 22/80/443, so a published
 port is safe" is wrong on this machine.
 
+I had written the opposite into `compose.prod.yml` — that the firewall was a
+second layer behind the bind — and a verifier that took the comment at its word
+disproved it with counters: across a window carrying 13 new HTTPS connections
+the `nat` and `filter DOCKER` counters each moved by 13 while INPUT's
+`dpt:443` counter did not move at all. The comment is corrected. The outcome
+was never unsafe; the reasoning was, which is worse, because it is the reasoning
+that decides whether the bind looks redundant later.
+
+### A better instrument than the one I gave up on
+
+The verifier got the outside-the-VM question much closer to closed than I did,
+by building a test that can return **three** answers rather than two. From this
+box, against the public IP: 443, 80 and 22 *succeed*; 8000, 8989 and 8990
+*time out*; and via the VM's own LAN address, where the loopback DNAT cannot
+match, 8000/8989/8990 come back *connection refused*. Refused and filtered are
+different failures, and separating them separates the two layers.
+
+The decisive part is the negative control. `rpcbind` (111) and `cupsd` (631)
+**are** bound to `0.0.0.0` on this host — and on the public IP they time out
+too. So a timeout means "filtered upstream", not "nothing listening", proven on
+a case where something certainly is listening.
+
+What remains genuinely open: every packet in that test originated on this VM's
+own VNIC and hairpinned out and back. If OCI short-circuits the hairpin without
+consulting the ingress security list, those timeouts are gateway behaviour
+rather than proof of the list. The DNAT evidence stands regardless — there is
+nothing on 8989/8990 to reach — but the security list itself still wants one
+command from a laptop on another network.
+
 The VCN security list also cannot be inspected from here — there is no `oci`
 CLI on the box. That both firewall layers pass 443 is proven only by the fact
 that requests arrive.
@@ -2973,20 +3002,76 @@ username. `BLOCKED.md` §6 has the exact command a human needs.
 | distinct geometries | **3 of 3** — 8 and 37 shared leading points before diverging |
 | `scoring_method` | `clip` on all three; `synthetic_upstream` false on all three |
 | segments in the baked-in cache | **146**, `segments_clip` 146 |
-| graphhopper RSS | **835.5 MiB** against a 5 GiB limit, 3g heap |
-| api RSS | **83.0 MiB** against a 1 GiB limit |
-| caddy RSS | **14.3 MiB** against a 256 MiB limit |
+| graphhopper — anon RSS / `memory.peak` | **966 MiB** / **1057 MiB**, limit 5 GiB |
+| api — anon RSS / `memory.peak` | **61 MiB** / **142 MiB**, limit 1 GiB |
+| caddy — anon RSS / `memory.peak` | **11 MiB** / **23 MiB**, limit 256 MiB |
+| OOM kills | 0 on all three; swap used 0 |
 | host memory in use | 2,106 MB of 11,927 MB |
 | graph import on this VM | 234 s at 8g, 486 MB graph-cache |
 | upstream failures | 0 |
 | backend tests | 652, coverage 87.71% |
 | frontend tests | **349** |
 
+### Proving the custom model is executed rather than accepted
+
+Three different geometries is the right criterion but not a sufficient one:
+these are round trips, and three different loops could come from seed variation
+rather than from the model doing anything. `routing.py:670` pins
+`round_trip.seed = 42`, so the A/B is clean, and the verifier ran it against the
+router directly — same body, the only difference being `custom_model`:
+
+| | points | distance | geometry |
+|---|---|---|---|
+| without `custom_model` | 84 | 2492 m | identical to `fastest` |
+| with the accessible model | 86 | 2761 m | 8 shared leading points, then divergence |
+
+The no-model result *is* the fastest route, exactly. That is the failure this
+criterion exists to catch, and it did not happen. The router also compiles the
+rules rather than ignoring what it does not recognise: a rule on a made-up
+encoded value returns **400 Cannot compile expression**, and so does a
+`smoothness` comparison against a made-up value. And the rules had material to
+act on — the fastest loop crosses `sand` twice and reports two sand blockers;
+the accessible route reports none.
+
+**One honest limit on that.** Sending only the smoothness rule returned the
+fastest route unchanged, because this loop's smoothness values are
+`{good, excellent, missing}` and never reach `BAD` or `IMPASSABLE`. So this
+deployment has proven the smoothness rule *reaches* the graph and is *valid* —
+which is the thing the hostname sniff silently breaks — but has not yet proven
+it ever *excludes* a way. The surface rules did the work here. A route through a
+genuinely rough segment would close that gap and nothing so far has.
+
 The `accessible` objective came back `status: "blocked"` with *"Hard
-accessibility constraints reject this route."* That is the engine working: the
-graph carries `smoothness` as an encoded value, the custom model can therefore
-exclude `IMPASSABLE` surfaces, and it did. A blocked route is the safe answer,
-and it is still a different geometry from the other two.
+accessibility constraints reject this route."* and one substantive blocker: a
+22.8% descent against an 8% limit. The custom model has no incline term, so
+gradient is caught downstream by the assessor and reported rather than passed —
+a blocked route with a drawn geometry is a verdict about a route, not a missing
+one, and it is still a third distinct geometry.
+
+### Someone is already using it, from the wrong URL
+
+Caddy's log shows a real iPhone hitting `POST /api/routes` from
+`https://7ff77dbe.meander-eoc.pages.dev` — a **per-deployment** Pages hostname.
+It is being CORS-rejected, precisely as `compose.prod.yml` documents on purpose,
+and the request dies as `context canceled` when the browser gives up on the SSE
+stream. The configuration is right and the person testing is on a URL production
+will never accept. The stable project URL is the only one in the allowlist.
+
+That client arrived from `104.28.120.31`, which is a Cloudflare/iCloud Private
+Relay egress address, and the counters show `rate_limited_total: 12`. The proxy
+hop count is correct — the app is reading the real peer — but "one IP is one
+user" stops holding behind a privacy relay, and relayed users will share a
+single 12-token bucket. Worth a decision later; not a misconfiguration now.
+
+**On the limits, which the measurements do not by themselves justify.** 5 GiB
+for the router is defensible for a better reason than 1057 MiB of observed peak:
+`/proc/1/cmdline` shows `-Xmx3g`, so the ceiling that matters is 3 GiB of
+permitted heap plus metaspace, thread stacks, code cache and direct buffers —
+realistically 3.5–4 GiB. 5 GiB sits above that and 2 GiB would not. The
+right basis is what the JVM is *allowed* to commit, not what it has committed so
+far. What no measurement here can give is the peak under sustained load: a Java
+heap grows under GC pressure, not under request count, and nothing has yet
+pushed it. That number is unknown, and bounded above rather than measured.
 
 **Live API calls this phase:** one uncached three-objective request against the
 real upstreams — 1 route request, 1 cache miss, 1 blocked route, 0 upstream
