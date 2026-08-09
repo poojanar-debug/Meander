@@ -2940,6 +2940,24 @@ deployment machine, which is worth more than it sounds — the layout gate had
 never been run anywhere but CI, and it is the one this repo already caught
 grading nothing at all.
 
+**Installing Chromium put a printer daemon on the box.** The snap pulls in
+`cups`, which starts `cupsd` and `cups-browsed` listening on `0.0.0.0:631`. It
+is not reachable — `cupsd` is a host process, so INPUT rule 7 rejects it on any
+real interface, which is exactly the protection Docker-published ports do *not*
+get — but a print server has no business on a public web server and I put it
+there. `sudo snap stop --disable cups.cupsd cups.cups-browsed` removes it; I was
+not able to run that here.
+
+Worth noting how nearly I fooled myself on this one: `curl http://10.0.0.120:631/`
+from the VM returns **200**, which looks like proof of exposure and is not.
+INPUT rule 3 is `-i lo -j ACCEPT`, and traffic to a local address is routed over
+`lo`, so that request never met the REJECT. The same shape of mistake as the
+relay, in the opposite direction — a test that says "reachable" for something
+unreachable.
+
+`rpcbind` is on `0.0.0.0:111` for the same reason and with the same mitigation.
+That one predates this session.
+
 **Nothing is pushed.** This clone has no credential helper, no stored
 credential, no `gh` and no private key, so `git push` cannot even ask for a
 username. `BLOCKED.md` §6 has the exact command a human needs.
