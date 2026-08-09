@@ -1,0 +1,173 @@
+# Production overlay for the single Oracle Always Free VM. An overlay, not a
+# replacement:
+#
+#   docker compose -f docker-compose.yml -f compose.prod.yml up -d
+#
+# docker-compose.yml stays the laptop file. `make compose-up`, DEPLOY.md and
+# docs/RUNBOOK.md all depend on it, and this file changes nothing there.
+#
+# ---------------------------------------------------------------------------
+# What compose actually does when it merges two files, because three of the
+# edits below are wrong without it. Proven on the installed binary (Compose
+# v5.4.0) rather than taken from the docs:
+#
+#   environment   merged per key, this file wins. Safe to restate a variable.
+#   ports         APPENDED, deduplicated on the whole
+#                 (host_ip, published, target, protocol) tuple. Listing
+#                 "127.0.0.1:8000:8000" here does NOT replace "8000:8000"
+#                 below it — it adds a second binding and the API stays on
+#                 0.0.0.0. `!override` is the only thing that replaces a port
+#                 list.
+#   services      a service cannot be removed by omission. `!reset null` does
+#                 it; `!override {}` fails validation ("has neither an image
+#                 nor a build context").
+#   healthcheck   merged PER KEY, so a partial block silently inherits the rest.
+#                 Nothing here touches one — they are already right.
+#
+# Relative paths resolve against the FIRST -f file's directory, not this one.
+# Both files sit at the repository root, so `.` means the repository root.
+# ---------------------------------------------------------------------------
+
+services:
+  # A Vite dev server has no business on a public VM: it is the wrong artefact
+  # (unbuilt source, bind-mounted from the host) served by the wrong process on
+  # the wrong port. Cloudflare Pages serves the build, from
+  # https://meander-eoc.pages.dev.
+  #
+  # `!reset null` is not decoration. Omitting the service here leaves it in the
+  # merged project and `up` starts it.
+  #
+  # Removing it also prunes the frontend_node_modules volume: nothing else
+  # references it, so it drops out of the resolved model on its own. No
+  # top-level volumes surgery is needed, and none is done.
+  #
+  # VITE_API_PROXY_TARGET stays in docker-compose.yml. vite.config.js:16 reads
+  # it and :11-13 records the bug that reading it closed.
+  frontend: !reset null
+
+  graphhopper:
+    # Not published. Deliberately, and this is the load-bearing line in the
+    # file even though it is a comment: the router is unauthenticated and
+    # compute-unbounded — anyone who can reach 8989 can spend the whole VM on
+    # arbitrary route requests, and 8990 is Dropwizard's admin connector, which
+    # serves /threads and /metrics.
+    #
+    # On the ECS shape in infra/ a private subnet enforced that. Here the
+    # compose network is the only boundary there is, so "no ports key" IS the
+    # boundary. The base file does not publish either port; nothing below adds
+    # them. Verified with `docker compose ps` and from outside the VM, not by
+    # re-reading this comment.
+    environment:
+      # Pinned rather than inherited. The base file reads ${GH_HEAP:-3g}, which
+      # means a stray GH_HEAP in the deploying shell silently re-sizes the JVM
+      # of a production router. 3g is the docker-compose.yml default and serves
+      # the demo graph with room over the 2 GB floor recorded at
+      # PROGRESS.md:1404.
+      GH_HEAP: 3g
+    # Sized from measurement, not from the numbers already in the repo — see
+    # the note at the bottom of this file for why those do not answer the
+    # question. Headroom over the 3g heap for metaspace, thread stacks, code
+    # cache and the JVM's own off-heap allocations.
+    mem_limit: 5g
+    logging: &logging
+      driver: json-file
+      options:
+        # An unrotated json-file log is how a single VM with no log shipping
+        # runs out of disk. The default is unbounded.
+        max-size: "10m"
+        max-file: "5"
+
+  api:
+    # !override, not a plain list. See the merge note at the top: appending
+    # would leave the base file's 0.0.0.0:8000 published alongside this one,
+    # putting an unauthenticated API on the public internet past Caddy, past
+    # any rate limit, and past TLS.
+    #
+    # Loopback rather than nothing at all: `curl 127.0.0.1:8000` from an SSH
+    # session is the difference between diagnosing the API and diagnosing the
+    # proxy. It is not reachable from off-box — the instance's iptables REJECT
+    # rule and the VCN security list both stop at 22/80/443.
+    ports: !override
+      - "127.0.0.1:8000:8000"
+
+    environment:
+      # Restated in full even where docker-compose.yml already agrees. This is
+      # the file someone reads to find out what production is, and a value that
+      # is only correct because of a default two files away is not something
+      # they should have to reconstruct.
+      MEANDER_FIXTURES: live
+      MEANDER_GRAPHHOPPER_URL: http://graphhopper:8989/route
+      # ⚠ The single most dangerous variable in the deployment. Unset, the
+      # hostname sniff at config.py:46-48 tests for loopback or .local, decides
+      # `graphhopper` is neither, and answers "hosted" — at which point
+      # path_details() stops requesting `smoothness` and the accessible custom
+      # model silently stops excluding IMPASSABLE surfaces. One of five hard
+      # accessibility constraints, gone, with the app still answering.
+      #
+      # In this exact configuration it is not silent — live mode plus
+      # STRICT_STARTUP plus no GRAPHHOPPER_KEY means a False answer makes
+      # missing_required_keys() demand a key and the container refuses to boot.
+      # That is a better failure, not a reason to rely on it: add a key, or
+      # turn off strict startup, and it goes back to being silent.
+      #
+      # /api/health reports self_hosted_source: "env" when this was configured
+      # and "hostname" when it was guessed. Check the source, not the boolean.
+      MEANDER_GRAPHHOPPER_SELF_HOSTED: "1"
+      # The stable Pages project URL, never a per-deployment
+      # <hash>.meander-eoc.pages.dev — that works on the day it is pasted in and
+      # breaks on the next Pages build. config.py:336-372 comma-splits this and
+      # matches the strings verbatim; there is no pattern matching anywhere in
+      # the backend, so preview deployments are CORS-rejected by construction.
+      MEANDER_ALLOWED_ORIGINS: https://meander-eoc.pages.dev
+      MEANDER_ALLOW_LOCAL_ORIGINS: "0"
+      # 1, because Caddy is in front. At 0 the rate limiter ignores
+      # X-Forwarded-For and buckets on the socket peer — which is Caddy for
+      # every request on earth, so all clients share one 12-token bucket and the
+      # service rate-limits itself into an outage under trivial load.
+      #
+      # 1 and not 2: Cloudflare proxies the Pages site, not this API. The API
+      # hostname is a DuckDNS A record straight at this VM, so Caddy is the only
+      # hop. Setting it higher trusts a header segment nobody wrote, which is a
+      # full rate-limit bypass.
+      MEANDER_TRUSTED_PROXY_HOPS: "1"
+      # Refuse to boot rather than serve wrong. With live fixtures and a
+      # self-hosted router this list is empty and the container starts; it is
+      # the tripwire for the SELF_HOSTED variable above.
+      MEANDER_STRICT_STARTUP: "1"
+      MEANDER_LOG_LEVEL: INFO
+      #
+      # MEANDER_CACHE_DB IS DELIBERATELY NOT SET, AND MUST NOT BE.
+      #
+      # config.py:25 makes it a plain path override with no validation. Point it
+      # anywhere but the baked-in data/cache.db and the 146 pre-warmed CLIP
+      # segment scores are simply not there: routes drop to
+      # scoring_method: "geometry_only" and the app keeps answering. The old
+      # render.yaml set it to /tmp/meander-cache.db and would have shipped
+      # exactly that.
+      #
+      # It is not perfectly silent — segments_scored: 0 appears in the startup
+      # log, in /api/health.cache and in every /api/routes response — but
+      # nothing errors and nothing goes red.
+    # Measured, not guessed. See the note at the bottom.
+    mem_limit: 1g
+    logging: *logging
+
+# ---------------------------------------------------------------------------
+# On the memory limits, and why the numbers already in the repository do not
+# answer the question:
+#
+#   PROGRESS.md:1415 measures RSS at 1,051 vs 1,073 MB, but that is a
+#   RAM_STORE-vs-MMAP A/B for elevation and it names no heap at all, so it
+#   cannot be read as "the router needs 1 GB".
+#   PROGRESS.md:1404 gives the demo set's minimum *serve heap* as 2 GB and
+#   records that 1 GB OOMs. A heap floor is not a container limit — the JVM
+#   needs metaspace, thread stacks, code cache and direct buffers on top.
+#   docker-compose.yml:22 defaults GH_HEAP to 3g, which is a heap size chosen
+#   for a laptop, not a measured ceiling either.
+#
+# The figures actually observed on this VM are recorded in PROGRESS.md under
+# the deployment phase. mem_limit is a ceiling that turns a leak into a
+# restart instead of an out-of-memory kill that takes the whole VM's other
+# container with it; it is not a target, and it is set above what was measured
+# rather than at it.
+# ---------------------------------------------------------------------------
