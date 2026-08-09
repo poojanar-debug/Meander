@@ -85,8 +85,25 @@ services:
     #
     # Loopback rather than nothing at all: `curl 127.0.0.1:8000` from an SSH
     # session is the difference between diagnosing the API and diagnosing the
-    # proxy. It is not reachable from off-box — the instance's iptables REJECT
-    # rule and the VCN security list both stop at 22/80/443.
+    # proxy.
+    #
+    # ⚠ This binding is the ONLY thing keeping the API off the internet, and an
+    # earlier version of this comment credited the host firewall as a second
+    # layer. That was wrong, and it is the kind of wrong that makes someone
+    # relax the first layer.
+    #
+    # A published port's packet is DNAT'd in `nat PREROUTING`; after the rewrite
+    # its destination is a container address, so the routing decision sends it
+    # through **FORWARD**, not **INPUT**. The instance's `REJECT
+    # icmp-host-prohibited` and its 22/80/443 allowlist live in INPUT and never
+    # see it — `filter DOCKER` already holds an explicit ACCEPT for this
+    # container, and DOCKER-USER is empty. Measured: over a window carrying 13
+    # new HTTPS connections, the nat and filter DOCKER counters moved by 13 and
+    # INPUT's `dpt:443` counter did not move at all.
+    #
+    # So `127.0.0.1:` here is load-bearing on its own. Delete `!override`, or
+    # widen this to 0.0.0.0, and the only remaining layer is the cloud security
+    # list — which cannot be inspected from this machine.
     ports: !override
       - "127.0.0.1:8000:8000"
 
