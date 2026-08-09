@@ -55,11 +55,22 @@ GRAPH_MARKER_NAME=".meander-graph-complete"
 # against a 6.6 GB graph dies with OutOfMemoryError during startup, *after* the
 # import has already succeeded, which is a confusing place to fail.
 #
-# These defaults are sized for `countries`. The demo set needs far less; see
-# PROGRESS.md for the measurements. Override:
-#   GH_HEAP=4g scripts/graphhopper.sh serve
-IMPORT_HEAP="${GH_IMPORT_HEAP:-24g}"
-SERVE_HEAP="${GH_HEAP:-20g}"
+# These defaults are sized for `demo`, which is what REGION_SET below defaults
+# to. They used to be sized for `countries` instead — 24g/20g against a default
+# region set that needs 8g/3g — so running the script with no arguments at all
+# asked for a 24 GB heap, and on anything smaller the JVM refused to start with
+# a message about the heap rather than about the region set. The 12 GB VM this
+# is deployed on is exactly that case.
+#
+# Measured on the demo set, on the deployment VM: import 234 s at 8g, producing
+# a 486 MB graph-cache. 3g serves it with room to spare — PROGRESS.md:1404 puts
+# the floor at 2 GB and records that 1 GB OOMs.
+#
+# For `countries`, override both — that set is ~6.6 GB of graph and wants the
+# old figures:
+#   GH_IMPORT_HEAP=24g GH_HEAP=20g GH_REGION_SET=countries scripts/graphhopper.sh setup
+IMPORT_HEAP="${GH_IMPORT_HEAP:-8g}"
+SERVE_HEAP="${GH_HEAP:-3g}"
 
 REGION_SET="${GH_REGION_SET:-demo}"
 
