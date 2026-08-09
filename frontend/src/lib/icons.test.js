@@ -112,15 +112,25 @@ describe('the icon set', () => {
       [27, 36, 48], // #1b2430
       [63, 174, 112], // #3fae70
     ]
+    // One expect() per run, not one per pixel. The assertion is unchanged —
+    // any pixel matching either constant still fails, still names the file and
+    // the colour — but the loop below used to call expect() 1.3 million times
+    // (5 icons x up to 512x512 px x 2 colours) and each call builds matcher
+    // state whether or not it fails. That cost 14.6 s against vitest's 5 s
+    // default on the 2-OCPU ARM VM this deploys to, so the gate failed on
+    // hardware rather than on colour. Collect the hits, assert once.
+    const hits = []
     for (const [file] of EXPECTED) {
       const png = decodePng(readFileSync(join(PUBLIC, file)))
       for (let i = 0; i < png.pixels.length; i += 4) {
         for (const [r, g, b] of forbidden) {
-          const hit = png.pixels[i] === r && png.pixels[i + 1] === g && png.pixels[i + 2] === b
-          expect(hit, `${file} contains ${r},${g},${b}`).toBe(false)
+          if (png.pixels[i] === r && png.pixels[i + 1] === g && png.pixels[i + 2] === b) {
+            hits.push(`${file} contains ${r},${g},${b}`)
+          }
         }
       }
     }
+    expect([...new Set(hits)]).toEqual([])
   })
 
   it('makes the maskable variant full-bleed and keeps the mark inside the safe radius', () => {
@@ -159,6 +169,10 @@ describe('the icon set', () => {
     expect(pixelAt(png, 1, 1)[3]).toBe(0) // corner is rounded away
   })
 
+  // 30 s, not the 5 s default. This test shells out to the generator and draws
+  // five PNGs; it measured 5018 ms on the deployment VM, which against a 5000 ms
+  // default is a coin toss rather than a gate. The number is patience, not
+  // tolerance — nothing about what it accepts has changed.
   it('regenerates identically — the files in git are the files the script draws', () => {
     // If this fails, someone hand-edited an icon or changed a token without
     // re-running the generator.
@@ -174,7 +188,7 @@ describe('the icon set', () => {
       const now = decodePng(readFileSync(join(PUBLIC, file)))
       expect(decodePng(bytes).pixels.equals(now.pixels), `${file} changed`).toBe(true)
     }
-  })
+  }, 30000)
 })
 
 describe('the manifest', () => {
