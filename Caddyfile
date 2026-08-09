@@ -1,0 +1,138 @@
+# TLS and the public edge for the API. The site itself is on Cloudflare Pages.
+#
+# Built into meander-caddy:2.11.4 by caddy/Dockerfile, which compiles the
+# DuckDNS DNS-01 solver in. Both versions are pinned there.
+#
+#   docker compose -f docker-compose.yml -f compose.prod.yml up -d
+#
+# DUCKDNS_TOKEN comes from .env at the repository root, which is git-ignored
+# (.gitignore:2) and excluded from every build context (.dockerignore:42-43).
+# It is never written into this file.
+{
+	# HTTP/1.1 and HTTP/2 only.
+	#
+	# Caddy binds and advertises HTTP/3 by default, and both firewall layers in
+	# front of this VM pass TCP 80/443 and nothing else. A browser that reads
+	# the Alt-Svc header, opens a QUIC connection to UDP 443 and gets silence
+	# waits for its own timeout before falling back — a first-visit stall with
+	# no error anywhere, on the one request that decides whether the app feels
+	# alive. Opening UDP 443 in the VCN and in iptables would be the other fix;
+	# this one needs no second firewall change to stay true.
+	servers {
+		protocols h1 h2
+	}
+}
+
+meander-app.duckdns.org {
+	# DNS-01, not HTTP-01. Port 80 is open and HTTP-01 would work today, but
+	# DNS-01 proves control of the *name* rather than of a port: renewal keeps
+	# working if 80 is ever closed, and the challenge never has to be routed
+	# past the rules below.
+	tls {
+		dns duckdns {env.DUCKDNS_TOKEN}
+		# Ask a public resolver rather than systemd-resolved on 127.0.0.53.
+		# The local stub caches the pre-challenge NXDOMAIN for the TXT record
+		# and Caddy then polls its own stale cache until the attempt times out.
+		resolvers 1.1.1.1 8.8.8.8
+	}
+
+	# --- what the internet may reach -------------------------------------
+	#
+	# An allowlist, and it has to be. A bare `reverse_proxy api:8000` publishes
+	# every route the app has, and the app has eleven — four of which FastAPI
+	# registers by itself and nothing in backend/ turns off:
+	#
+	#   /api/routes  /api/geocode  /api/report-barrier  /api/health   ← wanted
+	#   /healthz                                                      ← wanted
+	#   /readyz      /metrics                                         ← not
+	#   /docs        /docs/oauth2-redirect   /redoc   /openapi.json   ← not
+	#
+	# /docs/oauth2-redirect is the one an exact-match rule for /docs misses.
+	#
+	# /metrics is unauthenticated by design — main.py:1286-1289 argues it
+	# discloses no more than /api/health and says to scrape it from inside the
+	# network. On a single VM there is no inside, so the boundary has to be
+	# here. It is still reachable for operators at 127.0.0.1:8000/metrics over
+	# SSH, which is what that docstring actually wants.
+	@public path /api/* /healthz
+
+	handle @public {
+		# 64 KB, matching the app's own ceiling. The app enforces that from the
+		# Content-Length header alone, so a chunked POST with no Content-Length
+		# walks past it; Caddy counts bytes and does not care what the client
+		# declared.
+		request_body {
+			max_size 64KB
+		}
+
+		reverse_proxy api:8000 {
+			# POST /api/routes is Server-Sent Events. Caddy already streams a
+			# text/event-stream response without buffering, but "already does"
+			# is how the SSE path breaks silently one upgrade later: buffering
+			# in front of this endpoint does not error, it just delivers the
+			# whole stream at the end, and presents as the app being slow.
+			# -1 is unconditional and costs nothing here.
+			flush_interval -1
+
+			# Left deliberately unset: header_up X-Forwarded-For.
+			#
+			# Caddy appends the real peer to any inbound X-Forwarded-For, and
+			# the app reads parts[-1] because MEANDER_TRUSTED_PROXY_HOPS=1
+			# (main.py:382-421). A client that forges the header lands to the
+			# left of Caddy's entry and is ignored. Overwriting or trusting the
+			# whole header here would hand every client its own rate-limit
+			# bucket.
+		}
+
+		# No `encode` anywhere in this file, deliberately. The app compresses
+		# its own responses and explicitly refuses to compress a stream —
+		# ConditionalGZip (main.py:243-270) exists because Starlette's
+		# GZipMiddleware was measured gzipping a text/event-stream, and
+		# compression buffers. A second compressor here would re-introduce
+		# exactly that.
+
+		# Response headers for the API origin. See the ownership note below.
+		header {
+			Strict-Transport-Security "max-age=31536000"
+			X-Content-Type-Options "nosniff"
+			Referrer-Policy "no-referrer"
+			-Server
+		}
+	}
+
+	# --- everything else --------------------------------------------------
+	#
+	# Default deny, so a route added to the app in future is private until
+	# someone adds it above. 404 rather than 403: a 403 confirms there is
+	# something there.
+	handle {
+		respond 404
+	}
+}
+
+# ---------------------------------------------------------------------------
+# Which origin owns which security header
+#
+# These two files never both set a header on the same response, because no
+# response is served by both. The split is by origin, not by header name:
+#
+#   meander-app.duckdns.org   this file. API responses: JSON and SSE, consumed
+#                             by fetch() and never rendered as a document. HSTS,
+#                             nosniff and Referrer-Policy are the whole useful
+#                             set. A CSP here would govern nothing.
+#
+#   meander-eoc.pages.dev     frontend/public/_headers. Owns everything that
+#                             governs a *document*: the CSP, frame-ancestors,
+#                             Permissions-Policy, the cache policy. Pages does
+#                             not read vercel.json, and index.html carries no
+#                             <meta http-equiv> fallback, so without _headers
+#                             there is no CSP on the site at all.
+#
+# The one place they have to agree is `connect-src` in the site's CSP, which
+# must name https://meander-app.duckdns.org or the browser blocks every call to
+# this server. That is the site's header to get right, not this one's.
+#
+# CORS belongs to neither file: the app sets it (main.py:227-240) from
+# MEANDER_ALLOWED_ORIGINS. Adding Access-Control-Allow-Origin in Caddy would
+# emit it twice, and a duplicated ACAO is treated by browsers as no ACAO at all.
+# ---------------------------------------------------------------------------
