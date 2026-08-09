@@ -2925,13 +2925,20 @@ fresh certificate, and Let's Encrypt permits five duplicates a week.
 
 ### Deviations
 
-`make check` needed `python3.12-venv` and then Python 3.13 from deadsnakes — the
+`make check` needed `python3.12-venv`, then Python 3.13 from deadsnakes — the
 Makefile hardcodes `python3.13` and the deploy image is `python:3.13-slim`, so
-matching it was the right answer rather than relaxing the target. Both go in
-`scripts/provision-vm.sh` when it is written.
+matching it was the right answer rather than relaxing the target — and then
+Chromium from snap, because `gate` was skipping for want of a browser.
 
-**`gate` skips on this machine**: no Chrome. `make check` says so out loud and I
-am recording it rather than counting it. The layout gate is unrun here.
+All three go in `scripts/provision-vm.sh` when it is written. `gate` needs
+`CHROME_PATH=/snap/bin/chromium`, since the target looks for `google-chrome` by
+name and there is no such binary on ARM64.
+
+With those, **`make check` runs with zero skips on this VM**: 650 backend tests,
+349 frontend, 25 gate checks, all green. That is the whole of CI on the
+deployment machine, which is worth more than it sounds — the layout gate had
+never been run anywhere but CI, and it is the one this repo already caught
+grading nothing at all.
 
 **Nothing is pushed.** This clone has no credential helper, no stored
 credential, no `gh` and no private key, so `git push` cannot even ask for a
