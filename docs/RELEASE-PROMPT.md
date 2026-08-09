@@ -97,13 +97,17 @@ project is worth anything:
    `App.jsx`, the per-trigger debounce map, abort-on-refetch and
    keep-previous-answer are deliberate and were arrived at by fixing real bugs.
 9. **The full gate stays green at every commit.** Not at the end — every commit.
-   `make check` is `lint coverage test-frontend build infra-lint`
-   (`Makefile:72`). It does **not** include three checks that only run in CI:
-   the suite re-run under `sudo unshare -n` (`ci.yml:84`), the torch-free import
-   check (`:102`), and the hard-coded-colour gate (`:149`). `Makefile:74` claims
-   it "is the whole of CI now" and that stopped being true. Either run the CI
-   jobs too, or fix `check` to include them — fixing it is better, and is a
-   commit in its own right.
+   `make check` is `lint dupes coverage test-frontend build colour infra-lint
+   torch-free test-sandboxed gate` (`Makefile:127`), and that is every job CI
+   runs — including the three that once lived only in CI: the suite re-run
+   under `unshare -n` (`ci.yml:92`), the torch-free import check (`:110`) and
+   the hard-coded-colour gate (`:167`). This paragraph used to say `check`
+   omitted them and to ask for that to be fixed; it was, in `1749aa0`, and
+   `Makefile:131-134` narrates the correction.
+
+   Two of those targets *skip* rather than fail on a machine that cannot run
+   them — `test-sandboxed` off Linux, `gate` without Chrome. Both print a skip
+   line. Read it; a skip is not a pass.
 
 **Say only what is true.** This codebase has an unusually honest voice — the
 README withdraws a claim rather than restating it; `BLOCKED.md` §2 keeps its own
@@ -755,7 +759,7 @@ Also dropped and worth a look before you decide: `BetterLater.jsx` (renders
 | 4 | `.env.example:71` + omissions | one wrong claim; 8 undocumented variables, 3 of which a VM deploy depends on |
 | 5 | `README.md:46`, `:52-56` | test count and coverage stale; "four verification points" is three under the demo set |
 | 6 | `.github/workflows/deploy.yml:54-55` | asserts three frontend gates that no longer exist |
-| 7 | `Makefile:74` | claims `check` "is the whole of CI now"; three CI jobs are outside it |
+| 7 | `Makefile:127` | ~~claims `check` "is the whole of CI now"; three CI jobs are outside it~~ **closed in `1749aa0`.** `check` is `lint dupes coverage test-frontend build colour infra-lint torch-free test-sandboxed gate` — every job in `ci.yml`, verified by comparing command strings rather than target names. `test-sandboxed` (off Linux) and `gate` (no Chrome) print a skip line rather than fail; a skip is not a pass |
 | 8 | `frontend/package.json` | `axe-core` is a devDependency nothing runs; `a11y.html` is not in the build inputs |
 | 9 | `scripts/graphhopper.sh:61-62` | heap defaults sized for a region set that cannot run on the target VM |
 | 10 | `docker-compose.yml:60-61` | publishes the API on `0.0.0.0` |
