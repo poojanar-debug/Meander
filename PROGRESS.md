@@ -2783,3 +2783,187 @@ thing I did not do was let any of them ship with the old sentence still standing
 | capabilities restored | **9 of 9** |
 
 **Live API calls across the whole of Act II:** zero.
+
+# The deployment
+
+## Session A — the server
+
+Nothing had ever been deployed. `README.md`, `DEPLOY.md`, `docs/RUNBOOK.md` and
+`infra/README.md` all said so, and all four were right. This session put the
+API half on the internet: an Oracle Always Free A1 VM, two containers behind a
+third, and a Let's Encrypt certificate on `meander-app.duckdns.org`.
+
+### Before writing anything
+
+Seven parallel readers went out before a line of configuration was written, one
+per question I did not want to answer from memory: the exact semantics of every
+`MEANDER_*` variable; the compose file and its merge rules; the complete route
+table; the three claimed defects; what `make check` actually runs; the
+deployment docs and `.gitignore`; and this file's own format. An eighth audited
+the stale defect register in `docs/RELEASE-PROMPT.md`. Four of them came back
+disagreeing with the brief they were given, which is the entire reason for
+sending them.
+
+**The one that changed the deployment** was the compose reader, which did not
+read the documentation on override semantics but ran the experiment. `ports`
+**append** across `-f` files, deduplicated on the whole
+`(host_ip, published, target, protocol)` tuple. So the obvious spelling —
+listing `127.0.0.1:8000:8000` in the overlay — does not replace `8000:8000`, it
+*adds a second binding*, and the merged project publishes both. I diffed the two
+spellings through `docker compose config` and watched it happen: without
+`!override`, an unauthenticated API sits on `0.0.0.0` past Caddy, past TLS and
+past the rate limiter. That is the single most important line in
+`compose.prod.yml` and it is a YAML tag.
+
+The same reader established that a service cannot be removed by omission
+(`!reset null` does it; `!override {}` fails validation), which is what stops a
+Vite dev server starting on a public VM.
+
+### Three things that were already wrong
+
+`frontend/vercel.json` was recorded in two places as having been *moved* to
+`docs/legacy/`. It had been copied — byte-identical, sha256 `dc91c087…`, for 157
+commits. Deleting it made both sentences true. The `REPLACE-WITH-YOUR-RENDER-HOST`
+placeholder stays in the legacy copy on purpose: in a Render blueprint the API
+host genuinely is unknown until you create the service, so a placeholder is the
+honest value there and a live CSP hole here.
+
+`scripts/graphhopper.sh` defaulted to a 24 GB import heap while
+`GH_REGION_SET` defaulted to `demo`, so running it with no arguments asked for
+three times the heap the graph needs and failed on this machine with a message
+about the JVM rather than about the region set. The comment above it already
+apologised for the trap, which is not the same as removing it.
+
+`docs/RELEASE-PROMPT.md` told its reader to go and fix `make check` (fixed in
+`1749aa0`) and to delete `VITE_API_PROXY_TARGET` as dead config. It is read at
+`vite.config.js:16`, and the comment three lines above records the bug that
+reading it closed. That second one is the dangerous kind of stale documentation:
+actionable, and wrong.
+
+### A gate that was failing on hardware
+
+`make check` was red on this VM before this session touched anything, and not
+for any reason to do with the code. Two tests in `icons.test.js` exceeded
+vitest's 5 s default on 2 ARM cores. One measured **14.6 s** — not because
+scanning five PNGs is slow, but because it called `expect()` once per pixel per
+forbidden colour, about 1.3 million times, and each call builds matcher state
+whether or not it fails. Collecting the hits and asserting once takes the same
+test to **0.2 s** with the same assertion. The other measured 5018 ms against a
+5000 ms default, which is a coin toss rather than a gate; it shells out to the
+icon generator, so the work is real and it got explicit patience instead.
+
+I made the changed one fail before trusting it — adding the accent the icons
+*are* drawn in to the forbidden list, and watching it name `icon-512.png` and
+`icon-maskable-512.png`.
+
+### The edge
+
+A bare `reverse_proxy` would have published `/metrics`. The app registers
+**eleven** routes and only seven are in `backend/main.py`: FastAPI adds
+`/openapi.json`, `/docs`, `/docs/oauth2-redirect` and `/redoc` by itself, and
+nothing in the codebase turns them off in any environment. `/docs/oauth2-redirect`
+is the one a blocklist misses, which is why the Caddyfile is an allowlist —
+`/api/*` and `/healthz`, everything else 404.
+
+I proved that is Caddy refusing rather than the app lacking the routes: all four
+private paths return **200 on `127.0.0.1:8000` and 404 through the public
+hostname**, and `/metrics` really does serve Prometheus text on loopback.
+
+DNS-01 rather than HTTP-01, so renewal never depends on a port or on a proxy
+rule. The certificate was issued **9 seconds** after Caddy started.
+
+### What I could not prove
+
+**Ports 8000, 8989 and 8990 are not reachable from the public internet — but I
+could not demonstrate that from outside.** I tried a third-party HTTP relay and
+it turned out to be worthless as an instrument: it failed on both controls, an
+open port on an unrelated host and port 80 on this VM by raw IP, while
+succeeding against `https://meander-app.duckdns.org/healthz`. A test that
+reports "blocked" for everything is the same defect as a gate whose regex never
+matches, and reporting its failures as evidence would have been dishonest.
+
+What is conclusive, from inside: `iptables -t nat -L DOCKER` holds exactly three
+rules — `dst 127.0.0.1 dpt:8000`, `dst 0.0.0.0/0 dpt:80`, `dst 0.0.0.0/0
+dpt:443`. There is no DNAT rule for 8989, 8990 or 2019 at all, so a packet
+arriving for those ports has no path into any container. And the API's rule is
+restricted by *destination address*, so a packet addressed to the public IP does
+not match it.
+
+That last detail is worth keeping. Docker's published-port DNAT happens in `nat
+PREROUTING` and is then evaluated in `FORWARD`, **not** `INPUT` — so the
+instance's `REJECT` rule at the end of the INPUT chain would not have stopped a
+container published on `0.0.0.0`. The loopback binding is doing the work, not
+the firewall. Anyone who reasons "iptables only allows 22/80/443, so a published
+port is safe" is wrong on this machine.
+
+The VCN security list also cannot be inspected from here — there is no `oci`
+CLI on the box. That both firewall layers pass 443 is proven only by the fact
+that requests arrive.
+
+### Decisions
+
+**GraphHopper is published nowhere**, not even on loopback. It is
+unauthenticated and compute-unbounded and 8990 is Dropwizard's admin connector.
+On the ECS shape a private subnet enforced that; here the compose network is the
+only boundary there is.
+
+**HTTP/3 is off.** Caddy advertises it by default and both firewall layers pass
+TCP only, so a browser reading the `Alt-Svc` header opens a QUIC connection to a
+port nothing answers and waits for its own timeout — a first-visit stall with no
+error anywhere.
+
+**`MEANDER_CACHE_DB` stays unset**, with the reason written at the place someone
+would go to add it.
+
+**A missing `DUCKDNS_TOKEN` aborts `docker compose config`** rather than
+starting a Caddy that cannot answer a challenge and fails minutes later in a log
+nobody is tailing.
+
+**`caddy_data` is a named volume.** It holds the ACME account key and the
+certificate; on an anonymous volume every `up` is a fresh account asking for a
+fresh certificate, and Let's Encrypt permits five duplicates a week.
+
+### Deviations
+
+`make check` needed `python3.12-venv` and then Python 3.13 from deadsnakes — the
+Makefile hardcodes `python3.13` and the deploy image is `python:3.13-slim`, so
+matching it was the right answer rather than relaxing the target. Both go in
+`scripts/provision-vm.sh` when it is written.
+
+**`gate` skips on this machine**: no Chrome. `make check` says so out loud and I
+am recording it rather than counting it. The layout gate is unrun here.
+
+**Nothing is pushed.** This clone has no credential helper, no stored
+credential, no `gh` and no private key, so `git push` cannot even ask for a
+username. `BLOCKED.md` §6 has the exact command a human needs.
+
+### Measured
+
+| | |
+|---|---|
+| certificate issued | **9 s** after Caddy started, DNS-01, Let's Encrypt |
+| `/healthz` over TLS | `{"status":"ok","version":"0.1.0"}`, verify result 0 |
+| private paths 404 through Caddy | 6 of 6 — and 200 of 4 tested on loopback |
+| three-objective request, uncached | **15.5 s**, 28,751 bytes, HTTP 200 |
+| distinct geometries | **3 of 3** — 8 and 37 shared leading points before diverging |
+| `scoring_method` | `clip` on all three; `synthetic_upstream` false on all three |
+| segments in the baked-in cache | **146**, `segments_clip` 146 |
+| graphhopper RSS | **835.5 MiB** against a 5 GiB limit, 3g heap |
+| api RSS | **83.0 MiB** against a 1 GiB limit |
+| caddy RSS | **14.3 MiB** against a 256 MiB limit |
+| host memory in use | 2,106 MB of 11,927 MB |
+| graph import on this VM | 234 s at 8g, 486 MB graph-cache |
+| upstream failures | 0 |
+| backend tests | 652, coverage 87.71% |
+| frontend tests | **349** |
+
+The `accessible` objective came back `status: "blocked"` with *"Hard
+accessibility constraints reject this route."* That is the engine working: the
+graph carries `smoothness` as an encoded value, the custom model can therefore
+exclude `IMPASSABLE` surfaces, and it did. A blocked route is the safe answer,
+and it is still a different geometry from the other two.
+
+**Live API calls this phase:** one uncached three-objective request against the
+real upstreams — 1 route request, 1 cache miss, 1 blocked route, 0 upstream
+failures by the app's own counters. The router is self-hosted and unmetered;
+Open-Meteo and Overpass were called for that one request.
