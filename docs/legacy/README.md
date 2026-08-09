@@ -13,6 +13,32 @@ may want the cheaper shape.
 **Neither was ever deployed either.** Same status as `infra/`: written,
 reviewed, never applied.
 
+## The move that was a copy
+
+`PROGRESS.md:1768` and `docs/IOS-LAUNCH-PROMPT.md:119` both record `vercel.json`
+as having been *moved* here. It was copied: `frontend/vercel.json` survived,
+byte-identical, for 157 commits. Deleting it is what makes both of those
+sentences true. Two things made that worth doing rather than leaving alone.
+
+The live deployment is **Cloudflare Pages**, which does not read `vercel.json`
+at all — it reads `public/_headers` and `public/_redirects`. So the copy in
+`frontend/` was a file that looked like the deployed configuration, sat in the
+build directory, and governed nothing. Nothing in the repository referenced it
+either: not `package.json`, not the Makefile, not either workflow.
+
+It also carried a literal `https://REPLACE-WITH-YOUR-RENDER-HOST.onrender.com`
+in its `connect-src`. **That placeholder is correct here and wrong there.** In a
+Render blueprint the API host genuinely is not known until you create the
+service, so a placeholder is the honest value; in the build directory of a site
+that is actually deployed, it is a CSP that would block the only API the app
+talks to. The copy in this directory keeps it, deliberately.
+
+The policy itself still has to go somewhere Pages reads. At the time of writing
+`frontend/public/_headers` does **not** exist, which means the live site is
+served with no CSP at all — `frontend/index.html` has no `<meta http-equiv>`
+fallback either. That is the gap this file's `headers` block is the source
+material for, and it is the frontend session's first job.
+
 ## What the AWS version changed, and why
 
 **One origin instead of two.** The split deployment's most error-prone step was
