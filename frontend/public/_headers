@@ -1,0 +1,113 @@
+# Response headers for https://meander-eoc.pages.dev.
+#
+# Cloudflare Pages does not read vercel.json — that file was this policy's only
+# home, and it now lives in docs/legacy/ as a record. index.html carries no
+# <meta http-equiv="Content-Security-Policy"> fallback either. So until this
+# file existed the live site shipped with no CSP at all: measured, not assumed —
+# `curl -sSI https://meander-eoc.pages.dev/` came back with referrer-policy and
+# x-content-type-options and nothing else.
+#
+# Which origin owns which header is written out at the bottom of the Caddyfile.
+# The short version: that file owns the API's responses, which are JSON and SSE
+# and are never rendered as a document; this file owns everything that governs a
+# document. They never both set a header, because no response is served by both.
+#
+# Every comment here sits in column 0 and between blocks, never inside one.
+# Pages documents `#` at the start of a line as a comment and says nothing about
+# an indented one, and an indented `# ...` inside a rule block is one plausible
+# parse away from being read as a header named `#`.
+#
+# ── two Pages behaviours this file is shaped around ──────────────────────────
+#
+# 1. When a request matches several rules that set the same header name, Pages
+#    JOINS the values with a comma. Setting Cache-Control under both /* and
+#    /assets/* does not override, it produces
+#      public, max-age=0, must-revalidate, public, max-age=31536000, immutable
+#    which is a browser's guess rather than a policy. So Cache-Control appears
+#    only on disjoint patterns below, and never on /*.
+#
+# 2. `/` is an exact match, not a prefix, and a request for /index.html is 308'd
+#    to `/` — so a rule written against /index.html only ever decorates a
+#    redirect nobody consumes. The two that matter are `/` and `/*`.
+#
+# Limits, for anyone extending this: 100 rules, 2,000 characters per line.
+#
+# ── the policy ───────────────────────────────────────────────────────────────
+#
+# Ported from docs/legacy/vercel.json, with two changes.
+#
+# connect-src names https://meander-app.duckdns.org, replacing the literal
+# https://REPLACE-WITH-YOUR-RENDER-HOST.onrender.com that file still carries.
+# The placeholder is honest there and would be a live hole here.
+#
+# script-src gains the SHA-256 of the inline theme block at index.html:41-58.
+# Without it that script is blocked: the app still works, because
+# src/lib/theme.js re-applies the theme once React mounts, but a dark-mode
+# visitor gets a full frame of cream first and the console carries a violation.
+# The hash covers the bytes between <script> and </script>, and was computed
+# from the HTML Cloudflare actually served rather than from the source file.
+# src/lib/csp-hash.test.js recomputes it on every run, so editing that script
+# fails the suite instead of silently breaking the policy — which is what
+# DEPLOY.md already asked for: "add a build check that the hash still matches,
+# because it will drift the first time anyone edits it".
+#
+# tiles.openfreemap.org is in BOTH img-src and connect-src on purpose. The
+# vector tiles, the style JSON, the glyphs and the sprite are all fetched rather
+# than <img>-loaded; MapView.jsx:15 warns that a CSP which forgot connect-src
+# leaves a permanently blank basemap after a 20-second timeout and no error.
+#
+# worker-src 'self' blob: is MapLibre, which builds its workers from blob URLs.
+#
+# style-src keeps 'unsafe-inline'. MapLibre writes inline styles onto the map
+# container, and the <noscript> block at index.html:63 carries a style
+# attribute. Removing it is real work, not a one-line tightening, and pretending
+# otherwise would mean shipping a policy that blocks the map.
+
+/*
+  Content-Security-Policy: default-src 'self'; script-src 'self' 'sha256-rXb3GrH6fQu5rzdJqUPl87syYzPxM2UTz++hiaG3xVo='; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://tiles.openfreemap.org; font-src 'self'; worker-src 'self' blob:; connect-src 'self' https://tiles.openfreemap.org https://meander-app.duckdns.org; frame-ancestors 'none'; base-uri 'self'; form-action 'none'
+  X-Content-Type-Options: nosniff
+  Referrer-Policy: no-referrer
+  X-Frame-Options: DENY
+  Permissions-Policy: geolocation=(self), camera=(), microphone=(), payment=(), interest-cohort=()
+
+# Deliberately absent: Strict-Transport-Security.
+#
+# Not an oversight. `.dev` is a public-suffix entry in Chromium's static preload
+# list with force-https and include_subdomains, and every major browser ships a
+# list derived from it — so meander-eoc.pages.dev is already unreachable over
+# plaintext. The upgrade happens inside the browser, before any packet leaves,
+# on the first visit by someone who has never seen the site. An HSTS response
+# header is strictly weaker than that: it binds only after one successful HTTPS
+# response, which is exactly the trust-on-first-use gap preloading closes.
+#
+# This stops being true the day this project moves to a custom domain on an
+# ordinary TLD. That hostname would have no preload coverage and would want HSTS
+# here — or better, at the zone level.
+
+# Content-hashed by Vite, so the name changes whenever the bytes do. This is the
+# only place `immutable` is honest.
+
+/assets/*
+  Cache-Control: public, max-age=31536000, immutable
+
+# The shell. Pages' own default for HTML is already max-age=0, must-revalidate;
+# it is written out rather than inherited because the service worker is
+# cache-first over the precached shell (sw.js:168-178) and never revalidates, so
+# a stale document here is pinned until the worker's bytes change — and the
+# worker's version is a hash of the file *list*, which an index.html-only edit
+# does not move.
+
+/
+  Cache-Control: public, max-age=0, must-revalidate
+
+# The one file that must never be edge-cached. A stale worker keeps handing out
+# a precache manifest naming assets the deploy has already replaced, and the app
+# opens offline into a version that no longer exists.
+
+/sw.js
+  Cache-Control: public, max-age=0, must-revalidate
+
+# Precached by name rather than by content hash, so it has to be revalidated.
+
+/manifest.webmanifest
+  Cache-Control: public, max-age=0, must-revalidate
