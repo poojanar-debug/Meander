@@ -656,6 +656,295 @@ await cdp.send('Network.emulateNetworkConditions', {
   uploadThroughput: -1,
 })
 
+// ------------------------------- 6d. the search that starts from the device
+
+/**
+ * The two things a geolocated search does that a permalink search cannot, and
+ * that nothing above this line touches.
+ *
+ * Everything graded before now starts from a link — `?from=…` — which is a
+ * coordinate that is byte-identical on every reload. That is the easy case, and
+ * it is the only case the gate had. A device fix is the hard one: it is a fresh
+ * measurement every time, so the two behaviours below are the ones that were
+ * broken, and they were broken in production while every check above was green.
+ *
+ * Only one online search is spent here. The replay checks run offline, where a
+ * request costs no rate-limit token because it never reaches the deployment.
+ */
+/**
+ * Put a chosen fix behind `navigator.geolocation`, for the next document.
+ *
+ * ⚠ Not `Emulation.setGeolocationOverride`, and the reason is a defect this
+ * section had on its first run. **This gate already replaces
+ * `navigator.geolocation` wholesale**, in the boot script at the top of the
+ * file, with a stub hard-coded to LAT/LON. Nothing the CDP override says can
+ * reach a page whose geolocation object was redefined before any of its code
+ * ran — so the first version of this section moved the override to 200 m, the
+ * app kept answering from the original coordinate, and the gate reported
+ * "a fix two hundred metres away does not replay it — FAILED · the match is too
+ * wide". The store was correct; the gate was grading its own stub.
+ *
+ * That is worth spelling out because it is the exact failure mode this file was
+ * written to catch, arriving from the inside: a check that appears to measure
+ * the deployment and actually measures the harness. It failed loudly rather than
+ * passing, which is the only reason it was caught.
+ *
+ * So the fix is supplied by replacing that stub — added later, and later wins,
+ * because scripts run in the order they were registered — and the coordinate the
+ * page will actually report is read back and asserted before anything is graded.
+ * `movedBy` is not decoration; without it a stub that failed to install would
+ * make the 200 m check pass for the best-looking wrong reason.
+ */
+let geoScriptId = null
+const geo = async (lat, lon) => {
+  if (geoScriptId) {
+    await cdp
+      .send('Page.removeScriptToEvaluateOnNewDocument', { identifier: geoScriptId })
+      .catch(() => {})
+    geoScriptId = null
+  }
+  const source = `
+    (() => {
+      const pos = {
+        coords: { latitude: ${lat}, longitude: ${lon}, accuracy: 8,
+                  altitude: null, altitudeAccuracy: null, heading: null, speed: null },
+        timestamp: Date.now(),
+      }
+      const geolocation = {
+        getCurrentPosition: (ok) => setTimeout(() => ok(pos), 0),
+        watchPosition: (ok) => { setTimeout(() => ok(pos), 0); return 1 },
+        clearWatch: () => {},
+      }
+      try {
+        Object.defineProperty(navigator, 'geolocation', {
+          value: geolocation, configurable: true,
+        })
+      } catch (e) {
+        window.__meanderGeoStubFailed = String(e)
+      }
+    })()`
+  const { identifier } = await cdp.send('Page.addScriptToEvaluateOnNewDocument', { source })
+  geoScriptId = identifier
+}
+
+/** What the page would actually report, so a dead stub cannot pass as a miss. */
+const fixOnPage = () =>
+  cdp.evaluate(`
+    new Promise((res) => {
+      if (!navigator.geolocation) return res(null)
+      navigator.geolocation.getCurrentPosition(
+        (p) => res({ lat: p.coords.latitude, lon: p.coords.longitude }),
+        () => res(null),
+        { maximumAge: 0, timeout: 5000 },
+      )
+    })`)
+
+const metresApart = (a, b) =>
+  Math.hypot(
+    (b.lat - a.lat) * 111320,
+    (b.lon - a.lon) * 111320 * Math.cos((a.lat * Math.PI) / 180),
+  )
+
+/** Press whichever "Use my location" button the current layout is showing. */
+const pressLocate = () =>
+  cdp.evaluate(`
+    (() => {
+      const find = () => [...document.querySelectorAll('button')].find((b) =>
+        /use my location/i.test(b.textContent || ''))
+      let b = find()
+      if (!b) {
+        // On the full layout it lives inside the "from" drawer. Opening it is a
+        // click on the segment that labels it; a closed drawer still renders.
+        const seg = [...document.querySelectorAll('button')].find((x) =>
+          /starting point|^from$/i.test((x.textContent || '').trim()))
+        if (seg) seg.click()
+        b = find()
+      }
+      if (!b) return 'no-button'
+      if (b.disabled) return 'disabled'
+      b.click()
+      return 'clicked'
+    })()`)
+
+const searchNow = () => cdp.evaluate(`location.search`)
+
+// No Browser.grantPermissions: the page never reaches the real geolocation
+// API, so there is no permission to grant.
+
+// (i) BLOCKED.md §9 — the address bar must not keep the search before it.
+// Done offline and on P1, so it costs nothing: the URL is what is under test,
+// not the routes.
+await cdp.send('Network.emulateNetworkConditions', {
+  offline: true,
+  latency: 0,
+  downloadThroughput: -1,
+  uploadThroughput: -1,
+})
+await geo(LAT, LON)
+// Installed before the navigate: addScriptToEvaluateOnNewDocument applies to
+// the next document, not the current one.
+await cdp.send('Page.navigate', { url: P1 })
+await waitFor(cdp, `document.readyState === 'complete'`, 20000)
+await sleep(1500)
+const barBefore = await searchNow()
+const locatedFromLink = await pressLocate()
+await sleep(2000)
+const barAfter = await searchNow()
+
+check(
+  'a geolocated search clears the search before it out of the address bar',
+  locatedFromLink === 'clicked' && barBefore.includes('from=') && barAfter === '',
+  locatedFromLink !== 'clicked'
+    ? `not graded: the locate button was ${locatedFromLink}`
+    : `"${barBefore}" → "${barAfter || '(empty)'}"`,
+)
+
+// And the consequence that actually hurt: a reload must not boot the abandoned
+// search. Still offline, so a request would fail loudly rather than silently.
+await cdp.send('Page.navigate', { url: `${SITE}${barAfter}` })
+await waitFor(cdp, `document.readyState === 'complete'`, 20000)
+await sleep(2000)
+const bootedSomething = await cdp.evaluate(
+  `document.querySelectorAll('.route__sub').length > 0`,
+)
+check(
+  'a reload after a geolocated search does not boot the abandoned one',
+  locatedFromLink === 'clicked' && barAfter === '' && !bootedSomething,
+  locatedFromLink !== 'clicked'
+    ? `not graded: the locate button was ${locatedFromLink}`
+    : bootedSomething
+      ? 'routes rendered from a URL that should hold no search'
+      : 'nothing was asked for, as promised',
+)
+
+await cdp.send('Network.emulateNetworkConditions', {
+  offline: false,
+  latency: 0,
+  downloadThroughput: -1,
+  uploadThroughput: -1,
+})
+
+// (ii) The rounded key. One online geolocated search, saved, then replayed
+// offline from a fix a few metres away — and refused from one 200 m away.
+await resetStore()
+await geo(LAT, LON)
+await cdp.send('Page.navigate', { url: `${SITE}/` })
+await waitFor(cdp, `document.readyState === 'complete'`, 20000)
+await sleep(1200)
+const locatedFresh = await pressLocate()
+const geoRendered = await routesOnScreen(60000)
+await sleep(2500)
+const geoRun = { status: lastRouteStatus }
+
+// Consent has to be granted after the panel exists, which needs a search first.
+const geoConsent = await pressConsent('Yes, keep them')
+await sleep(800)
+// Re-run the same search so it is stored under consent rather than before it.
+// No navigate, so the stub installed above is still the one answering.
+await pressLocate()
+await routesOnScreen(60000)
+await sleep(2500)
+const geoSaved = await savedState()
+const geoRun2 = { status: lastRouteStatus }
+
+gradeOrSkip(
+  'a search started from the device is saved, which it never was before',
+  [geoRun, geoRun2],
+  locatedFresh === 'clicked' && geoConsent === 'clicked' && geoSaved.entries.length === 1,
+  locatedFresh !== 'clicked'
+    ? `not graded: the locate button was ${locatedFresh}`
+    : geoConsent !== 'clicked'
+      ? `not graded: the consent chip was ${geoConsent}`
+      : `${geoSaved.entries.length} entry in ${geoSaved.buckets.length} bucket(s)`,
+)
+
+/** Reload with no network, take a fix `metres` from the saved one, and press. */
+const replayFrom = async (metres, bearingDeg) => {
+  const dLat = (metres * Math.cos((bearingDeg * Math.PI) / 180)) / 111320
+  const dLon =
+    (metres * Math.sin((bearingDeg * Math.PI) / 180)) / (111320 * Math.cos((LAT * Math.PI) / 180))
+  await cdp.send('Network.emulateNetworkConditions', {
+    offline: true,
+    latency: 0,
+    downloadThroughput: -1,
+    uploadThroughput: -1,
+  })
+  // Installed before the navigate: addScriptToEvaluateOnNewDocument applies to
+  // the next document, not the current one.
+  await geo(LAT + dLat, LON + dLon)
+  await cdp.send('Page.navigate', { url: `${SITE}/` })
+  await waitFor(cdp, `document.readyState === 'complete'`, 20000)
+  await sleep(1200)
+
+  // Read back what the page will actually report. A stub that failed to install
+  // would otherwise make the 200 m check pass for the wrong reason — no
+  // position, no search, no replay, graded green. `movedBy` is asserted by the
+  // caller, so this cannot be believed without being checked.
+  const reported = await fixOnPage()
+  const movedBy = reported ? metresApart({ lat: LAT, lon: LON }, reported) : null
+
+  const pressed = await pressLocate()
+  const rendered = await routesOnScreen(20000)
+  await sleep(1500)
+  const badge = await cdp.evaluate(
+    `!!document.querySelector('.badge--cached') || !!document.querySelector('.offline')`,
+  )
+  await cdp.send('Network.emulateNetworkConditions', {
+    offline: false,
+    latency: 0,
+    downloadThroughput: -1,
+    uploadThroughput: -1,
+  })
+  return { pressed, rendered, badge, movedBy }
+}
+
+// Five metres, due east — the narrow axis, where a 4 dp square is only 6.9 m
+// wide at this latitude and plain rounding would lose the match about two
+// times in three.
+const near = await replayFrom(5, 90)
+gradeOrSkip(
+  'a fix five metres from the saved one replays it, with no network',
+  [geoRun, geoRun2],
+  geoSaved.entries.length === 1 &&
+    near.pressed === 'clicked' &&
+    near.movedBy !== null &&
+    Math.abs(near.movedBy - 5) < 1 &&
+    near.rendered &&
+    near.badge,
+  geoSaved.entries.length !== 1
+    ? 'not graded: nothing was stored, so a replay proves nothing'
+    : near.pressed !== 'clicked'
+      ? `not graded: the locate button was ${near.pressed}`
+      : near.movedBy === null
+        ? 'not graded: the page reported no position at all'
+        : `the page reported a fix ${near.movedBy.toFixed(1)} m away · ` +
+          `rendered=${near.rendered} labelled-as-saved=${near.badge}`,
+)
+
+// Two hundred metres. Far enough to be a different corner of the park, and the
+// negative half of the claim: the widening must not have become a wildcard.
+const far = await replayFrom(200, 90)
+gradeOrSkip(
+  'a fix two hundred metres away does not replay it',
+  [geoRun, geoRun2],
+  geoSaved.entries.length === 1 &&
+    far.pressed === 'clicked' &&
+    far.movedBy !== null &&
+    Math.abs(far.movedBy - 200) < 5 &&
+    !far.rendered,
+  geoSaved.entries.length !== 1
+    ? 'not graded: nothing was stored, so a miss proves nothing'
+    : far.pressed !== 'clicked'
+      ? `not graded: the locate button was ${far.pressed}`
+      : far.movedBy === null
+        ? 'not graded: the page reported no position at all'
+        : far.rendered
+          ? `a walk saved ${far.movedBy.toFixed(0)} m away came back — the match is too wide`
+          : `the page reported a fix ${far.movedBy.toFixed(1)} m away · no replay, as promised`,
+)
+
+await resetStore()
+
 // --------------------------------------------- 7. the service worker registers
 
 await load(`${SITE}/`)
