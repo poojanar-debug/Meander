@@ -2,8 +2,9 @@
 
 Things this run could not finish, what was tried, and what needs a human.
 
-**Two entries are open — §5, a deliberate deferral with a list, and §6, which
-needs one command from a human.**
+**Four entries are open — §5, a deliberate deferral with a list; §6, which needs
+one command from a human; §7, a deploy this session could not perform; and §8,
+which needs a decision rather than a fix.**
 
 | | |
 |---|---|
@@ -14,6 +15,8 @@ needs one command from a human.**
 | §4 two suites asserted things about the machine | **resolved** — TZ and the Mapillary token are now supplied by the harness |
 | §5 the merge took main's frontend entirely | **open** — deliberate; §5 lists what has to come back and when |
 | §6 the deployment VM cannot push to GitHub | **open** — needs a credential only a human can supply |
+| §7 the Caddyfile and rate limit are committed, not deployed | **open** — no SSH from the machine Session B ran on; three commands on the VM |
+| §8 the saved-route store is inert and the UI says otherwise | **open** — needs a decision, not a fix; §1 reserves the privacy surface to the operator |
 
 ---
 
@@ -450,3 +453,124 @@ resolution changes any code; the deployment itself does not depend on the push
 succeeding, only the visibility of the history does. The brief for this work
 asks for a push after every phase, and that is the one instruction this session
 could not carry out.
+
+---
+
+## 7 · The Caddyfile and the rate limit are committed but not deployed — NEEDS A HUMAN
+
+**Opened:** 2026-08-10, during Session B.
+
+Session B changed two things that only take effect on the VM, and Session B did
+not run on the VM. It ran on the operator's Mac.
+
+- `Caddyfile` — `/api/health` is no longer in the public allowlist, and the
+  allowlist is now literal paths rather than `/api/*`. Until Caddy reloads,
+  `https://meander-app.duckdns.org/api/health` is still public and still
+  discloses the router's internal endpoint, the key booleans, the counters and
+  the rate limiter's configuration. Verified still open at the time of writing.
+- `backend/config.py` — `per_ip_refill_per_min` is 1.0 rather than 3.0. Until
+  the API container restarts, one address can still sustain 4,320 requests a day
+  against a 2,000/day ceiling. `/api/health` reports the live value under
+  `rate_limit.per_ip_refill_per_min`, which is how to tell which is running.
+
+**What was tried.** SSH from this machine, three users, with the key that is
+here:
+
+```
+$ ssh -i ~/.ssh/meander_oci -o BatchMode=yes ubuntu@130.210.61.235 'echo OK'
+ubuntu@130.210.61.235: Permission denied (publickey).
+opc@130.210.61.235:    Permission denied (publickey).
+root@130.210.61.235:   Permission denied (publickey).
+$ nc -z 130.210.61.235 22
+Connection to 130.210.61.235 port 22 [tcp/ssh] succeeded!
+```
+
+Port 22 is open; this key is not in `authorized_keys`. Its fingerprint is
+`SHA256:UIzMOvy71ZPWES9LxmqbHjfbRtBIBViAEzl/mTONos8`. Nothing about the
+frontend was blocked by this — Cloudflare Pages builds from `main` on push, and
+that half is live and verified.
+
+**What the human has to do**, from a shell on the VM:
+
+```bash
+cd ~/Meander
+git pull
+docker compose -f docker-compose.yml -f compose.prod.yml exec caddy \
+  caddy reload --config /etc/caddy/Caddyfile
+docker compose -f docker-compose.yml -f compose.prod.yml up -d --force-recreate api
+```
+
+**Then confirm all four, from a laptop rather than from the VM:**
+
+```bash
+curl -s -o /dev/null -w '%{http_code}\n' https://meander-app.duckdns.org/api/health     # want 404
+curl -s -o /dev/null -w '%{http_code}\n' https://meander-app.duckdns.org/api/health%0a  # want 404
+curl -fsS https://meander-app.duckdns.org/healthz                                       # want status ok
+```
+
+and, from the VM itself:
+
+```bash
+curl -s 127.0.0.1:8000/api/health | jq .rate_limit.per_ip_refill_per_min       # want 1
+```
+
+The second of those is the one worth running. `%0a` is the byte that defeated
+the first version of this change: Caddy compared it as a different path and let
+it through, and Starlette's `^/api/health$` matched it anyway, because Python's
+`$` also matches before a trailing newline.
+
+---
+
+## 8 · The saved-route store does nothing in production, and the UI says it does — NEEDS A DECISION
+
+**Opened:** 2026-08-10, during Session B. Not caused by Session B.
+
+`sw.js:186` returns early for any cross-origin request — the one line that
+guarantees map tiles are never cached, and it is right. But this deployment sets
+`VITE_API_BASE=https://meander-app.duckdns.org` while the site is served from
+`https://meander-eoc.pages.dev`, so **every** API call is cross-origin and the
+`/api/routes` branch at `sw.js:188` never executes. `handleRoutes`,
+`storeResult`, `mayStoreResults` and the `forgetResults()` branch are all
+unreachable in production.
+
+**Measured in a real browser against the live site**, not inferred —
+`frontend/scripts/live-gate.mjs` grants consent through the prefs cache exactly
+as the page does, runs a route search, waits, and then counts:
+
+```
+FAIL  a route is actually saved when the user consents
+      [consent granted, search completed, 0 results cache(s), nothing stored]
+```
+
+The affordance still ships. `About.jsx` renders the control unconditionally, the
+tick appears when you grant consent, and the hint says: *"The last set of routes
+is kept on this device, in the browser's cache store… Only the most recent one
+is kept, it is always labelled with its age, and choosing 'No' deletes it
+immediately."* Nothing is kept, nothing is labelled, and "No" deletes a cache
+that was never written. A user who consents, walks out of signal and reloads
+gets the shell and an error where the routes were.
+
+This is the failure mode this project's own DEPLOY.md names for iOS — "A control
+that does nothing is the exact dishonesty this project refuses" — arriving on the
+web by a different route.
+
+**Why this session did not fix it.** Three options, and all three are the
+operator's call rather than a bug fix:
+
+1. **Remove the control** until it works. Honest immediately, and loses a
+   feature that took three commits to build.
+2. **Proxy `/api/*` through Pages** so the API is same-origin again and the
+   worker sees it. Needs a Pages Function; also re-opens the same-origin `/api`
+   surface that `_redirects` and the build assertion were written to close, and
+   would put a Cloudflare Worker in the request path for every route search.
+3. **Re-base the store on the page rather than the worker** — Cache Storage or
+   IndexedDB written by `client.js` after a completed stream. Keeps the feature
+   and the promise, and is the largest change.
+
+§1 of the deployment brief says to ask before touching the privacy promise, and
+the consent control *is* the privacy surface: it is the only place the app asks
+permission to store anything about a person. Changing it unilaterally — in
+either direction — is exactly the decision that rule reserves.
+
+**Until then** the live gate fails on this check, deliberately, and
+`DEPLOY.md`'s table names it.
