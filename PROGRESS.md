@@ -3077,3 +3077,153 @@ pushed it. That number is unknown, and bounded above rather than measured.
 real upstreams — 1 route request, 1 cache miss, 1 blocked route, 0 upstream
 failures by the app's own counters. The router is self-hosted and unmetered;
 Open-Meteo and Overpass were called for that one request.
+
+## Session B — the frontend, and proof · 2026-08-10
+
+Session A's report ended by saying the API was live. I did not take that on
+trust, and it held: the certificate is a real Let's Encrypt one issued for
+`meander-app.duckdns.org`, `notBefore Aug 9 21:39:38 2026`, `notAfter Nov 7`,
+`/healthz` returns `{"status":"ok","version":"0.1.0"}`, `/api/health` reports
+`self_hosted: true` with `self_hosted_source: "env"` and `smoothness` present in
+`path_details`, and `/metrics` and `/readyz` both 404. Uptime at that moment was
+37,962 s — a little over ten and a half hours since the API container started.
+
+I did not run on the VM. This session ran on the operator's Mac, and the VM's
+`authorized_keys` does not carry the key on this machine — port 22 answers, the
+handshake does not. So half of what follows is deployed and verified, and half
+is committed and waiting for three commands. BLOCKED.md §7 has them. That split
+runs through everything below and I have tried to be exact about which side of
+it each claim sits on.
+
+**Seven readers before anything was written**, which is the only reason the
+first of these was found before the deploy rather than after.
+
+`vite.config.js:41-46` sweeps every file in `public/` into the service worker's
+precache, filtering only `sw.js` and `.map`. Session B's first instruction was
+to put `_headers` and `_redirects` in that directory. Both would have landed in
+`PRECACHE`, and `cache.addAll()` is atomic — one non-OK response rejects the
+whole promise and no service worker registers at all. The cost of getting that
+wrong is not a missing cache entry, it is the entire offline capability, and the
+only trace is a failed install nobody is watching. Fixed before either file
+existed.
+
+Both ends of that are now measured and they disagree, which is worth writing
+down. Under `wrangler pages dev`, `GET /_headers` is a 502 once Pages has
+consumed the file — non-OK, install fails outright. Production answers `200
+text/html`, the SPA shell. So a developer would have seen offline break loudly
+and production would have quietly cached a copy of `index.html` under
+`/_headers`. My first commit message asserted the 404 reading as though it were
+the production answer; the next one corrected it.
+
+**`_redirects` contains no rules, and that is the decision.** The brief said not
+to write a bare `/* /index.html 200` because it turns same-origin `/api` calls
+into 200-with-HTML. Cloudflare's own documentation says something worse:
+"Redirects are always followed, regardless of whether or not an asset matches
+the incoming request." Rules are consulted *before* the asset lookup and the
+top-most match wins, so a catch-all would have served the HTML shell for
+`/assets/index-*.js`, for `/sw.js`, for every icon. The site would not have
+rendered at all. It is also unnecessary — Pages does that fallback automatically
+whenever the build has no top-level `404.html`, which is why `/r/abc` and
+`/some/deep/link` already returned 200 with the shell before I touched anything.
+
+The `/api/*` hole is real and `_redirects` cannot close it: Cloudflare supports
+200 and the redirect codes, and documents `/blog/* /blog/404.html 404` as an
+explicitly unsupported example. There is no rule that answers 404. So it is
+closed at the other end — the Pages build now fails when `VITE_API_BASE` is not
+an https origin, is the project's own origin, or is a host the CSP will not
+permit. Gated on `CF_PAGES`, so `make check` is untouched.
+
+**The CSP is live.** Before: `curl -sSI https://meander-eoc.pages.dev/` returned
+`referrer-policy` and `x-content-type-options` and nothing else. After: the
+policy is on `/`, on the hashed assets, on `sw.js`, on the manifest, on the
+icons and on the SPA-fallback response for a path with no file behind it — which
+is the one that matters for permalinks. `/assets/*` carries `immutable`,
+everything else `max-age=0, must-revalidate`, and neither is comma-joined,
+because Pages joins duplicate header names across matching rules and
+`Cache-Control` is therefore never on `/*`.
+
+Push to `main` and Pages rebuilt in under two minutes, every time. That is the
+deploy mechanism for this half and it needs no credential I do not have.
+
+**Then five hostile reviewers, none of whom had written any of it.** They could
+not break the CSP. They broke every gate around it.
+
+- `/api/health%0a` reached the health handler. Caddy compared it against
+  `not path /api/health`, found it different, and let `path /api/*` proxy it —
+  and Starlette compiles a literal route to `^/api/health$`, where Python's `$`
+  matches immediately before a trailing newline. I verified both halves myself:
+  `caddy:2.11.4` with an echo upstream answering 200 for `%0a` and 404 for the
+  bare path, and `compile_path('/api/health')[0].match('/api/health\n')`
+  returning a match. Excluding a path means enumerating every spelling of it,
+  and there is always one more. It is now an allowlist of literals, which also
+  closes the thing the file's own comment had been promising falsely: `/api/*`
+  published every route the app will ever have.
+- `csp-hash.test.js` passed with the policy moved out of `/*` and under
+  `/index.html` — a pattern the `_headers` file itself documents as a 308 nobody
+  consumes — while every document shipped with no CSP. It passed with a bogus
+  hash in `script-src` and the real one in `style-src`. And it hashed
+  `index.html` while the browser runs `dist/index.html`, which Vite is free to
+  differ from because it substitutes `%VITE_*%` inside the HTML.
+- The precache test was `X === X`: it asserted `isPrecachable(x) ===
+  !PAGES_CONTROL_FILES.includes(x)` against an implementation that was that
+  expression. Removing an entry removed its own assertion.
+- The build assertion accepted `VITE_API_BASE=https://meander-eoc.pages.dev` —
+  the app pointed at itself, the exact defect it existed to prevent.
+
+That is the fourth, fifth, sixth and seventh check this repository has produced
+that could not fail, and I wrote four of them in one afternoon. Every mutation
+above was re-run against the rewritten gates and each one now fails. The one I
+am least comfortable about is that I had already "falsified" the precache gate
+before shipping it, three ways, and all three falsifications were of the wrong
+thing.
+
+**The browser gate is the point of this session.** `frontend/scripts/live-gate.mjs`,
+in the same shape as `scripts/gate.mjs` — raw CDP, no dependencies, a manifest
+that must match before anything is graded. Against the live site, in Chrome 151:
+21 pass, 1 fails, 2 are not checkable here.
+
+It got three things wrong about itself first. It latched onto whichever
+`/api/routes` request came first, which is the CORS preflight, and concluded the
+stream had no chunks. It counted the console errors produced deliberately by its
+own negative control. And it asserted a time spread unconditionally, which fails
+on a healthy deployment whenever someone ran it recently — a cached route
+replays in 0.06 s, which timing alone cannot tell from buffering. It now reads
+`X-Meander-Cache` and skips that assertion with the reason.
+
+Measured, cold: **6 chunks over 2.9 s**, at 1, 17, 112, 143, 2916 and 2949 ms.
+Caddy is not buffering. The CORS negative control is the half that matters —
+routes arrive from `https://meander-eoc.pages.dev` and the identical request
+from another origin is refused by the browser, so the allowlist is doing real
+work rather than the server merely being willing. Pointed at the same build
+served without `_headers`, 8 checks fail, which is how I know it can.
+
+**The one failure is real and is not mine.** `sw.js:186` returns early for any
+cross-origin request — the line that guarantees a tile cache never becomes a
+record of where you have been, and it is right. But this deployment serves the
+site and the API from different hosts, so *every* API call is cross-origin and
+the `/api/routes` branch below it never runs. I granted consent through the
+prefs cache exactly as the page does, ran a search, waited three seconds, and
+counted: **zero results caches, nothing stored**. Meanwhile About.jsx tells the
+user their last routes are kept, labelled with their age, and deleted when they
+choose No. All three are false. §1 says to ask before touching the privacy
+promise and the consent control *is* the privacy surface, so it is written up in
+BLOCKED.md §8 with the three ways out rather than changed on my judgement.
+
+The offline permalink, which a reviewer flagged as theoretically broken, works —
+`SHELL_MATCH` is `ignoreVary` and not `ignoreSearch`, but the `/index.html`
+fallback covers it. Checked, not assumed.
+
+**What I could not do.** The whole feature list on a real phone. Device
+emulation at 390×844 with a fake geolocation is not a phone: no touch, no
+WebKit, no install-to-home-screen, no real GPS, no cellular. That line in the
+gate is a SKIP with its reason spelled out rather than a pass, and it is the
+honest answer.
+
+**Not deployed:** the Caddyfile and the rate-limit default. Until three commands
+run on the VM, `/api/health` is still public and one address can still sustain
+4,320 requests a day against a 2,000/day ceiling. `/api/health` reports the live
+refill rate, which is how to tell which one is running.
+
+**Live API calls this phase:** roughly a dozen route requests across the gate
+runs and the streaming measurements, most of them served from the route cache
+and refunded. Two were cold.
