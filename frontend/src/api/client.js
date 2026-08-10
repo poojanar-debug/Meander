@@ -6,6 +6,8 @@
  * server that answers with plain JSON is handled transparently.
  */
 
+import { readRoutes, saveRoutes } from '../lib/resultsStore.js'
+
 const isMock = import.meta.env.VITE_MOCK_API === '1'
 
 /**
@@ -76,14 +78,36 @@ async function toApiError(res) {
  * the casing is itself the signal that these two were added on this side of the
  * boundary and are not the server's opinion.
  *
- * ⚠ `X-Meander-Cached` (this worker: "you are looking at a replay") is one
- * letter from `X-Meander-Cache` (the server: "I had a warm cache and this
+ * ⚠ `X-Meander-Cached` (lib/resultsStore.js: "you are looking at a replay") is
+ * one letter from `X-Meander-Cache` (the server: "I had a warm cache and this
  * answer is completely current"). They mean opposite things. Do not read the
  * server's header here.
+ *
+ * The header used to be written by the service worker. It is now written by the
+ * page-side store, on the entry it saves, and read back off that same entry —
+ * so the age a route is labelled with has exactly one source, and it is the
+ * moment the thing on disk was written.
  */
 function cacheStampFrom(res) {
   const cachedAt = res.headers.get('X-Meander-Cached')
   return cachedAt ? { servedFromCache: true, cachedAt } : null
+}
+
+/**
+ * Answer from the saved set, if there is one and it answers *this* request.
+ *
+ * Only reached when the network failed. Routes are pushed through `onRoute` in
+ * the same order a live stream would deliver them, so nothing downstream has to
+ * know it is looking at a replay — except by the stamp, which is the point.
+ */
+async function replayFromStore(req, onRoute) {
+  const hit = await readRoutes(req)
+  if (!hit) return null
+  const stamp = cacheStampFrom(hit.response)
+  if (!stamp) return null
+  const routes = (hit.payload.routes ?? []).map((route) => ({ ...route, ...stamp }))
+  routes.forEach((route) => onRoute(route))
+  return { ...hit.payload, routes }
 }
 
 async function realFetchRoutes(req, { signal, onProgress, onRoute }) {
@@ -97,6 +121,11 @@ async function realFetchRoutes(req, { signal, onProgress, onRoute }) {
     })
   } catch (err) {
     if (err?.name === 'AbortError') throw err
+    // No network. This is the walk-out-of-signal case the consent control
+    // exists for, so it is asked before the error is raised — and only ever
+    // answers for the identical search.
+    const replay = await replayFromStore(req, onRoute)
+    if (replay) return replay
     throw new ApiError('Could not reach the Meander server. Check your connection and try again.')
   }
 
@@ -111,7 +140,9 @@ async function realFetchRoutes(req, { signal, onProgress, onRoute }) {
   if (!contentType.includes('text/event-stream') || !res.body) {
     const json = await res.json()
     json.routes.forEach((route) => onRoute(mark(route)))
-    return markPayload(json)
+    const payload = markPayload(json)
+    await keep(req, payload, { stamp, signal })
+    return payload
   }
 
   const reader = res.body.getReader()
@@ -145,7 +176,33 @@ async function realFetchRoutes(req, { signal, onProgress, onRoute }) {
       }
     }
   }
+  await keep(req, final, { stamp, signal })
   return final
+}
+
+/**
+ * Offer the answer to the store, once it is an answer.
+ *
+ * Three refusals, and each one is a way the old worker could not go wrong and
+ * this could:
+ *
+ * - **`final` is null** — the stream ended without a `done`. A stream that
+ *   stopped part-way is not an answer, and replaying one later as though it
+ *   were would be worse than having nothing to replay. An `error` event throws
+ *   before reaching here, and so does an abort, so neither can be stored.
+ * - **`signal.aborted`** — App.jsx aborts on every dial drag and chip toggle,
+ *   and the request that lost the race is not the one the person is looking at.
+ * - **`stamp`** — this payload is itself a replay. Re-saving it would move the
+ *   age forward and relabel yesterday's routes as fresh.
+ *
+ * Awaited rather than fired and forgotten: the routes are already on screen by
+ * now — `onRoute` ran during the stream — so nothing is waiting on this except
+ * the caller's promise, and a save that has definitely finished is a save that
+ * can be tested.
+ */
+async function keep(req, final, { stamp, signal }) {
+  if (!final || stamp || signal?.aborted) return
+  await saveRoutes(req, final)
 }
 
 async function realGeocode(q, { signal }) {
