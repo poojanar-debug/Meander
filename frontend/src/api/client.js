@@ -199,10 +199,30 @@ async function realFetchRoutes(req, { signal, onProgress, onRoute }) {
  * now — `onRoute` ran during the stream — so nothing is waiting on this except
  * the caller's promise, and a save that has definitely finished is a save that
  * can be tested.
+ *
+ * But awaited *with a deadline*. `fetchRoutes` resolving is what moves App.jsx
+ * out of `loading`, so an await here puts CacheStorage on the critical path of
+ * the interface settling. `saveRoutes` cannot reject — every path is caught —
+ * but it can hang, because a `cache.put` under storage pressure is allowed to
+ * take as long as it likes, and a promise that never settles would leave the
+ * spinner up over three routes that are already rendered behind it. The save
+ * continues either way; only the waiting stops.
  */
+const SAVE_DEADLINE_MS = 3000
+
 async function keep(req, final, { stamp, signal }) {
   if (!final || stamp || signal?.aborted) return
-  await saveRoutes(req, final)
+  let timer
+  try {
+    await Promise.race([
+      saveRoutes(req, final),
+      new Promise((resolve) => {
+        timer = setTimeout(resolve, SAVE_DEADLINE_MS)
+      }),
+    ])
+  } finally {
+    clearTimeout(timer)
+  }
 }
 
 async function realGeocode(q, { signal }) {

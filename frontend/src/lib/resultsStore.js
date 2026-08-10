@@ -128,6 +128,18 @@ export async function saveRoutes(request, payload) {
     if (!digest) return false
 
     const savedAt = new Date().toISOString()
+
+    // Sweep first, then write. "Only the most recent one is kept" has to hold
+    // across *buckets*, not just within one, and the bucket name is derived
+    // from whichever shell is installed. Two shells can coexist — between a new
+    // worker's install and its activate, or when an install fails — and then
+    // two saves land in two different buckets, each holding one set, which is
+    // two sets on disk. Deleting every results bucket before the put makes
+    // "exactly one, ever" structural rather than dependent on the worker
+    // lifecycle. It also clears a bucket left by a previous build without
+    // waiting for an activation that may never come.
+    await forgetResults()
+
     const cache = await caches.open(name)
     await cache.put(
       ENTRY_URL,
@@ -145,10 +157,22 @@ export async function saveRoutes(request, payload) {
     // Consent can be withdrawn while a stream is finishing. Revoking deletes
     // the bucket, and a put that lands a moment later would resurrect exactly
     // the route the user just refused — the store would end up holding data
-    // written *after* the "No". Re-read and undo. The window is small and this
-    // closes it; without this, "deleted immediately" is true only if nothing
-    // was in flight.
+    // written *after* the "No". Re-read and undo.
+    //
+    // ⚠ `cache.delete(ENTRY_URL)` first, and it is not belt-and-braces. A
+    // `Cache` handle outlives `caches.delete(name)`: the bucket leaves the
+    // registry, the handle keeps working, and a put through it lands in storage
+    // that `caches.keys()` no longer lists — so `forgetResults()`, which
+    // deletes by name, can never reach it. That is a route on disk that nothing
+    // in the app can delete. Deleting through the handle we already hold is the
+    // only thing that reaches an unlinked bucket. Same shape as the Caddyfile
+    // bind mount in §7 of BLOCKED.md: the name was rebound, the handle was not.
     if (!(await readSaveResults()).saveResults) {
+      try {
+        await cache.delete(ENTRY_URL)
+      } catch {
+        // Fall through to the sweep; one of the two has to reach it.
+      }
       await forgetResults()
       return false
     }

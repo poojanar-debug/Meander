@@ -227,6 +227,32 @@ describe('a saved route cannot become a history', () => {
     expect(await readRoutes(OTHER)).toBeNull()
   })
 
+  it('keeps one set across two shell caches, not one per shell', async () => {
+    // sw.js prunes every shell but the current one on activate — but two can
+    // coexist between a new worker's install and that activate, or when an
+    // install fails. resultsCacheName() derives the bucket from whichever shell
+    // it finds, so without a sweep before the put, two saves land in two
+    // buckets and there are two sets of routes on disk at once.
+    await setSaveResults(true)
+    await saveRoutes(REQ, payloadOf())
+    await fake.api.open(`${SHELL_PREFIX}0000newshell`) // sorts before 'deadbeef…'
+    await saveRoutes(OTHER, payloadOf())
+
+    const resultBuckets = [...fake.buckets.keys()].filter((n) => n.startsWith(RESULTS_PREFIX))
+    expect(resultBuckets).toHaveLength(1)
+    const total = resultBuckets.reduce((n, b) => n + fake.entries(b).length, 0)
+    expect(total).toBe(1)
+  })
+
+  it('clears a bucket left by a previous build rather than adding to it', async () => {
+    await setSaveResults(true)
+    await fake.api.open(`${RESULTS_PREFIX}oldbuildhash`)
+    await saveRoutes(REQ, payloadOf())
+    expect([...fake.buckets.keys()].filter((n) => n.startsWith(RESULTS_PREFIX))).toEqual([
+      `${RESULTS_PREFIX}deadbeef1234`,
+    ])
+  })
+
   it('writes no coordinate into a key anything can enumerate', async () => {
     await setSaveResults(true)
     await saveRoutes(REQ, payloadOf())
@@ -280,6 +306,54 @@ describe('withdrawing consent', () => {
     expect(names).toContain(SHELL)
     expect(names).toContain('meander-prefs')
     expect(names.filter((n) => n.startsWith(RESULTS_PREFIX))).toEqual([])
+  })
+
+  it('deletes through the handle it holds, which is what reaches an unlinked bucket', async () => {
+    // A Cache handle outlives caches.delete(name): the bucket leaves the
+    // registry, the handle keeps working, and anything written through it lands
+    // where caches.keys() cannot see it — so forgetResults(), which deletes by
+    // name, can never reach it. That is a saved route nothing in the app can
+    // delete. The fake models exactly that: the bucket is unregistered but the
+    // handle still writes into the same Map.
+    await setSaveResults(true)
+    const name = `${RESULTS_PREFIX}deadbeef1234`
+
+    const realOpen = fake.api.open
+    let unlinkOnce = true
+    let orphaned = null
+    let puts = 0
+    globalThis.caches = {
+      ...fake.api,
+      open: async (n) => {
+        const handle = await realOpen(n)
+        if (n === name && unlinkOnce) {
+          unlinkOnce = false
+          // The Map this handle is backed by. Whatever happens to the registry
+          // afterwards, writes through the handle land here.
+          orphaned = fake.buckets.get(n)
+          return {
+            ...handle,
+            put: async (url, res) => {
+              // Consent withdrawn and the bucket unlinked between open() and
+              // the write landing — the interleaving saveRoutes describes.
+              await setSaveResults(false)
+              fake.buckets.delete(n)
+              puts += 1
+              return handle.put(url, res)
+            },
+          }
+        }
+        return handle
+      },
+    }
+
+    await saveRoutes(REQ, payloadOf())
+
+    // The write has to have happened, or this proves nothing about reaching it.
+    expect(puts).toBe(1)
+    expect(orphaned).not.toBeNull()
+    expect(fake.buckets.has(name)).toBe(false) // unlinked: deletion by name cannot reach it
+    expect([...orphaned.keys()]).toEqual([])
   })
 
   it('refuses to replay after a withdrawal, even if a bucket survived', async () => {

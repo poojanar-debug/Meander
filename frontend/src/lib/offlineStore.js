@@ -75,9 +75,20 @@ export async function readSaveResults() {
   }
 }
 
-/** Read the flag and publish it to every subscriber. */
+/**
+ * Read the flag and publish it to every subscriber.
+ *
+ * Sweeps when the answer is anything but yes, and that is not tidiness. The
+ * store's own undo — write, notice the withdrawal, delete — is two round trips
+ * long, and a tab closed or a device asleep inside that window leaves a route
+ * on disk that consent no longer covers. This runs on every boot, before
+ * anything is rendered, so the longest such a route can survive is until the
+ * app is next opened. A withdrawal that only holds while the page stays alive
+ * is not a withdrawal.
+ */
 export async function refreshOfflineSetting() {
   const { saveResults, chosen } = await readSaveResults()
+  if (!saveResults) await forgetResults()
   emit({ saveResults, chosen, ready: true })
   return snapshot
 }

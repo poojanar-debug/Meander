@@ -174,3 +174,23 @@ describe('when storage is unavailable', () => {
     expect(getOfflineSetting().saveResults).toBe(false)
   })
 })
+
+describe('a withdrawal that outlives the page', () => {
+  it('sweeps saved routes on the next boot when the answer is not yes', async () => {
+    // The store's own undo — write, notice the withdrawal, delete — is two
+    // round trips long. A tab closed inside that window leaves a route on disk
+    // that consent no longer covers, and nothing on the page is alive to
+    // remove it. Reading the flag at boot is the sweep.
+    await setSaveResults(false)
+    await fake.api.open(`${RESULTS_PREFIX}abc`) // as if a put had landed late
+    await refreshOfflineSetting()
+    expect([...fake.buckets.keys()].filter((k) => k.startsWith(RESULTS_PREFIX))).toEqual([])
+  })
+
+  it('leaves the saved route alone at boot when consent stands', async () => {
+    await setSaveResults(true)
+    await fake.api.open(`${RESULTS_PREFIX}abc`)
+    await refreshOfflineSetting()
+    expect([...fake.buckets.keys()]).toContain(`${RESULTS_PREFIX}abc`)
+  })
+})
