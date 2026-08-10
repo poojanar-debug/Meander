@@ -1,4 +1,4 @@
-import { readFileSync, readdirSync } from 'node:fs'
+import { existsSync, readFileSync, readdirSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 
 import { describe, expect, it } from 'vitest'
@@ -118,27 +118,38 @@ describe('the precache never names a file Cloudflare Pages will not serve', () =
   // the app has no service worker at all — so a Pages control file reaching
   // this list does not degrade offline, it deletes it.
 
-  it('grades every file that is actually in public/, whatever is in there', () => {
-    // Written against the real directory rather than a fixed list, so it starts
-    // grading _headers the moment _headers exists — and keeps grading whatever
-    // anyone adds next, which is the only way this stays true.
-    const present = readdirSync(fileURLToPath(new URL('../../public', import.meta.url)))
-    expect(present.length).toBeGreaterThan(0)
-    for (const name of present) {
-      expect(isPrecachable(`/${name}`)).toBe(!PAGES_CONTROL_FILES.includes(name))
-    }
-  })
-
-  it('excludes each control file by name, whether or not one exists yet', () => {
-    // Literals, deliberately. The directory-driven test above cannot catch the
-    // regression that matters while public/ happens to hold no control file:
-    // deleting the exclusion entirely left all 20 tests green, which is how
-    // this assertion came to be written.
-    for (const name of PAGES_CONTROL_FILES) {
+  it('excludes any root-level file Cloudflare reserves, named or not', () => {
+    // Literals that are NOT derived from PAGES_CONTROL_FILES. Asserting
+    // `isPrecachable(x) === !PAGES_CONTROL_FILES.includes(x)` was X === X: a
+    // reviewer put _routes.json in public/, took it out of the list, and the
+    // whole suite stayed green while the built manifest shipped it. The last
+    // name below is in no list anywhere, which is the point — it stands for the
+    // control file Cloudflare adds next.
+    for (const name of ['_headers', '_redirects', '_routes.json', '_worker.js', '_future.json']) {
       expect(isPrecachable(`/${name}`)).toBe(false)
     }
     expect(PAGES_CONTROL_FILES).toContain('_headers')
     expect(PAGES_CONTROL_FILES).toContain('_redirects')
+  })
+
+  it('grades every file that is actually in public/, whatever is in there', () => {
+    const present = readdirSync(fileURLToPath(new URL('../../public', import.meta.url)))
+    expect(present.length).toBeGreaterThan(0)
+    for (const name of present) {
+      expect(isPrecachable(`/${name}`)).toBe(!name.startsWith('_'))
+    }
+  })
+
+  it('grades the manifest the build actually emitted, when there is one', () => {
+    // The end of the chain: not the predicate, the shipped bytes.
+    const dist = fileURLToPath(new URL('../../dist/sw.js', import.meta.url))
+    if (!existsSync(dist)) return
+    const m = /const PRECACHE = (\[[^\]]*\])/.exec(readFileSync(dist, 'utf8'))
+    expect(m).not.toBeNull()
+    const precache = JSON.parse(m[1])
+    expect(precache.length).toBeGreaterThan(3)
+    expect(precache.filter((u) => /^\/_/.test(u))).toEqual([])
+    expect(precache).toContain('/index.html')
   })
 
   it('proves its own predicate — the things that should stay, stay', () => {

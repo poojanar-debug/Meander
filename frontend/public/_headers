@@ -57,6 +57,11 @@
 # leaves a permanently blank basemap after a 20-second timeout and no error.
 #
 # worker-src 'self' blob: is MapLibre, which builds its workers from blob URLs.
+# child-src repeats it for Safari before 15.4, which has no worker-src at all and
+# falls back child-src -> script-src -> default-src. Landing on script-src there
+# means no blob:, so `new Worker(blobUrl)` throws, and what the user sees is
+# MapView's 20-second timeout and a blank map — on a phone, with no console to
+# read. One extra directive, and DEPLOY.md keeps an iOS table for a reason.
 #
 # style-src keeps 'unsafe-inline'. MapLibre writes inline styles onto the map
 # container, and the <noscript> block at index.html:63 carries a style
@@ -64,7 +69,7 @@
 # otherwise would mean shipping a policy that blocks the map.
 
 /*
-  Content-Security-Policy: default-src 'self'; script-src 'self' 'sha256-rXb3GrH6fQu5rzdJqUPl87syYzPxM2UTz++hiaG3xVo='; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://tiles.openfreemap.org; font-src 'self'; worker-src 'self' blob:; connect-src 'self' https://tiles.openfreemap.org https://meander-app.duckdns.org; frame-ancestors 'none'; base-uri 'self'; form-action 'none'
+  Content-Security-Policy: default-src 'self'; script-src 'self' 'sha256-rXb3GrH6fQu5rzdJqUPl87syYzPxM2UTz++hiaG3xVo='; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://tiles.openfreemap.org; font-src 'self'; worker-src 'self' blob:; child-src 'self' blob:; connect-src 'self' https://tiles.openfreemap.org https://meander-app.duckdns.org; frame-ancestors 'none'; base-uri 'self'; form-action 'none'
   X-Content-Type-Options: nosniff
   Referrer-Policy: no-referrer
   X-Frame-Options: DENY
@@ -86,6 +91,21 @@
 
 # Content-hashed by Vite, so the name changes whenever the bytes do. This is the
 # only place `immutable` is honest.
+#
+# ⚠ Known hazard, measured and left in place deliberately. Pages matches this
+# rule on the REQUEST path and only then falls back to index.html, so a request
+# for an asset that does not exist gets the HTML shell *with these headers*:
+#
+#   $ curl -D- https://meander-eoc.pages.dev/assets/index-DOESNOTEXIST.js
+#   HTTP/2 200 · content-type: text/html · cache-control: …, immutable
+#
+# A browser holding a stale shell can therefore cache an HTML document under a
+# .js URL for a year, unrevalidatable. Dropping `immutable` does not fix it —
+# the document is still cached, just revalidatably — and it would cost the
+# normal case, which is every real asset here. The only real fix is a Pages
+# Function that 404s unmatched /assets/*, which is a Worker this project does
+# not have. The window is narrow: `/` is max-age=0, must-revalidate, so a
+# browser without a service worker always re-reads the document first.
 
 /assets/*
   Cache-Control: public, max-age=31536000, immutable

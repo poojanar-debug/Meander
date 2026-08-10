@@ -3,7 +3,7 @@ import { existsSync, readFileSync, readdirSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-import { defineConfig } from 'vite'
+import { defineConfig, loadEnv } from 'vite'
 import react from '@vitejs/plugin-react'
 
 const here = dirname(fileURLToPath(import.meta.url))
@@ -28,26 +28,43 @@ const API_PROXY = {
  * single unserved URL in this list does not cost you one cached file, it costs
  * you the entire offline shell, and the only trace is a failed install.
  *
- * Measured, in Cloudflare's own asset server via `wrangler pages dev dist`:
- * GET /_headers returns 502 once the file is consumed as configuration. That is
- * a non-OK response and is enough to fail the install. What production Pages
- * answers has not been measured here — it may instead fall through to the SPA
- * shell with a 200, which would not fail the install but would put a copy of
- * index.html in the cache under /_headers. Wrong either way, badly wrong in one
- * of them, and the exclusion costs nothing.
+ * Both ends are now measured, and they disagree, which is worth writing down.
+ * Under `wrangler pages dev dist`, GET /_headers is a 502 once the file is
+ * consumed as configuration — non-OK, so the install fails and there is no
+ * worker at all. Production Pages instead answers 200 with the SPA shell:
  *
- * This is a list rather than a `_`-prefix rule on purpose. `_headers` and
- * `_redirects` are the two that exist today; the other two are the rest of the
- * Pages control surface, added now so that reaching for one later does not
- * quietly reintroduce the same failure.
+ *   $ curl -sS -o /dev/null -w '%{http_code} %{content_type}' \
+ *       https://meander-eoc.pages.dev/_headers
+ *   200 text/html; charset=utf-8
+ *
+ * So on production the install would have survived and quietly cached a copy of
+ * index.html under /_headers, while a developer running the emulator would see
+ * offline break outright. The exclusion is right for both, and the earlier note
+ * here — which asserted the 404/install-failure reading as though it were the
+ * production answer — was wrong about which branch ships.
  */
 export const PAGES_CONTROL_FILES = ['_headers', '_redirects', '_routes.json', '_worker.js']
 
-/** Does this build-output URL belong in the service worker's precache? */
+/**
+ * Does this build-output URL belong in the service worker's precache?
+ *
+ * The rule is the underscore, not the list. Testing membership of
+ * PAGES_CONTROL_FILES was a tautology — the gate asserted
+ * `isPrecachable(x) === !PAGES_CONTROL_FILES.includes(x)` against an
+ * implementation that *was* that expression, so deleting an entry deleted its
+ * own assertion. Verified: with `_routes.json` in public/ and removed from the
+ * list, the whole suite stayed green and the built manifest shipped it.
+ *
+ * Cloudflare reserves the underscore prefix at the build root for its own
+ * configuration, so any root-level `_*` is a file Pages consumes rather than
+ * serves. That rule catches the next control file whether or not anyone
+ * remembered to name it. The list stays, as documentation and as the thing the
+ * gate pins by name.
+ */
 export function isPrecachable(url) {
   if (url.endsWith('/sw.js')) return false
   if (url.endsWith('.map')) return false
-  return !PAGES_CONTROL_FILES.includes(url.slice(1))
+  return !/^\/_[^/]*$/.test(url)
 }
 
 /**
@@ -77,7 +94,11 @@ function requireApiBaseOnPages() {
     apply: 'build',
     config(_config, { mode }) {
       if (process.env.CF_PAGES !== '1') return
-      const base = process.env.VITE_API_BASE ?? ''
+      // loadEnv, not process.env: Vite's own precedence, so a .env.production
+      // carrying VITE_API_BASE is honoured rather than failing the build for
+      // having configured it the idiomatic way.
+      const env = loadEnv(mode, here, '')
+      const base = (env.VITE_API_BASE ?? '').trim()
       if (!/^https:\/\/[^/\s]+$/.test(base.replace(/\/$/, ''))) {
         throw new Error(
           `VITE_API_BASE must be an absolute https origin in a Cloudflare Pages build, got ${
@@ -86,7 +107,35 @@ function requireApiBaseOnPages() {
             'HTML shell with a 200, and surfaces as a JSON parse error in the UI.',
         )
       }
-      if (process.env.VITE_MOCK_API === '1') {
+      const origin = base.replace(/\/$/, '')
+
+      // The exact defect this exists to stop, spelled correctly. A shape check
+      // passes https://meander-eoc.pages.dev happily, and that is the app
+      // pointed at itself — every /api call falls back to the SPA shell.
+      const self = process.env.CF_PAGES_URL ?? ''
+      if (self && new URL(origin).host === new URL(self).host) {
+        throw new Error(
+          `VITE_API_BASE is this Pages project's own origin (${origin}). Every /api ` +
+            'call would come back as the HTML shell with a 200.',
+        )
+      }
+
+      // And a base the CSP will not permit builds cleanly and then fails in the
+      // browser on every request, with the cause only visible in a console.
+      const headersFile = join(here, 'public', '_headers')
+      if (existsSync(headersFile)) {
+        const csp = /^\s+Content-Security-Policy:\s*(.*)$/m.exec(readFileSync(headersFile, 'utf8'))
+        const connect = csp && /(?:^|;)\s*connect-src\s+([^;]*)/.exec(csp[1])
+        if (connect && !connect[1].split(/\s+/).includes(origin)) {
+          throw new Error(
+            `VITE_API_BASE is ${origin}, which public/_headers does not name in ` +
+              `connect-src (${connect[1].trim()}). The build would succeed and the ` +
+              'browser would block every call to it.',
+          )
+        }
+      }
+
+      if (env.VITE_MOCK_API === '1') {
         throw new Error(
           'VITE_MOCK_API=1 in a Cloudflare Pages build would deploy the mock API. ' +
             'The site would answer every request with invented routes and say nothing.',

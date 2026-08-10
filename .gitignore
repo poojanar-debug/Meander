@@ -63,3 +63,6 @@ graphhopper/graph-dist/
 # Staged graph for the router image build (see scripts/publish_graph.sh).
 graphhopper/graph-dist/*
 !graphhopper/graph-dist/.gitkeep
+
+# wrangler pages dev leaves a local state directory behind
+frontend/.wrangler/

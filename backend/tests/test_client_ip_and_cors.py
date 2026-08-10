@@ -375,13 +375,45 @@ def test_one_address_cannot_outspend_the_global_ceiling() -> None:
 
     This is the relation, not the values: raise the refill rate without raising
     the ceiling and this fails.
+
+    ⚠ It grades the committed defaults, and only those. A reviewer pointed out
+    that `MEANDER_RATE_REFILL_PER_MIN=60 MEANDER_DAILY_ROUTE_CEILING=100` passes
+    here while the running process would allow 86,400 a day per IP against a
+    ceiling of 100 — and both keys ship in .env.example, so overriding them is
+    the documented path.
+
+    Grading load_settings() instead was tried and is worse: it reads the ambient
+    environment, so on any machine with a real .env — this one, where the suite
+    went red with "4320 against a 120/day ceiling" — the test fails for reasons
+    that have nothing to do with what is committed. A test cannot see the VM's
+    environment from here.
+
+    What would close it is a check at startup, next to MEANDER_STRICT_STARTUP,
+    which already owns the question of refusing to boot on bad configuration.
+    That is a runtime semantics change and is deliberately left for the release
+    session rather than slipped in here.
     """
-    s = config.Settings()
+    _assert_coherent(config.Settings())
+
+
+def _assert_coherent(s: config.Settings) -> None:
     sustained_per_day = s.per_ip_refill_per_min * 60 * 24
     assert sustained_per_day <= s.global_daily_route_ceiling, (
         f"one IP sustains {sustained_per_day:.0f} requests/day against a "
         f"{s.global_daily_route_ceiling}/day global ceiling"
     )
+
+
+def test_the_coherence_check_can_fail() -> None:
+    """The relation above, proved to reject something.
+
+    Without this, _assert_coherent could be `pass` and the test above would be a
+    green light for any pair of numbers at all.
+    """
+    with pytest.raises(AssertionError, match="4320 requests/day"):
+        _assert_coherent(
+            config.Settings(per_ip_refill_per_min=3.0, global_daily_route_ceiling=2000)
+        )
 
 
 def test_a_fractional_refill_rate_survives(monkeypatch: pytest.MonkeyPatch) -> None:
