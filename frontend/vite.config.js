@@ -28,6 +28,14 @@ const API_PROXY = {
  * single unserved URL in this list does not cost you one cached file, it costs
  * you the entire offline shell, and the only trace is a failed install.
  *
+ * Measured, in Cloudflare's own asset server via `wrangler pages dev dist`:
+ * GET /_headers returns 502 once the file is consumed as configuration. That is
+ * a non-OK response and is enough to fail the install. What production Pages
+ * answers has not been measured here — it may instead fall through to the SPA
+ * shell with a 200, which would not fail the install but would put a copy of
+ * index.html in the cache under /_headers. Wrong either way, badly wrong in one
+ * of them, and the exclusion costs nothing.
+ *
  * This is a list rather than a `_`-prefix rule on purpose. `_headers` and
  * `_redirects` are the two that exist today; the other two are the rest of the
  * Pages control surface, added now so that reaching for one later does not
@@ -40,6 +48,53 @@ export function isPrecachable(url) {
   if (url.endsWith('/sw.js')) return false
   if (url.endsWith('.map')) return false
   return !PAGES_CONTROL_FILES.includes(url.slice(1))
+}
+
+/**
+ * Refuse to produce a Cloudflare Pages build that would talk to itself.
+ *
+ * client.js:19 reads VITE_API_BASE and falls back to the empty string, which
+ * means same-origin `/api`. That default is right for local dev, where Vite
+ * proxies, and it is silently wrong on Pages: the API is on another host, so an
+ * unset variable ships an app that requests https://meander-eoc.pages.dev/api/…
+ * and gets the SPA shell back with a 200, because Pages falls back to
+ * index.html for anything with no asset behind it.
+ *
+ * The user sees `Unexpected token '<', "<!doctype "... is not valid JSON` in the
+ * error banner, because res.json() is unguarded at client.js:112, :160 and :215.
+ * Nothing in that message names the cause.
+ *
+ * `_redirects` cannot close it — Cloudflare supports no rule that answers 404 —
+ * so it is closed here, at the point where the mistake is actually made.
+ *
+ * Gated on CF_PAGES, which Cloudflare sets to "1" in its build environment and
+ * nothing else does. A developer running `npm run build`, and `make check`
+ * running it in CI, are unaffected: they legitimately have no API base.
+ */
+function requireApiBaseOnPages() {
+  return {
+    name: 'meander-require-api-base',
+    apply: 'build',
+    config(_config, { mode }) {
+      if (process.env.CF_PAGES !== '1') return
+      const base = process.env.VITE_API_BASE ?? ''
+      if (!/^https:\/\/[^/\s]+$/.test(base.replace(/\/$/, ''))) {
+        throw new Error(
+          `VITE_API_BASE must be an absolute https origin in a Cloudflare Pages build, got ${
+            base === '' ? '(unset)' : JSON.stringify(base)
+          }. Unset, every /api call goes to the Pages origin, comes back as the ` +
+            'HTML shell with a 200, and surfaces as a JSON parse error in the UI.',
+        )
+      }
+      if (process.env.VITE_MOCK_API === '1') {
+        throw new Error(
+          'VITE_MOCK_API=1 in a Cloudflare Pages build would deploy the mock API. ' +
+            'The site would answer every request with invented routes and say nothing.',
+        )
+      }
+      void mode
+    },
+  }
 }
 
 /**
@@ -87,7 +142,7 @@ function meanderServiceWorker() {
 }
 
 export default defineConfig({
-  plugins: [react(), meanderServiceWorker()],
+  plugins: [react(), requireApiBaseOnPages(), meanderServiceWorker()],
   server: {
     proxy: API_PROXY,
   },
