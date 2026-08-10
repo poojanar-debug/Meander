@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 
 import { PAGES_CONTROL_FILES, isPrecachable } from '../../vite.config.js'
-import { PREFS_CACHE, PREF_URL, RESULTS_PREFIX } from './offlineStore.js'
+import { PREFS_CACHE, RESULTS_PREFIX, SHELL_PREFIX } from './offlineStore.js'
 
 // sw.js runs in a worker, cannot import from src/, and cannot be unit-tested in
 // a node runner. What *can* be checked is the source text — and the properties
@@ -17,15 +17,27 @@ const code = sw.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '')
 
 describe('the worker and the page agree on their three strings', () => {
   // The worker cannot import them, so they are duplicated. Duplication is fine;
-  // silent divergence is not.
+  // silent divergence is not. The pref URL is no longer among them — the worker
+  // stopped reading the flag when the store moved to the page, and asserting a
+  // string it does not use would be asserting nothing.
+
   it('uses the same prefs cache name', () => {
+    // Still in the keep set: the worker does not read the flag, but it is the
+    // thing that would delete it.
     expect(code).toContain(`'${PREFS_CACHE}'`)
   })
-  it('uses the same pref URL', () => {
-    expect(code).toContain(`'${PREF_URL}'`)
+
+  it('names the results bucket the page will write to', () => {
+    // resultsStore.js derives its bucket from the shell name and relies on this
+    // one being in the keep set, or an activation would delete the saved route.
+    expect(code).toContain(`${RESULTS_PREFIX}\${VERSION}`)
+    expect(code).toMatch(/keep\s*=\s*new Set\(\[[^\]]*RESULTS_CACHE/)
   })
-  it('uses the same results prefix', () => {
-    expect(code).toContain(`'${RESULTS_PREFIX}'`)
+
+  it('names the shell bucket the page reads its version from', () => {
+    // The page cannot see __PRECACHE_VERSION__ — the plugin computes it from
+    // the finished bundle. It reads this name instead, so the prefix is shared.
+    expect(code).toContain(`${SHELL_PREFIX}\${VERSION}`)
   })
 })
 
@@ -49,7 +61,7 @@ describe('nothing cross-origin is ever cached', () => {
   })
 })
 
-describe('the consent flag fails closed', () => {
+describe('the caches the worker keeps', () => {
   it('keeps the prefs cache unversioned', () => {
     // Versioning it would let a deploy silently re-grant a withdrawn permission
     // — or silently withdraw a given one.
@@ -58,14 +70,11 @@ describe('the consent flag fails closed', () => {
   })
 
   it('versions the shell and results caches', () => {
+    // Still both, and the results one still matters: everything except the
+    // current build's bucket is swept on activate, which is how a deploy
+    // replaces the saved set now that the page is what writes it.
     expect(code).toMatch(/SHELL_CACHE\s*=\s*`[^`]*\$\{VERSION\}/)
     expect(code).toMatch(/RESULTS_CACHE\s*=\s*`[^`]*\$\{VERSION\}/)
-  })
-
-  it('answers no when the flag cannot be read', () => {
-    const fn = code.slice(code.indexOf('async function mayStoreResults'))
-    const body = fn.slice(0, fn.indexOf('\n}'))
-    expect(body).toMatch(/catch\s*{\s*return false/)
   })
 
   it('has no message channel — the page owns the flag', () => {
@@ -73,43 +82,29 @@ describe('the consent flag fails closed', () => {
   })
 })
 
-describe('a saved route cannot become a history', () => {
-  it('stores only a completed stream', () => {
-    const fn = code.slice(code.indexOf('async function storeResult'))
-    const body = fn.slice(0, fn.indexOf('\n}'))
-    expect(body).toContain('"type":"done"')
-    expect(body).toContain('"type":"error"')
+describe('the worker no longer stores routes', () => {
+  // The store moved to src/lib/resultsStore.js, and its invariants moved to
+  // resultsStore.test.js where they can be exercised instead of grepped. What
+  // is left to assert here is that the worker does not quietly grow a second
+  // copy: two writers cannot both honour "only the most recent one is kept".
+
+  it('does not intercept the route endpoint', () => {
+    expect(code).not.toContain('/api/routes')
   })
 
-  it('deletes what is already there before putting the new one', () => {
-    const fn = code.slice(code.indexOf('async function storeResult'))
-    const body = fn.slice(0, fn.indexOf('\n}'))
-    expect(body.indexOf('cache.delete')).toBeLessThan(body.indexOf('cache.put'))
+  it('lets every API request go to the network', () => {
+    const listener = code.slice(code.indexOf("addEventListener('fetch'"))
+    expect(listener).toMatch(/pathname\.startsWith\('\/api\/'\)\)\s*return/)
   })
 
-  it('forgets every saved route when consent is absent', () => {
-    expect(code).toMatch(/else\s*{\s*event\.waitUntil\(forgetResults\(\)\)/)
+  it('never writes anything but the shell', () => {
+    // cache.put appears exactly nowhere; the shell is installed with addAll.
+    expect(code).not.toContain('cache.put')
+    expect(code).toContain('cache.addAll')
   })
 
-  it('never deletes the shell or the prefs when forgetting routes', () => {
-    const fn = code.slice(code.indexOf('async function forgetResults'))
-    const body = fn.slice(0, fn.indexOf('\n}'))
-    expect(body).toContain('startsWith(RESULTS_PREFIX)')
-    expect(body).not.toContain('meander-shell')
-    expect(body).not.toContain('PREFS_CACHE')
-  })
-
-  it('keys the cache on the request body, not on the URL alone', () => {
-    // Every route request is a POST to the same path. Keying on the URL would
-    // make every search look like the same search.
-    const fn = code.slice(code.indexOf('function routeCacheKey'))
-    expect(fn.slice(0, fn.indexOf('\n}'))).toMatch(/body/)
-  })
-
-  it('computes the key before the fetch consumes the body', () => {
-    const fn = code.slice(code.indexOf('async function handleRoutes'))
-    const body = fn.slice(0, fn.indexOf('\n}\n'))
-    expect(body.indexOf('routeCacheKey')).toBeLessThan(body.indexOf('await fetch('))
+  it('does not read the consent flag it no longer needs', () => {
+    expect(code).not.toContain('save-results')
   })
 })
 
