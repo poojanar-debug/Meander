@@ -178,15 +178,35 @@ describe('writeUrl and shareUrl', () => {
     vi.unstubAllGlobals()
   })
 
-  const stubWindow = () => {
-    const replaceState = vi.fn()
-    const pushState = vi.fn()
-    vi.stubGlobal('window', {
-      location: { origin: 'https://meander.example', pathname: '/', search: '' },
-      history: { replaceState, pushState },
+  /**
+   * A window whose `replaceState` actually moves the address bar.
+   *
+   * The stub this replaces recorded calls and left `location.search` at ''
+   * forever, which is precisely why BLOCKED.md §9 survived a full suite: every
+   * assertion about "what is in the bar" was really an assertion about the
+   * first write, and a *stale* bar is only visible on the second. Any test that
+   * cares what a reload would see has to read `location.search` back.
+   */
+  const liveWindow = (search = '') => {
+    const location = { origin: 'https://meander.example', pathname: '/', search }
+    const replaceState = vi.fn((_state, _title, url) => {
+      const q = String(url).indexOf('?')
+      location.search = q === -1 ? '' : String(url).slice(q)
     })
+    const pushState = vi.fn()
+    vi.stubGlobal('window', { location, history: { replaceState, pushState } })
+    return { location, replaceState, pushState }
+  }
+
+  const stubWindow = () => {
+    const { replaceState, pushState } = liveWindow()
     return { replaceState, pushState }
   }
+
+  const geolocated = (state = FULL) => ({
+    ...state,
+    origin: { lat: 6.9, lon: 79.8, name: GEOLOCATED },
+  })
 
   it('writes a searched origin to the address bar', () => {
     const { replaceState } = stubWindow()
@@ -198,9 +218,69 @@ describe('writeUrl and shareUrl', () => {
   it('never writes a device fix to the address bar', () => {
     // The address bar persists into browser history. This is "no location
     // history" as an executable assertion rather than a promise in a comment.
-    const { replaceState } = stubWindow()
-    writeUrl({ ...FULL, origin: { lat: 6.9, lon: 79.8, name: GEOLOCATED } })
-    expect(replaceState).toHaveBeenCalledTimes(0)
+    //
+    // Asserted on the *content* of every write rather than on the call count.
+    // The count was the weaker claim and it is now the wrong one: the fix for
+    // §9 clears the bar, which is itself a replaceState.
+    const { location, replaceState } = liveWindow()
+    writeUrl(geolocated())
+    for (const call of replaceState.mock.calls) {
+      expect(String(call[2])).not.toContain('6.9')
+      expect(String(call[2])).not.toContain('79.8')
+      expect(String(call[2])).not.toContain('from=')
+    }
+    expect(location.search).toBe('')
+  })
+
+  it('clears the search before it, instead of leaving it standing — BLOCKED.md §9', () => {
+    // The defect, as a test. Search for a place, then press "Use my location".
+    // The old guard returned before replaceState, so the bar kept the abandoned
+    // place and a reload booted *that* search: App.jsx's init seeds nonce 1 off
+    // whatever decodeState finds.
+    const { location } = liveWindow()
+
+    writeUrl(FULL)
+    expect(location.search).toContain('from=')
+
+    writeUrl(geolocated())
+
+    expect(location.search).toBe('')
+    // The thing that actually hurt: what a reload would ask for.
+    expect(decodeState(location.search)).toBeNull()
+  })
+
+  it('does not resurrect the abandoned search when a control moves afterwards', () => {
+    // Step 3 of the §9 reproduction. The guard keys on the origin, so every
+    // later write was suppressed too — changing the minutes could not repair
+    // the bar, it just left the stale query there.
+    const { location } = liveWindow()
+
+    writeUrl(FULL)
+    writeUrl(geolocated())
+    writeUrl(geolocated({ ...FULL, minutes: 90, mode: 'bike' }))
+
+    expect(location.search).toBe('')
+    expect(decodeState(location.search)).toBeNull()
+  })
+
+  it('puts a searched place back in the bar after a geolocated one', () => {
+    // The other direction: clearing must not be sticky.
+    const { location } = liveWindow()
+
+    writeUrl(geolocated())
+    expect(location.search).toBe('')
+
+    writeUrl(FULL)
+    expect(decodeState(location.search).origin.name).toBe('Colombo Fort')
+  })
+
+  it('writes nothing twice when the bar is already bare', () => {
+    // Clearing an already-clear bar must not spend a history entry.
+    const { replaceState } = liveWindow()
+    writeUrl(geolocated())
+    const after = replaceState.mock.calls.length
+    writeUrl(geolocated({ ...FULL, minutes: 90 }))
+    expect(replaceState.mock.calls.length).toBe(after)
   })
 
   it('still shares a device fix when the user asks it to', () => {

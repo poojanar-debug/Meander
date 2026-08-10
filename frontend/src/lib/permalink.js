@@ -144,8 +144,20 @@ export function writeUrl(state) {
   const l = loc()
   if (!l || typeof window.history?.replaceState !== 'function') return
   // See the header: a searched place goes in, a satellite fix does not.
-  if (state.origin?.name === GEOLOCATED) return
-  const next = `${l.pathname}${encodeState(state)}`
+  //
+  // The refusal **clears** rather than returns, and that distinction is the
+  // whole of BLOCKED.md §9. Returning here left standing whatever was already
+  // in the bar, and the guard keys on the origin, so nothing else could
+  // overwrite it either: search for a place, press "Use my location", and the
+  // URL kept the abandoned place for the rest of the session. A reload then
+  // booted that search — App.jsx's init seeds nonce 1 off the query, so the app
+  // silently asked for a walk the user had moved on from.
+  //
+  // Writing '' is therefore not a tidier way of writing nothing. It is the only
+  // way the address bar can say "there is no search here to reload", which is
+  // the true statement once the origin is one we refuse to record.
+  const query = state.origin?.name === GEOLOCATED ? '' : encodeState(state)
+  const next = `${l.pathname}${query}`
   if (next === `${l.pathname}${l.search}`) return
   window.history.replaceState(null, '', next)
 }
