@@ -2,9 +2,8 @@
 
 Things this run could not finish, what was tried, and what needs a human.
 
-**Four entries are open — §5, a deliberate deferral with a list; §6, which needs
-one command from a human; §7, a deploy this session could not perform; and §8,
-which needs a decision rather than a fix.**
+**Three entries are open — §5, a deliberate deferral with a list; §6, which needs
+one command from a human; and §8, which needs a decision rather than a fix.**
 
 | | |
 |---|---|
@@ -15,7 +14,7 @@ which needs a decision rather than a fix.**
 | §4 two suites asserted things about the machine | **resolved** — TZ and the Mapillary token are now supplied by the harness |
 | §5 the merge took main's frontend entirely | **open** — deliberate; §5 lists what has to come back and when |
 | §6 the deployment VM cannot push to GitHub | **open** — needs a credential only a human can supply |
-| §7 the Caddyfile and rate limit are committed, not deployed | **open** — no SSH from the machine Session B ran on; three commands on the VM |
+| §7 the Caddyfile and rate limit are committed, not deployed | **resolved** — the documented commands were not enough; both needed the container replaced, not reloaded |
 | §8 the saved-route store is inert and the UI says otherwise | **open** — needs a decision, not a fix; §1 reserves the privacy surface to the operator |
 
 ---
@@ -456,7 +455,12 @@ could not carry out.
 
 ---
 
-## 7 · The Caddyfile and the rate limit are committed but not deployed — NEEDS A HUMAN
+## 7 · ~~The Caddyfile and the rate limit are committed but not deployed~~ — RESOLVED
+
+**Resolved:** 2026-08-10, during Session C, on the VM. **Both documented commands
+ran, both exited 0, and neither did anything.** See "What actually deployed it"
+at the end of this section — the commands in this entry were wrong, and wrong in
+a way that reported success.
 
 **Opened:** 2026-08-10, during Session B.
 
@@ -518,6 +522,93 @@ The second of those is the one worth running. `%0a` is the byte that defeated
 the first version of this change: Caddy compared it as a different path and let
 it through, and Starlette's `^/api/health$` matched it anyway, because Python's
 `$` also matches before a trailing newline.
+
+### What actually deployed it
+
+Session C ran the three commands above on the VM. All three exited 0. Afterwards
+`https://meander-app.duckdns.org/api/health` still returned **200**, and
+`/api/health` was still public. Two separate reasons, and both commands report
+success while changing nothing:
+
+**1. `caddy reload` reloaded a file that no longer exists.** `Caddyfile` is
+bind-mounted as a *single file*:
+
+```
+/home/ubuntu/Meander/Caddyfile -> /etc/caddy/Caddyfile
+```
+
+A single-file bind mount binds the **inode**, not the path. `git pull` does not
+edit a file in place — it writes a new one and renames it over the old — so the
+pull that brought Session B's Caddyfile down gave the path a new inode and left
+the container holding the unlinked old one. Measured:
+
+```
+$ stat -c '%i %s' Caddyfile                                  # host
+1311395 10666
+$ docker exec meander-caddy-1 stat -c '%i %s' /etc/caddy/Caddyfile
+1311390 7571
+```
+
+Two different files. `caddy reload` dutifully read `/etc/caddy/Caddyfile`,
+found the pre-Session-B config, and logged:
+
+```
+{"level":"info","msg":"config is unchanged"}
+{"level":"info","logger":"admin.api","msg":"load complete"}
+```
+
+Exit 0. **A reload that could not fail.** The running allowlist was still the
+old `path /api/* /healthz`, confirmed straight out of the admin API:
+
+```
+$ docker exec meander-caddy-1 wget -qO- http://127.0.0.1:2019/config/ \
+    | grep -o '"path":\[[^]]*\]'
+"path":["/api/*","/healthz"]
+```
+
+**2. `--force-recreate api` recreated the container from a stale image.**
+`--force-recreate` replaces the container; it does not rebuild the image, and
+the backend is baked in rather than mounted. The new container came up carrying
+the image built the previous evening:
+
+```
+$ docker exec meander-api-1 grep -n 'per_ip_refill_per_min: float' /app/backend/config.py
+271:    per_ip_refill_per_min: float = 3.0        # repo says 1.0, at config.py:292
+```
+
+So the container restarted, healthily, still serving 3.0.
+
+**The commands that worked**, both of which replace rather than refresh:
+
+```bash
+cd ~/Meander
+docker compose -f docker-compose.yml -f compose.prod.yml up -d --force-recreate caddy
+docker compose -f docker-compose.yml -f compose.prod.yml build api
+docker compose -f docker-compose.yml -f compose.prod.yml up -d --force-recreate api
+```
+
+Recreating `caddy` re-resolves the bind mount against the current path, so the
+container gets the current file. `build api` is the step this entry omitted.
+
+**Verified after**, from this VM over the public hostname:
+
+```
+/api/health        -> 404
+/api/health%0a     -> 404
+/metrics           -> 404
+/readyz            -> 404
+/openapi.json      -> 404
+/healthz           -> {"status":"ok","version":"0.1.0"}
+```
+
+and locally, `rate_limit.per_ip_refill_per_min` is now **1.0**, with
+`routing.self_hosted_source: "env"` and `smoothness` still in `path_details`.
+
+The lesson generalises past this entry: **`caddy reload` cannot detect that it
+is reading a replaced file, and `--force-recreate` cannot detect that its image
+is stale.** Both failure modes are silent and both present as a successful
+deploy. Check the effect over the wire, never the exit code. `docs/RUNBOOK.md`
+should carry the single-file bind-mount trap; Session C's C3 covers that file.
 
 ---
 
