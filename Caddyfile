@@ -61,10 +61,10 @@ meander-app.duckdns.org {
 	# every route the app has, and the app has eleven — four of which FastAPI
 	# registers by itself and nothing in backend/ turns off:
 	#
-	#   /api/routes  /api/geocode  /api/report-barrier  /api/health   ← wanted
-	#   /healthz                                                      ← wanted
-	#   /readyz      /metrics                                         ← not
-	#   /docs        /docs/oauth2-redirect   /redoc   /openapi.json   ← not
+	#   /api/routes  /api/geocode  /api/report-barrier              ← wanted
+	#   /healthz                                                    ← wanted
+	#   /api/health  /readyz      /metrics                          ← not
+	#   /docs        /docs/oauth2-redirect   /redoc   /openapi.json ← not
 	#
 	# /docs/oauth2-redirect is the one an exact-match rule for /docs misses.
 	#
@@ -73,7 +73,40 @@ meander-app.duckdns.org {
 	# network. On a single VM there is no inside, so the boundary has to be
 	# here. It is still reachable for operators at 127.0.0.1:8000/metrics over
 	# SSH, which is what that docstring actually wants.
-	@public path /api/* /healthz
+	#
+	# ⚠ That argument was applied backwards, and this file shipped the mistake.
+	# /metrics (main.py:1270-1325) renders exactly metrics.snapshot(). Every one
+	# of its series appears in /api/health's `counters` too (main.py:1371-1430),
+	# and /api/health then adds what /metrics has never carried: the router's
+	# internal endpoint URL, key-presence booleans, cache and schema counts, and
+	# the rate-limiter's own configuration and consumption. It is a strict
+	# superset. Firewalling /metrics while publishing /api/health kept the
+	# smaller disclosure private and served the larger one to the internet.
+	#
+	# So /api/health leaves the allowlist and falls through to the default deny
+	# below. "Loopback-only" here means the same thing it already means for
+	# /metrics: the API's only binding is 127.0.0.1:8000 (compose.prod.yml:107),
+	# so 127.0.0.1:8000/api/health over SSH is the whole remaining surface, and
+	# every runbook step that reads it runs on the VM anyway.
+	#
+	# Deliberately NOT done: a `not remote_ip 127.0.0.1/8 ::1` matcher letting
+	# loopback through Caddy. Caddy is reached through Docker's published port,
+	# so a request from the VM arrives with the bridge gateway as its peer
+	# address, not 127.0.0.1 — and that rule would deny the operator while
+	# reading as though it permitted them. Removing the path from the allowlist
+	# does not depend on being right about the peer address.
+	#
+	# /healthz stays public. It is what UptimeRobot polls, and it discloses a
+	# status string and a version and nothing else.
+	# Both spellings. `path` is an exact match, so `not path /api/health` alone
+	# let /api/health/ straight through to the app — which answers it with a 307
+	# to /api/health, so nothing leaked, but only because a second rule happened
+	# to catch what the first one missed. Measured against a real Caddy with a
+	# stub upstream before this line was written, not reasoned about.
+	@public {
+		path /api/* /healthz
+		not path /api/health /api/health/
+	}
 
 	handle @public {
 		# 64 KB, matching the app's own ceiling. The app enforces that from the

@@ -291,7 +291,9 @@ Two things stay optional:
 | `MAPILLARY_TOKEN` + `python3 -m backend.batch_score` | scenery is scored from route shape and OSM tags; every route reports `scoring_method: "geometry_only"` instead of `"clip"` |
 | `ANTHROPIC_API_KEY` | `narration` stays `null` and the card says the description is still being written |
 
-Watch your quota at `/api/health` under `rate_limit.served_today`. The default
+Watch your quota under `rate_limit.served_today` — on the VM, with
+`curl -s 127.0.0.1:8000/api/health`, because `/api/health` is not reachable from
+outside the machine and deliberately so. The default
 daily ceiling is 2,000 routed requests, and the default per-IP rate is 12
 straight away then 1 a minute — 1,440 a day, so no single address can spend the
 ceiling on its own.
