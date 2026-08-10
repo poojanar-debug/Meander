@@ -44,6 +44,20 @@ Split it.
   byte-identical request body, which is exactly the key the worker stored the
   result under. Two features built for unrelated reasons.
 
+  > **Amended 2026-08-10.** The decision stands; the mechanism in that last
+  > bullet has moved twice and the paragraph is left as written so the movement
+  > is visible. The worker no longer stores anything — BLOCKED.md §8 found it
+  > had never run in production, and `src/lib/resultsStore.js` on the page does
+  > it now. And the key is no longer the byte-identical body: it is a SHA-256
+  > over the request with the **origin snapped to a 4 dp grid**, because a
+  > device fix is a fresh measurement every time and byte-identity meant a
+  > geolocated search could never replay at all. So the permalink is still
+  > load-bearing for a search that came from a link, and it is deliberately not
+  > load-bearing for one that came from the device: BLOCKED.md §9 made
+  > `writeUrl` clear the address bar for a geolocated origin rather than leave
+  > the previous search standing, so there is no link to reload, and the grid is
+  > what carries that case instead.
+
 ## Alternatives rejected
 
 **Cache results unconditionally.** The straightforward reading of the brief.

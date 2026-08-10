@@ -53,7 +53,7 @@ export default function OfflineControl() {
 
       <p className="field__hint">
         {saveResults
-          ? 'The last set of routes is kept on this device, in the browser’s cache store — not in a cookie, and never sent anywhere. Only the most recent one is kept, it is always labelled with its age, and choosing “No” deletes it immediately.'
+          ? 'The last set of routes is kept on this device, in the browser’s cache store — not in a cookie, and never sent anywhere. Only the most recent one is kept, it is always labelled with its age, and choosing “No” deletes it immediately. It comes back when you ask for the same walk again from roughly the same place, within a few paces, so that it still works when your phone’s idea of where you are has drifted.'
           : 'Nothing about where you go is kept. The app itself is stored so it opens without a connection, but that is the program — the same for everyone, and it says nothing about you.'}
       </p>
     </fieldset>

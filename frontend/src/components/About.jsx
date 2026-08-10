@@ -36,21 +36,40 @@ const About = forwardRef(function About({ cache }, ref) {
         </p>
 
         {/* The control that changes this promise sits against the sentence that
-            states it, rather than three screens away in a settings drawer. */}
+            states it, rather than three screens away in a settings drawer.
+
+            The second sentence is new, and it is here because the match stopped
+            being exact. A saved set now answers a search from a spot a few
+            paces off rather than only a byte-identical repeat, which is what
+            makes it work at all for a starting point taken from the device —
+            two fixes from the same doorstep are never identical. That is a
+            thing the reader can observe, so it is stated rather than left to be
+            noticed. See KEY_DP in lib/resultsStore.js. */}
         <p>
           If you turn on “keep the last routes”, one set of routes is kept too, always labelled
-          with its age and deleted the moment you turn it off.
+          with its age and deleted the moment you turn it off. It is handed back when you ask for
+          the same walk from roughly the same place — within a few paces, not a street — because a
+          phone’s idea of where you are shifts by a few metres each time you ask it.
         </p>
 
         <OfflineControl />
 
         {/* The address bar is the one place a coordinate becomes visible, so it
             is named here rather than left for someone to notice. A device fix
-            is never written there — only a place the user searched for. */}
+            is never written there — only a place the user searched for.
+
+            The third sentence is the fix for BLOCKED.md §9 showing through. The
+            old copy said a reload keeps your search, full stop, and that was
+            false for a geolocated one in the direction that surprises someone:
+            writeUrl returned without clearing, so the bar kept the *previous*
+            search and a reload booted that instead. Clearing it is the honest
+            behaviour, and this says what clearing means. */}
         <p>
-          One exception you can see: your search is kept in the address bar, so a reload keeps it
-          and the link is shareable. A place taken from your device is never written there — only a
-          place you searched for. Nothing is added to the back button either way.
+          One exception you can see: a place you searched for is kept in the address bar, so a
+          reload keeps it and the link is shareable. A place taken from your device is never written
+          there. Starting from your location empties the bar instead, so a reload starts fresh
+          rather than reopening the search before it. Nothing is added to the back button either
+          way.
         </p>
 
         {/* The paragraph above has exactly one exception, so it names it rather
