@@ -32,10 +32,16 @@ import {
  * **What is not kept: the request.** The worker keyed its entry on
  * `url#body`, which put an unrounded GPS fix in a cache key that any script on
  * the origin can enumerate. Here the request is reduced to a SHA-256 and only
- * the digest is written. A replay still requires a byte-identical request, and
- * the coordinate is no longer sitting in the key. `permalink.js` refuses to
- * write a device fix to the address bar; writing one to a cache key was the
- * same disclosure by another route.
+ * the digest is written — the coordinate is not sitting in the key.
+ * `permalink.js` refuses to write a device fix to the address bar; writing one
+ * to a cache key was the same disclosure by another route.
+ *
+ * A replay requires the *same search*, which since KEY_DP below means the same
+ * request with the origin snapped to an ~11 m grid, not a byte-identical one.
+ * That is a deliberate widening and it is the narrowest one that makes the
+ * store work at all for a device fix — see KEY_DP for why byte-identical was
+ * the same as never. It changes when a replay happens. It does not change what
+ * is written: still one digest, still one entry, still no coordinate.
  *
  * **Nothing here enumerates.** There is one entry, at one fixed URL, readable
  * only by presenting a request that hashes to the stored digest. No "recent
@@ -87,24 +93,113 @@ export async function resultsCacheName() {
 }
 
 /**
+ * How coarse the origin is before it is hashed. Four decimal places.
+ *
+ * **The request body is not rounded.** This grid exists only inside the key, and
+ * `api/client.js` sends `buildRouteRequest`'s full-precision coordinates to the
+ * router exactly as before — routing accuracy is untouched. What changes is only
+ * the question "is this the same search?".
+ *
+ * It has to change, because at full precision the answer was *no* for the one
+ * journey the store exists for. A device fix is a fresh measurement every time:
+ * stand still, ask twice, and the two differ in the sixth decimal. That is a
+ * different JSON body, a different SHA-256 and a miss — so a geolocated search
+ * could never replay, and the walk-out-of-signal case only ever recovered for a
+ * search that arrived from a link. BLOCKED.md §9 recorded that, and the fix for
+ * it removed the other half: a geolocated search no longer leaves a link behind
+ * to reload.
+ *
+ * Four places is ~11 m of latitude — tighter than the GPS jitter it is
+ * absorbing, and far short of a street.
+ */
+const KEY_DP = 4
+const KEY_SCALE = 10 ** KEY_DP
+
+/** Which grid square a degree value falls in. An integer, so no float is re-derived. */
+const gridCell = (deg) => Math.round(deg * KEY_SCALE)
+
+/**
+ * The request as it is hashed: everything byte-exact except the origin, which
+ * becomes a pair of grid indices.
+ *
+ * **Only the origin.** A destination is always a place picked from search, and
+ * `backend/routing.py` rounds geocode results to six places before they are ever
+ * shown, so the same pick yields the same bytes on every reload — there is no
+ * jitter there to absorb. Widening it would buy nothing and would let two
+ * genuinely different destinations eleven metres apart answer for each other.
+ * `onLocate` in App.jsx dispatches `type: 'origin'` and nothing else, so a
+ * device fix cannot reach the destination field in the first place.
+ *
+ * Null when there is no usable origin, which fails closed: no digest, so no
+ * save and no read.
+ */
+function keyedRequest(request, dLat = 0, dLon = 0) {
+  const origin = request?.origin
+  if (!origin || !Number.isFinite(origin.lat) || !Number.isFinite(origin.lon)) return null
+  return {
+    ...request,
+    origin: { lat: gridCell(origin.lat) + dLat, lon: gridCell(origin.lon) + dLon },
+  }
+}
+
+/**
  * The request, reduced to a digest.
  *
  * Only used to answer "is this the same search?". A miss is a miss — the app
  * asks the network — so the cost of a hash that cannot be computed is one
  * unsaved route, never a wrong replay. `crypto.subtle` needs a secure context;
  * without one, this returns null and nothing is stored.
+ *
+ * `dLat`/`dLon` step the origin by whole grid squares. `readRoutes` uses them to
+ * ask about the neighbours of the square it is standing in; a save always uses
+ * the square itself.
  */
-export async function fingerprint(request) {
+export async function fingerprint(request, dLat = 0, dLon = 0) {
   try {
     const subtle = globalThis.crypto?.subtle
     if (!subtle) return null
-    const bytes = new TextEncoder().encode(JSON.stringify(request))
+    const keyed = keyedRequest(request, dLat, dLon)
+    if (!keyed) return null
+    const bytes = new TextEncoder().encode(JSON.stringify(keyed))
     const digest = await subtle.digest('SHA-256', bytes)
     return Array.from(new Uint8Array(digest), (b) => b.toString(16).padStart(2, '0')).join('')
   } catch {
     return null
   }
 }
+
+/**
+ * The nine squares a saved origin may be sitting in for this request to be "the
+ * same search": the one the caller is standing in, and its eight neighbours.
+ *
+ * Rounding alone does not survive its own boundary, and that is not a corner
+ * case — it is most of the map. Two fixes five metres apart fall in the same
+ * square only if no grid line runs between them, which for a 6.9 m-wide square
+ * (longitude, at London's latitude) happens well under half the time. A store
+ * that replayed on a coin flip would be worse than one that never replayed,
+ * because it would look intermittent rather than absent.
+ *
+ * Asking about the neighbours makes it deterministic in the direction that
+ * matters: if every coordinate moved by less than one square — 11.1 m of
+ * latitude, 6.9 m of longitude at London — the saved square is at worst one step
+ * away in each axis, so it is always found. The cost is that the far edge widens
+ * to two squares along a diagonal.
+ *
+ * Measured, not predicted. resultsStore.test.js bisects for the flip point from
+ * nine positions across one square × 36 bearings, and reports **7.00 m to
+ * 25.58 m** at 51.5074 — the near figure is a fix in the corner of its square
+ * stepping west, the far one a fix in the opposite corner going diagonally. So
+ * 5 m always replays and 200 m never does, which are the two claims, and the
+ * margin on the near one is 2 m rather than the 6 m a cell-centre measurement
+ * would have flattered it into reporting.
+ *
+ * ⚠ The east-west figures scale with cos(latitude). Above roughly 60° the
+ * longitude square is narrow enough that a 5 m step can cross two of them, and
+ * the guarantee weakens to "usually". Nothing breaks — a miss is a network
+ * request — but it is not the same promise, so it is written down rather than
+ * engineered around.
+ */
+const NEIGHBOURHOOD = [-1, 0, 1]
 
 /**
  * Keep one set of routes, if the user has said we may.
@@ -207,10 +302,20 @@ export async function readRoutes(request) {
     if (envelope?.v !== ENVELOPE_VERSION) return null
     if (!envelope.payload || !Array.isArray(envelope.payload.routes)) return null
 
-    const digest = await fingerprint(request)
-    if (!digest || digest !== envelope.fingerprint) return null
+    if (typeof envelope.fingerprint !== 'string' || !envelope.fingerprint) return null
 
-    return { response: hit, payload: envelope.payload }
+    // Nine digests, one comparison each. There is still exactly one entry at one
+    // fixed URL — the neighbourhood is a question asked about the digest already
+    // stored, not extra keys to look under, so nothing here reads or writes more
+    // than the single-digest version did.
+    for (const dLat of NEIGHBOURHOOD) {
+      for (const dLon of NEIGHBOURHOOD) {
+        const digest = await fingerprint(request, dLat, dLon)
+        if (!digest) return null
+        if (digest === envelope.fingerprint) return { response: hit, payload: envelope.payload }
+      }
+    }
+    return null
   } catch {
     return null
   }
