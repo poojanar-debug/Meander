@@ -90,6 +90,7 @@ plausible-looking wrong answer:
 | `heading` is ignored when `algorithm=round_trip` | Do not depend on loop direction. |
 | Mapillary bbox must be < 0.01° square (since 2026-01-16) | Sample points along the polyline, one ±0.002° bbox per point. |
 | Render free tier is 512 MB; CLIP needs 2–3 GB | `requirements-deploy.txt` must never contain `torch` or `open-clip-torch`. |
+| **The Cloudflare preview deployment your PR creates cannot reach the API** | Known, decided, and not a bug in your branch. Every preview build gets a fresh `<hash>.meander-eoc.pages.dev` hostname, and `backend/config.py:336-372` compares `MEANDER_ALLOWED_ORIGINS` as verbatim strings — there is no pattern matching anywhere in the backend. Only the stable `https://meander-eoc.pages.dev` is allowlisted, so a preview gets `400 Disallowed CORS origin` on every call. Develop against `npm run dev:mock`. See DEPLOY.md for why this was accepted rather than fixed. |
 
 ## Style
 

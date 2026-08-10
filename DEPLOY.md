@@ -202,6 +202,56 @@ are in [`docs/RUNBOOK.md`](docs/RUNBOOK.md).
 
 ---
 
+## Preview deployments are CORS-rejected, on purpose
+
+Every Cloudflare Pages build that is not on the production branch is published
+at a fresh, per-deployment hostname — `https://<hash>.meander-eoc.pages.dev`.
+The API allowlists one origin, the stable project URL, so **every preview
+deployment fails CORS on every call.** Measured against the live API:
+
+```
+$ curl -i -X OPTIONS https://meander-app.duckdns.org/api/routes \
+    -H 'Origin: https://abc123.meander-eoc.pages.dev' \
+    -H 'Access-Control-Request-Method: POST' \
+    -H 'Access-Control-Request-Headers: content-type'
+HTTP/2 400
+Disallowed CORS origin
+```
+
+with no `access-control-allow-origin` header at all, against a `200` and
+`access-control-allow-origin: https://meander-eoc.pages.dev` for the stable one.
+
+Session A saw this happen for real: Caddy's log shows an iPhone hitting
+`POST /api/routes` from `https://7ff77dbe.meander-eoc.pages.dev` and being
+rejected.
+
+**Three options existed, and this is the one that was taken:**
+
+1. **Accept it.** Previews are for looking at the UI; develop against the mock
+   with `npm run dev:mock`, which needs no API at all.
+2. Build previews against the mock automatically — a `VITE_MOCK_API=1` preview
+   environment variable in the Pages project. Rejected only because it makes a
+   preview quietly *not* the thing it looks like, which is worse than a preview
+   that visibly cannot reach the server.
+3. Teach the backend pattern matching. `backend/config.py:336-372` comma-splits
+   `MEANDER_ALLOWED_ORIGINS` and compares verbatim; there is no
+   `allow_origin_regex` anywhere in the backend and no test pins the behaviour,
+   so this is an absence rather than a guarantee. Rejected because a regex over
+   an origin allowlist is a security control that is easy to write
+   almost-correctly — `.*\.meander-eoc\.pages\.dev` also matches
+   `evil.meander-eoc.pages.dev.attacker.com` if the anchor is wrong — and the
+   thing it buys is convenience on a branch build.
+
+If you need a specific preview to reach the API, add that exact origin to
+`MEANDER_ALLOWED_ORIGINS` on the VM for as long as you need it, and take it out
+again. Do not put a per-deployment hostname in the committed config: it works
+today and breaks on the next Pages build.
+
+CONTRIBUTING.md carries the short version, in the gotchas table, because the
+person who hits this is opening a pull request rather than reading this file.
+
+---
+
 ## Things that will look like bugs and are not
 
 The most useful table in this document. Kept from the Render version and
@@ -218,6 +268,7 @@ extended, because most of it was never about Render.
 | 429 with "used up its routing allowance" | The daily ceiling. Working as intended. |
 | `/api/health` 404s from your laptop but `/healthz` is fine | Deliberate, since the Caddyfile stopped allowlisting it. `/api/health` is a strict superset of `/metrics` — the same counters, plus the router's internal URL, key-presence booleans, cache counts and the rate limiter's own configuration — and `/metrics` was already firewalled to hide exactly that, so publishing the larger one was the wrong way round. Read it on the VM: `curl -s 127.0.0.1:8000/api/health`. `/healthz` stays public because UptimeRobot polls it and it discloses a status string and a version. |
 | *Everyone* getting 429 at once | `MEANDER_TRUSTED_PROXY_HOPS` is wrong. Behind CloudFront **and** an ALB it is `2`: the header is `viewer, cloudfront` and the limiter counts from the right. At `1` every request in the world shares one bucket, and the limiter still *works*, which is what makes it hard to spot. |
+| A Cloudflare **preview** deployment loads, but every API call fails CORS | Expected, and accepted rather than fixed — see "Preview deployments" above. |
 | Routes appear but the map is blank | CSP `connect-src`/`img-src` is missing `https://tiles.openfreemap.org`. |
 | The map is blank **and** the app says it is showing a saved copy | Correct. Map tiles are deliberately never cached — a tile cache is a record of where you have been — so an offline route has no map. Everything the routes say is in the list. |
 | Nothing is served offline at all | Correct **for now**, and a regression this tree owns. The service worker and the saved-route store belonged to the launch frontend and did not survive the reconciliation merge — BLOCKED.md §5. They are coming back on native storage, because a service worker never registers under `capacitor://localhost` in the first place. |
