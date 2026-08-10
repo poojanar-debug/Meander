@@ -112,22 +112,50 @@ export async function resultsCacheName() {
  * the question "is this the same search?".
  *
  * It has to change, because at full precision the answer was *no* for the one
- * journey the store exists for. A device fix is a fresh measurement every time:
- * stand still, ask twice, and the two differ in the sixth decimal. That is a
- * different JSON body, a different SHA-256 and a miss — so a geolocated search
- * could never replay, and the walk-out-of-signal case only ever recovered for a
- * search that arrived from a link. BLOCKED.md §9 recorded that, and the fix for
- * it removed the other half: a geolocated search no longer leaves a link behind
- * to reload.
+ * journey the store exists for. A device fix is a fresh measurement every time,
+ * so two requests from one doorstep are two different JSON bodies, two different
+ * SHA-256s and a miss — a geolocated search could never replay, and the
+ * walk-out-of-signal case only ever recovered for a search that arrived from a
+ * link. BLOCKED.md §9 recorded that, and the fix for it removed the other half:
+ * a geolocated search no longer leaves a link behind to reload.
  *
- * Four places is ~11 m of latitude — tighter than the GPS jitter it is
- * absorbing, and far short of a street.
+ * Four places is ~11 m of latitude, and the neighbourhood below takes the
+ * guaranteed match to 7 m and the far edge to ~26 m at London.
+ *
+ * ⚠ **How often that is enough depends on the fix, and this app asks for the
+ * coarse one.** An earlier version of this comment said two fixes from one spot
+ * "differ in the sixth decimal" — 0.11 m — and that was wrong about the app it
+ * is in. App.jsx:429 passes `enableHighAccuracy: false`, which is an explicit
+ * request for the wifi/cell provider rather than GPS, and that provider returns
+ * access-point centroids that step by tens of metres. Measured by an agent that
+ * did not write this, 200k trials per cell, two independent fixes of one
+ * standing person:
+ *
+ *       σ of one fix   1 m    3 m    5 m     8 m     10 m    20 m
+ *       London         100%   96.6%  81.0%   52.7%   39.1%   12.6%
+ *
+ * So this is not the coin flip the grid-line problem was — it is a different
+ * one, and it is not fixed here. At σ = 8 m the store replays about half the
+ * time. Three things would change that and none is this session's to take:
+ * `enableHighAccuracy: true`, a coarser KEY_DP, or reading
+ * `position.coords.accuracy` — which App.jsx:414 currently discards — and
+ * choosing the grid from it. Recorded in BLOCKED.md rather than guessed at,
+ * because widening the match is a privacy decision and not a bug fix.
  */
 const KEY_DP = 4
 const KEY_SCALE = 10 ** KEY_DP
 
-/** Which grid square a degree value falls in. An integer, so no float is re-derived. */
-const gridCell = (deg) => Math.round(deg * KEY_SCALE)
+/**
+ * Which grid square a degree value falls in. An integer, so no float is
+ * re-derived.
+ *
+ * Exported for the suite, and that is not a convenience. The boundary test used
+ * to compute the cell edge with its own copy of `Math.round(x * 1e4)` and assert
+ * against that — an assertion about the test's arithmetic, not the store's,
+ * which stayed green against a store mutated to `Math.floor`. A test that asks
+ * "are these two in different squares?" has to ask the thing that decides.
+ */
+export const gridCell = (deg) => Math.round(deg * KEY_SCALE)
 
 /**
  * The request as it is hashed: everything byte-exact except the origin, which
@@ -206,11 +234,26 @@ export async function fingerprint(request, dLat = 0, dLon = 0) {
  *
  * ⚠ The east-west figures scale with cos(latitude), so the guarantee is not
  * global. The longitude square is 6.93 m at London, 5.57 m at 60° and 1.93 m at
- * 80°, and the 5 m guarantee breaks above **63.2°** — arccos(5 / 11.132) — where
- * a 5 m step east can cross two squares. Tromsø and Fairbanks are past it.
- * Nothing breaks there: a miss is a network request, which is what the app did
- * before any of this. But it is not the same promise, so it is written down
- * rather than quietly engineered around with a wider probe.
+ * 80°, and the 5 m guarantee breaks above **63.28°**, where a 5 m step east can
+ * cross two squares. Tromsø and Fairbanks are past it. That figure is bisected
+ * against the real module — every 5 m move replays up to 63.2776° and first
+ * fails at 63.2782° — not derived; the derivation this comment used to show,
+ * arccos(5 / 11.132), gives 63.31° because 11.132 is the *equatorial* degree.
+ *
+ * Above ~85° it is not a degradation but an absence: 3 m due east at 89° is 15
+ * squares, at 89.999° it is 15,454. Nothing breaks — a miss is a network
+ * request, which is what the app did before any of this — but "the promise
+ * weakens" would be too kind, so it says this instead.
+ *
+ * ⚠ The antimeridian is a dead zone. Two points 2 m apart either side of ±180°
+ * longitude are 3,600,000 squares apart, so nothing on the far side of the line
+ * ever replays for anything on the near side, at any separation. Same at the
+ * pole for two longitudes 180° apart. A `lon ± 360` probe would close it and is
+ * deliberately not written: the cost of the gap is one network request, and the
+ * cost of the code is a second wrap-around rule in the one function that decides
+ * whether two searches are the same. Documented because this module documents
+ * the cos(latitude) limit at length, and leaving its neighbour unmentioned would
+ * be the file failing its own standard.
  */
 const NEIGHBOURHOOD = [-1, 0, 1]
 
@@ -326,7 +369,24 @@ export async function readRoutes(request) {
       for (const dLon of NEIGHBOURHOOD) {
         const digest = await fingerprint(request, dLat, dLon)
         if (!digest) return null
-        if (digest === envelope.fingerprint) return { response: hit, payload: envelope.payload }
+        if (digest === envelope.fingerprint) {
+          // Re-read the flag before handing anything back, exactly as saveRoutes
+          // does after its put. The check at the top of this function is up to
+          // nine awaits ago, and every one of them is a point at which another
+          // tab — or this one, with a stream still finishing — can press "No".
+          //
+          // That window was one await wide before the neighbourhood existed, so
+          // the top-of-function check was very nearly enough. Widening the match
+          // widened the window with it, and an agent that did not write the
+          // change found it: consent withdrawn during the first digest, payload
+          // still returned on the fifth probe, drawn on the map and announced as
+          // "Showing a saved copy from N minutes ago" — and then held in React
+          // state, exportable to GPX, for the rest of the session.
+          //
+          // A withdrawal a read can outrun is not a withdrawal.
+          if (!(await readSaveResults()).saveResults) return null
+          return { response: hit, payload: envelope.payload }
+        }
       }
     }
     return null
