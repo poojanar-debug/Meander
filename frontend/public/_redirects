@@ -1,0 +1,59 @@
+# Redirect and rewrite rules for https://meander-eoc.pages.dev.
+#
+# This file deliberately contains no rules. That is the decision, not an
+# omission, and it is written down here because the obvious edit — adding a
+# single-page-application catch-all — would break the site.
+#
+# ── why there is no `/* /index.html 200` ──────────────────────────────────────
+#
+# Two facts from Cloudflare's own documentation, and they compose badly:
+#
+#   "The order of your redirects matter. If there are multiple redirects for the
+#    same source path, the top-most redirect is applied."
+#   "Redirects are always followed, regardless of whether or not an asset
+#    matches the incoming request."
+#
+# Rules are consulted BEFORE the asset lookup. A catch-all is therefore not a
+# fallback for paths that have no file — it matches everything, first, and wins.
+# `/* /index.html 200` would serve the HTML shell for /assets/index-*.js, for
+# /sw.js, for every icon. The site would not render at all.
+#
+# And it is not needed. Pages already does exactly the SPA fallback we want,
+# automatically, triggered by the absence of a top-level 404.html:
+#
+#   "If your project does not include a top-level 404.html file, Pages assumes
+#    that you are deploying a single-page application. Pages' default
+#    single-page application behavior matches all incoming paths to the root."
+#
+# Verified against the live site: /r/abc, /some/deep/link and /?s=xyz all return
+# 200 with the shell, with no rules file present at all. Permalinks are query
+# strings in any case — permalink.js:150 uses replaceState and never pushState,
+# so a shared link is `/?from=…&to=…`, which is the root and always a real asset.
+#
+# So: do not add a 404.html to the build either. That single file would switch
+# the SPA fallback off for every path at once.
+#
+# ── the /api/* hole, and why it is not closed here ────────────────────────────
+#
+# GET https://meander-eoc.pages.dev/api/health returns 200 with an HTML body
+# today, because of that same automatic fallback. If the app ever made a
+# same-origin API call it would get the shell instead of JSON, and client.js
+# calls res.json() unguarded at :112, :160 and :215 — so the user would see a
+# raw `Unexpected token '<'` SyntaxError in the error banner, and read aloud by
+# the live region, with nothing pointing at the real cause.
+#
+# `_redirects` cannot fix this. Cloudflare supports 200 and the redirect codes
+# 301, 302, 303, 307 and 308, and documents `/blog/* /blog/404.html 404` as an
+# explicitly UNSUPPORTED example. There is no rule that answers 404, and a
+# redirect to any other path lands back on the same fallback.
+#
+# It is closed at the other end instead, where the real defect is: the app only
+# makes same-origin calls when VITE_API_BASE is unset at build time, and
+# vite.config.js now fails the production build when it is. A misconfigured
+# deploy stops before it ships rather than producing an app that talks to
+# itself. See client.js:19 for why empty means same-origin, and DEPLOY.md's
+# "things that will look like bugs" table for the symptom.
+#
+# If a real 404 on /api/* is ever wanted, it needs a Pages Function
+# (functions/api/[[path]].js) — a Worker, and a runtime dependency this project
+# does not currently have.
