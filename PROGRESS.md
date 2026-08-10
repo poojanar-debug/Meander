@@ -3227,3 +3227,182 @@ refill rate, which is how to tell which one is running.
 **Live API calls this phase:** roughly a dozen route requests across the gate
 runs and the streaming measurements, most of them served from the route cache
 and refunded. Two were cold.
+
+---
+
+## Session C, part one — §8, and a deploy that had never happened
+
+The brief said §8 only, and to confirm §7 had landed before building on it. It
+had not, and that took the first hour.
+
+### The reload that could not fail
+
+BLOCKED.md §7 listed three commands and said to run them on the VM. Someone ran
+them. All three exited 0. `/api/health` was still public afterwards, and the
+rate limiter was still refilling at 3.0 rather than 1.0.
+
+`Caddyfile` is bind-mounted as a *single file*, so Docker binds the **inode**,
+not the path. `git pull` does not edit in place — it writes a new file and
+renames it over the old — so the pull that brought Session B's Caddyfile down
+gave the path a new inode and left the container holding the unlinked previous
+one. 1311390, 7571 bytes, still carrying `path /api/* /healthz`. `caddy reload`
+read exactly what it was told to read, correctly logged **"config is
+unchanged"**, and exited 0.
+
+The other half was blunter: `--force-recreate api` replaces a container and
+rebuilds nothing, and the backend is baked into the image rather than mounted.
+The new container came up healthy carrying the previous evening's code.
+
+Both commands report success while changing nothing, which is this repo's
+recurring bug arriving in a deploy step rather than in a gate. Recreating
+`caddy` re-resolves the mount; `build api` was the missing verb. Verified over
+the public hostname afterwards: `/api/health`, its `%0a` variant, `/metrics`,
+`/readyz` and `/openapi.json` all **404**, `/healthz` ok, live refill **1.0**,
+`self_hosted_source: "env"`, `smoothness` still in `path_details`.
+
+### §8 — the store moves to the page
+
+The operator chose option 3. `sw.js`'s cross-origin early return is untouched;
+it was never the thing that was wrong. The store is now
+`src/lib/resultsStore.js`, written by `client.js` after a completed stream.
+
+It stores **less** than the worker did, which is what let this happen without
+re-opening the privacy question. The final payload rather than the raw stream,
+so no progress events and no duplicate routes from the two-pass enrichment. A
+SHA-256 of the request rather than the request, so the unrounded GPS fix that
+used to sit in the cache key — `url#body`, enumerable by any script on the
+origin — is not written at all. One entry at one fixed key, so "only the most
+recent one is kept" is structural rather than a delete-then-put two tabs can
+interleave.
+
+Retention is deliberately unchanged: the bucket is named for the installed
+shell cache, so a deploy still replaces it and `forgetResults()` still finds it
+by prefix. With no shell installed there is no version to bind to and it stores
+nothing — which is also why iOS does not quietly start storing, where no worker
+registers and DEPLOY.md still records the affordance as inert.
+
+The worker's own store had to go rather than sit there dead. In production it is
+unreachable, but `vite preview` serves the build same-origin, and there both
+halves would write. Two writers cannot both honour "only the most recent one is
+kept".
+
+**Three shipped sentences stopped being true** the moment the store worked, all
+of them true before only because nothing was ever written: `UnitsControl.jsx`
+("the only things Meander keeps — never a place, never a route"),
+`ReportBarrier.jsx` ("Nothing else you do in Meander is stored"), and
+`README.md`'s "deleted from two independent paths" — one path now that the
+worker no longer sweeps. About.jsx needed no change. Everything it promised is
+now true, which was the point.
+
+### The gate, and three things it got wrong about itself
+
+The old check was one assertion — "a route is actually saved" — and that is not
+what the control promises. Three promises, three checks now, plus nothing saved
+before being asked, the previous search gone rather than hidden, and the set
+coming back on a reload with the network off.
+
+I watched it fail first, and then watched it fail three more times for reasons
+that were mine:
+
+1. **The consent control is not on the first-run screen.** `App.jsx:460`
+   replaces the whole panel with `<FirstRun>` until there is an origin, and
+   About lives at the foot of that panel — so pressing a chip on the bare site
+   returned `no-fieldset`. A failed press leaves consent ungranted, so "nothing
+   is saved without consent" then **passed**, with the control never found.
+2. **The two searches were the same search.** `minutes=30` and `minutes=45`;
+   `permalink.js:80` writes `min`, and an unrecognised key is ignored rather
+   than rejected, so both decoded to the default. One entry after two identical
+   requests proves nothing was replaced. The gate now captures both POST bodies
+   and refuses to grade "only the most recent" unless they differ.
+3. **A warm server cache failed the chunk-count check.** The existing skip
+   covered the timing assertion and not the one above it. Measured: **1 chunk,
+   51,517 bytes** on a deployment whose streaming is fine.
+
+Final run: **31 passed, 0 failed, 3 not checkable here**, exit 0.
+
+```
+ok  nothing is saved before the user has been asked         [0 entries in 0 bucket(s)]
+ok  a route is actually saved when the user consents        [1 entry at /__meander__/last-routes]
+ok  the two searches are actually different requests        [114B vs 114B, differing]
+ok  only the most recent set is kept, after a second search [1 entry across 1 bucket(s)]
+ok  the saved set is stamped with the time it was written   [X-Meander-Cached … (4s ago)]
+ok  the saved set comes back on a reload with no network
+ok  the replayed set is labelled as saved, with its age, on screen
+ok  the search before it is gone, not merely hidden
+ok  choosing "No" deletes the saved set immediately, without a reload
+```
+
+A 429 now reports as *not graded* rather than as "nothing stored". The section
+spends three tokens against a bucket of 12 refilling at 1/min, so two runs
+inside a few minutes exhaust it — and every store assertion then reports exactly
+the symptom of the bug the section exists to catch. I hit this for real on the
+third run and briefly believed I had broken the store.
+
+### Twenty-six agents, told to break it
+
+Six attackers on named scenarios — consent withdrawn mid-stream, two searches in
+a row, quota exhausted, private browsing, a reload with no network, plus an open
+hunt — then twenty verifiers whose only job was to refute what the attackers
+filed. Thirty-one claims, eighteen serious enough to verify, **four survived**.
+
+- **A `Cache` handle outlives `caches.delete(name)`.** The bucket leaves the
+  registry, the handle keeps working, and a put through it lands where
+  `caches.keys()` cannot see it — so `forgetResults()`, which deletes by name,
+  can never reach it. Withdraw consent between `caches.open()` and the write
+  landing and the result is a route on disk that nothing in the app can delete.
+  The same shape as the Caddyfile above: the name was rebound, the handle was
+  not. It now deletes through the handle it already holds.
+- **Two shells meant two sets.** `caches.open(SHELL_CACHE)` is the install
+  handler's first statement and commits the bucket immediately; `addAll` is
+  atomic and a single non-OK URL rejects it; a rejected install means `activate`
+  never runs, and its keep-set is the only pruner. Two shells then coexist, the
+  page picks `sort()[0]`, and which one wins is a coin flip on a content hash.
+  Two buckets, one set each, is two sets. The store now sweeps every results
+  bucket before it writes, which makes exactly-one structural rather than
+  dependent on the worker lifecycle.
+- **A withdrawal only held while the page did.** The undo is two round trips
+  long; a tab closed inside that window left a route consent no longer covered.
+  Reading the flag at boot now sweeps when the answer is not yes.
+- **A "No" the disk was too full to record did not stop the storing.** The
+  existing routes *were* deleted — which is what made it hard to see — but the
+  flag write threw, the catch swallowed it, the read-back agreed, and the
+  control sprang back to "Yes, keep them". The next search stored again.
+  Deleting the entry needs no new bytes, which is exactly why it works when
+  writing one does not.
+
+A fifth, found while fixing those: the link dying **mid-stream** was guarded
+nowhere. `fetch` was; the reader loop was not, so a raw `TypeError` reached the
+banner as the browser's untranslated string and the store — holding the answer —
+was never asked. It is the same walk as being offline at the start.
+
+Each fix has a test that was watched failing without it. Two of those tests were
+themselves vacuous on the first attempt. The consent-check mutation kept 22/22
+green because the second check masked the first, and only counting the *writes*
+caught it — a store that writes a coordinate to disk and then deletes it has
+still written it. The orphaned-bucket test passed with its fix removed, because
+the sweep re-created the bucket and nothing ever wrote into the orphan it was
+supposed to observe.
+
+### What I did not do
+
+**§9 is new and open.** `permalink.js:147` returns before `replaceState` when
+the origin is geolocated, so the address bar keeps the *previous* search, and
+because the guard keys on the origin nothing written afterwards lands either.
+Search a place, press "Use my location", and the URL is frozen for the rest of
+the session; a reload boots the abandoned search. It makes `About.jsx:51-52`
+false in that case. Reproduced and written up rather than fixed: `permalink.js`
+is shared by the share button, the round-trip suite and `App.jsx`'s init, and
+this session was scoped to §8.
+
+**A geolocated search still cannot replay after a reload.** The request body
+carries unrounded coordinates, so a second GPS fix never hashes the same. The
+saved set is there and is still deleted on "No" — nothing About.jsx promises is
+false — but the walk-out-of-signal journey only recovers for a search that came
+from a link. Making it recover means matching on *rounded* coordinates, which
+changes what "the same search" means and would replay a saved walk for someone
+standing tens of metres away. That is a decision about the privacy surface, and
+§1 reserves it.
+
+**Live API calls this phase:** about twenty route requests across six gate runs,
+most served from the route cache. One run was rate-limited outright, which is
+why the gate now knows what a 429 means.
