@@ -43,10 +43,21 @@ import {
  * the same as never. It changes when a replay happens. It does not change what
  * is written: still one digest, still one entry, still no coordinate.
  *
- * **Nothing here enumerates.** There is one entry, at one fixed URL, readable
- * only by presenting a request that hashes to the stored digest. No "recent
+ * **Nothing here enumerates.** There is one entry, at one fixed URL. No "recent
  * searches", no restore-on-open, no listing. A store you can ask "what did this
  * person do?" is a location history however few rows it has.
+ *
+ * ⚠ This sentence used to end "readable only by presenting a request that
+ * hashes to the stored digest", and that was never true — not before the grid
+ * below and not after it. The digest is a field *inside* the value, not the key:
+ * `readRoutes` matches ENTRY_URL, parses the whole envelope, and only then
+ * compares. Any script on the origin can stop after the parse, and both
+ * ENTRY_URL and RESULTS_PREFIX ship as literals in the bundle. What the digest
+ * actually buys is the two things claimed above it — no coordinate in a cache
+ * key, and no replaying one search into another — and neither is confidentiality
+ * of the geometry against same-origin script. Corrected rather than deleted,
+ * because the widening below would otherwise look like it cost a defence that
+ * was never there.
  *
  * **Versioned against the installed shell.** The bucket is named for the shell
  * cache that is present, so a deploy replaces it exactly as it did when the
@@ -147,8 +158,8 @@ function keyedRequest(request, dLat = 0, dLon = 0) {
  *
  * Only used to answer "is this the same search?". A miss is a miss — the app
  * asks the network — so the cost of a hash that cannot be computed is one
- * unsaved route, never a wrong replay. `crypto.subtle` needs a secure context;
- * without one, this returns null and nothing is stored.
+ * unsaved route, never a route replayed into the wrong search. `crypto.subtle`
+ * needs a secure context; without one, this returns null and nothing is stored.
  *
  * `dLat`/`dLon` step the origin by whole grid squares. `readRoutes` uses them to
  * ask about the neighbours of the square it is standing in; a save always uses
@@ -193,11 +204,13 @@ export async function fingerprint(request, dLat = 0, dLon = 0) {
  * margin on the near one is 2 m rather than the 6 m a cell-centre measurement
  * would have flattered it into reporting.
  *
- * ⚠ The east-west figures scale with cos(latitude). Above roughly 60° the
- * longitude square is narrow enough that a 5 m step can cross two of them, and
- * the guarantee weakens to "usually". Nothing breaks — a miss is a network
- * request — but it is not the same promise, so it is written down rather than
- * engineered around.
+ * ⚠ The east-west figures scale with cos(latitude), so the guarantee is not
+ * global. The longitude square is 6.93 m at London, 5.57 m at 60° and 1.93 m at
+ * 80°, and the 5 m guarantee breaks above **63.2°** — arccos(5 / 11.132) — where
+ * a 5 m step east can cross two squares. Tromsø and Fairbanks are past it.
+ * Nothing breaks there: a miss is a network request, which is what the app did
+ * before any of this. But it is not the same promise, so it is written down
+ * rather than quietly engineered around with a wider probe.
  */
 const NEIGHBOURHOOD = [-1, 0, 1]
 
@@ -278,7 +291,8 @@ export async function saveRoutes(request, payload) {
 }
 
 /**
- * The saved routes, if the stored one answers this exact request.
+ * The saved routes, if the stored one answers this request — same everything,
+ * and an origin within a square or so of the saved one. See KEY_DP.
  *
  * Returns the raw `Response` alongside the payload so the caller reads the age
  * off the header it was written with, rather than being handed a second copy of

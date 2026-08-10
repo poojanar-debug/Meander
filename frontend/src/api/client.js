@@ -94,7 +94,7 @@ function cacheStampFrom(res) {
 }
 
 /**
- * Answer from the saved set, if there is one and it answers *this* request.
+ * Answer from the saved set, if there is one and it answers this request.
  *
  * Only reached when the network failed. Routes are pushed through `onRoute` in
  * the same order a live stream would deliver them, so nothing downstream has to
@@ -123,7 +123,12 @@ async function realFetchRoutes(req, { signal, onProgress, onRoute }) {
     if (err?.name === 'AbortError') throw err
     // No network. This is the walk-out-of-signal case the consent control
     // exists for, so it is asked before the error is raised — and only ever
-    // answers for the identical search.
+    // answers for the same search: same minutes, mode, objectives and
+    // destination, and a starting point within about a square of the saved one.
+    // It stopped being "the identical search" when resultsStore.js started
+    // hashing the origin on a grid, because a device fix is never identical
+    // twice and the identical-only version could not answer a geolocated
+    // search at all.
     const replay = await replayFromStore(req, onRoute)
     if (replay) return replay
     throw new ApiError('Could not reach the Meander server. Check your connection and try again.')
