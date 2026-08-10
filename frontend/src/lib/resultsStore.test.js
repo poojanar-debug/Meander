@@ -1,7 +1,14 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
-import { RESULTS_PREFIX, SHELL_PREFIX, forgetResults, setSaveResults } from './offlineStore.js'
-import { ENTRY_URL, readRoutes, resultsCacheName, saveRoutes } from './resultsStore.js'
+import {
+  PREFS_CACHE,
+  PREF_URL,
+  RESULTS_PREFIX,
+  SHELL_PREFIX,
+  forgetResults,
+  setSaveResults,
+} from './offlineStore.js'
+import { ENTRY_URL, gridCell, readRoutes, resultsCacheName, saveRoutes } from './resultsStore.js'
 
 // These are the invariants that used to be asserted by grepping sw.js as text,
 // in sw-contract.test.js — "stores only a completed stream", "deletes what is
@@ -282,11 +289,24 @@ describe('the same spot, measured', () => {
     lon: lon + (metres * Math.sin(rad(bearing))) / (METRES_PER_DEG_LAT * Math.cos(rad(lat))),
   })
 
-  /** What the offset actually came out as, computed back from the coordinates. */
+  /**
+   * What the offset actually came out as — **by a different method**.
+   *
+   * Haversine on a sphere, from an Earth radius. It shares no constant and no
+   * algebra with offsetBy, and that is the whole point: the first version of
+   * this block checked offsetBy against a flat-earth inverse of itself, which
+   * is a tautology. Doubling METRES_PER_DEG_LAT left that guard green and
+   * silently rewrote the measurement this file prints from 7.00–25.58 m to
+   * 14.00–51.16 m. Found by an agent that did not write the block.
+   */
+  const R_EARTH = 6371008.8
   const metresBetween = (a, b) => {
-    const dy = (b.lat - a.lat) * METRES_PER_DEG_LAT
-    const dx = (b.lon - a.lon) * METRES_PER_DEG_LAT * Math.cos(rad((a.lat + b.lat) / 2))
-    return Math.hypot(dx, dy)
+    const dLat = rad(b.lat - a.lat)
+    const dLon = rad(b.lon - a.lon)
+    const h =
+      Math.sin(dLat / 2) ** 2 +
+      Math.cos(rad(a.lat)) * Math.cos(rad(b.lat)) * Math.sin(dLon / 2) ** 2
+    return 2 * R_EARTH * Math.asin(Math.min(1, Math.sqrt(h)))
   }
 
   const BEARINGS = Array.from({ length: 36 }, (_, i) => i * 10)
@@ -310,14 +330,26 @@ describe('the same spot, measured', () => {
     })),
   )
 
-  it('moves a point the distance it says it does', () => {
+  it('moves a point the distance it says it does, measured a different way', () => {
     // The guard against the whole block being vacuous. If offsetBy were wrong —
-    // a missing cos(lat), a degrees/radians slip — every "5 metres" below would
-    // really be some other distance and the measurements would be fiction.
+    // a missing cos(lat), a degrees/radians slip, a wrong metres-per-degree —
+    // every "5 metres" below would really be some other distance and the
+    // measurements would be fiction.
+    //
+    // Graded against haversine, which shares nothing with offsetBy. A relative
+    // tolerance, because the two disagree by the sphere-versus-ellipsoid
+    // difference and nothing else: measured worst case 0.205% over these
+    // bearings and distances, against a Vincenty inverse as a third opinion.
+    // 1% leaves headroom for that without leaving room for an error that
+    // matters — 2× would need 100%.
     for (const bearing of BEARINGS) {
       for (const metres of [0.5, 5, 25, 200]) {
         const moved = offsetBy(REQ.origin, metres, bearing)
-        expect(metresBetween(REQ.origin, moved), `${metres}m @ ${bearing}°`).toBeCloseTo(metres, 2)
+        const actual = metresBetween(REQ.origin, moved)
+        expect(
+          Math.abs(actual - metres) / metres,
+          `${metres}m @ ${bearing}° came out as ${actual.toFixed(4)}m`,
+        ).toBeLessThan(0.01)
       }
     }
   })
@@ -350,12 +382,29 @@ describe('the same spot, measured', () => {
     // so their rounded coordinates differ. Two people could not stand this
     // close together; if this misses, "the same spot" means "the same spot
     // unless a grid line happens to run through it".
-    const line = (Math.round(REQ.origin.lat * 1e4) + 0.5) / 1e4
-    const below = { lat: line - 1e-9, lon: REQ.origin.lon }
-    const above = { lat: line + 1e-9, lon: REQ.origin.lon }
+    // The edge is found by walking until `gridCell` — the store's own function,
+    // imported, not re-implemented — actually changes its answer. The first
+    // version computed the boundary from a local copy of `Math.round(x * 1e4)`
+    // and asserted against that copy, which is an assertion about the test's
+    // arithmetic: it stayed green against a store mutated to `Math.floor`,
+    // where the chosen pair sat mid-square and the case degraded to "the same
+    // point replays".
+    const start = REQ.origin.lat
+    const cell0 = gridCell(start)
+    let lo = start
+    let hi = start + 1e-4
+    for (let i = 0; i < 80; i += 1) {
+      const mid = (lo + hi) / 2
+      if (gridCell(mid) === cell0) lo = mid
+      else hi = mid
+    }
+    const below = { lat: lo, lon: REQ.origin.lon }
+    const above = { lat: hi, lon: REQ.origin.lon }
+
     // Both halves stated, so the test cannot pass by accident: the two really
-    // are in different cells, and they really are that close together.
-    expect(Math.round(below.lat * 1e4)).not.toBe(Math.round(above.lat * 1e4))
+    // are in different squares — according to the store — and they really are
+    // that close together.
+    expect(gridCell(below.lat)).not.toBe(gridCell(above.lat))
     expect(metresBetween(below, above)).toBeLessThan(0.001)
 
     await setSaveResults(true)
@@ -374,7 +423,11 @@ describe('the same spot, measured', () => {
     const flipFor = async (saved, bearing) => {
       let hit = 0
       let miss = 400
-      for (let i = 0; i < 24; i += 1) {
+      // 14 iterations resolves to 400/2^14 = 2.4 cm, far finer than anything
+      // claimed here. 24 spent 3.0 s of the 5 s default timeout on this test
+      // alone, which is a flake waiting for a loaded CI box rather than
+      // precision anybody reads.
+      for (let i = 0; i < 14; i += 1) {
         const mid = (hit + miss) / 2
         if (await readRoutes(at(offsetBy(saved, mid, bearing)))) hit = mid
         else miss = mid
@@ -400,6 +453,15 @@ describe('the same spot, measured', () => {
     // The two claims, and nothing about 4 decimal places.
     expect(nearest).toBeGreaterThan(5)
     expect(furthest).toBeLessThan(200)
+
+    // …and a band, because those two alone are satisfied by an enormous family
+    // of implementations. Widening the probe to ±2 takes the far edge from
+    // 25.58 m to 38.43 m — a distance at which two genuinely different searches
+    // answer for each other — and passed every assertion above it. 30 m is not
+    // a restatement of the grid: it is the point past which "the same spot"
+    // stops being a fair description of what was matched.
+    expect(furthest).toBeLessThan(30)
+    expect(nearest).toBeLessThan(15)
   })
 
   it('does not round the request it was handed', async () => {
@@ -488,6 +550,45 @@ describe('the same spot, measured', () => {
     expect(await readRoutes(nudged)).toBeNull()
     // …while the origin of that same search still tolerates a step.
     expect(await readRoutes({ ...withDest, origin: offsetBy(REQ.origin, 5, 90) })).not.toBeNull()
+  })
+
+  it('makes every square the same width, including the one straddling zero', async () => {
+    // Not a restatement of gridCell. `Math.trunc` in its place passes every
+    // other test in this file while folding -0.00009 and +0.00009 into one
+    // square — 20 m apart at the equator, replaying for each other, where the
+    // same separation misses everywhere else on the map. A grid whose squares
+    // change size by longitude is a match radius that changes with where the
+    // person is standing, and nothing above would notice.
+    //
+    // The width of each square is found by bisecting for its edges with
+    // gridCell itself, rather than by stepping a base value — stepping lands on
+    // exact half-boundaries, where `x + 1e-4` is a float a hair over the line
+    // and the answer moves for reasons that have nothing to do with the grid.
+    // The first version of this test did that and failed against a correct
+    // store, which is the mirror image of the defect it is here to catch.
+    const lowerEdgeOf = (k) => {
+      let lo = (k - 1) * 1e-4
+      let hi = (k + 1) * 1e-4
+      for (let i = 0; i < 200; i += 1) {
+        const mid = (lo + hi) / 2
+        if (gridCell(mid) < k) lo = mid
+        else hi = mid
+      }
+      return hi
+    }
+    const edges = [-3, -2, -1, 0, 1, 2, 3, 4].map(lowerEdgeOf)
+    for (let i = 0; i < edges.length - 1; i += 1) {
+      const width = (edges[i + 1] - edges[i]) / 1e-4
+      expect(width, `square ${i - 3} is ${width.toFixed(3)} squares wide`).toBeCloseTo(1, 6)
+    }
+
+    // Width only, deliberately — not where the edges fall. `Math.floor` shifts
+    // every boundary by half a square and is otherwise the same grid: the
+    // squares stay one wide, saves and reads use the one function, and no
+    // distance behaves differently. It is an equivalent mutation, and a test
+    // that failed it would be pinning an arbitrary alignment and calling it a
+    // guarantee. An earlier draft of this test did exactly that, by asserting
+    // on a specific pair of coordinates across the meridian.
   })
 
   it('stores nothing and replays nothing without a usable origin', async () => {
@@ -593,6 +694,52 @@ describe('withdrawing consent', () => {
     expect(orphaned).not.toBeNull()
     expect(fake.buckets.has(name)).toBe(false) // unlinked: deletion by name cannot reach it
     expect([...orphaned.keys()]).toEqual([])
+  })
+
+  it('does not hand back a walk refused while it was still matching', async () => {
+    // The read is not atomic. readRoutes checks consent, then runs up to nine
+    // digests before it can answer, and every one of those is a yield point at
+    // which another tab can press "No". The flag is flipped here between the
+    // first check and the match, with the bucket deliberately left in place —
+    // that is the real interleaving, where the prefs write has landed and the
+    // deletion has not yet.
+    //
+    // Deleting the bucket instead would make this pass for the wrong reason:
+    // readRoutes would find no entry and return null having never reached the
+    // re-check. `reads` is asserted for the same reason.
+    //
+    // Found by an agent attacking the widened match: the window was one await
+    // wide before the neighbourhood existed and is nine now, and the payload
+    // came back on the fifth probe with a live X-Meander-Cached header.
+    await setSaveResults(true)
+    await saveRoutes(REQ, payloadOf())
+
+    const prefs = fake.buckets.get(PREFS_CACHE)
+    let reads = 0
+    const realOpen = fake.api.open
+    globalThis.caches = {
+      ...fake.api,
+      open: async (name) => {
+        const handle = await realOpen(name)
+        if (name !== PREFS_CACHE) return handle
+        return {
+          ...handle,
+          match: async (url) => {
+            const hit = await handle.match(url)
+            reads += 1
+            // The "No", pressed after readRoutes has already looked once. The
+            // old value is returned for this read; the next one sees the change.
+            if (reads === 1) prefs.set(PREF_URL, new globalThis.Response('false'))
+            return hit
+          },
+        }
+      },
+    }
+
+    expect(await readRoutes(REQ)).toBeNull()
+    // Without a second look there is only ever one read, and this is the
+    // assertion that says so out loud.
+    expect(reads).toBeGreaterThan(1)
   })
 
   it('refuses to replay after a withdrawal, even if a bucket survived', async () => {
