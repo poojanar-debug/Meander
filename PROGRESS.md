@@ -3406,3 +3406,183 @@ standing tens of metres away. That is a decision about the privacy surface, and
 **Live API calls this phase:** about twenty route requests across six gate runs,
 most served from the route cache. One run was rate-limited outright, which is
 why the gate now knows what a 429 means.
+
+## Session C, part two — the two geolocated defects · 2026-08-10
+
+Both of last session's open items were about the same person: someone who
+started a walk from where they were standing rather than from a link. §9 said
+the address bar froze on the search before it. The note under it said a device
+fix could never replay, because a fresh measurement never hashes the same twice.
+They are one problem seen from two ends, and closing one without the other would
+have moved the failure rather than removed it.
+
+### Confirmed by measuring, not by reading
+
+Last session's lesson was that "confirmed" had meant "committed" and not
+"deployed". So before touching anything: `/healthz` answering `{"status":"ok"}`
+over valid TLS, `/metrics` returning 404 from outside, GraphHopper still
+unpublished, the API bound to `127.0.0.1:8000`, 408 frontend tests green, and
+the live gate at **31 passed, 0 failed, 3 not checkable**. All of it measured
+here, none of it taken from a file.
+
+### The address bar
+
+`writeUrl` returned before `replaceState` for a geolocated origin. The refusal
+was right and is the whole reason `About.jsx` can promise what it promises — but
+*returning* left standing whatever was already there, and because the guard keys
+on the origin, nothing written afterwards could repair it. Search a place, press
+"Use my location", and the URL held the abandoned place for the rest of the
+session; a reload booted it, because `init` seeds `nonce: 1` off whatever
+`decodeState` finds.
+
+It writes an empty query now. That is not a tidier way of writing nothing: it is
+the only way the bar can say "there is no search here to reload", which is the
+true statement once the origin is one this module will not record.
+
+The test stub was the other half, exactly as §9 predicted. The old one recorded
+calls and left `location.search` at `''` forever, so every assertion about the
+bar was really an assertion about the *first* write — and a stale bar is only
+visible on the second. It moves `location.search` now, and the device-fix test
+asserts on the content of every write rather than on a call count. The count was
+the weaker claim, and the fix makes it the wrong one.
+
+### The same spot, which had meant the same bytes
+
+The key now hashes the request with the origin snapped to a 4 dp grid, and
+`readRoutes` probes the eight neighbouring squares. The request body is
+untouched — full precision still goes to the router — and the destination stays
+byte-exact, because it is always a geocoded place with no jitter to absorb.
+
+The neighbourhood is not belt-and-braces, and this is the number that decided
+it: rounding alone loses **64%** of re-queries at 5 m, because two fixes that
+close share a square only if no grid line runs between them and a square is
+6.93 m wide east-west at this latitude. A store that replayed on a coin flip
+would be worse than one that never replayed — it would look intermittent rather
+than absent.
+
+Measured rather than asserted, which is what the brief asked for:
+
+| | |
+|---|---|
+| replay stops between | **7.01 m and 25.59 m** of the saved fix, at 51.5074 |
+| method | bisection, 9 positions across one square × 36 bearings |
+| 5 m | always replays — 2 m of margin at the worst position |
+| 200 m | never replays |
+
+The first version of that measurement said 10.39–19.28 m and was flattering
+itself: `REQ`'s origin sits exactly on two grid lines, dead centre of its square,
+which is the best place a saved fix can be. Sweeping the corners is what turned
+it honest.
+
+An independent agent derived 6.9287 m guaranteed-hit and 26.2243 m
+guaranteed-miss from the geometry alone. The suite measured 7.00 and 25.58 from
+positions 0.49 of a square off-centre on bearings stepped 10° apart. They agree
+to the discretisation, which is the strongest evidence here that either is right.
+
+### The gate could not see any of this
+
+Every store check in `live-gate.mjs` started from a permalink — a coordinate
+that is byte-identical on every reload. That is the easy case and it was the
+only case, which is how the gate sat at 31/0 while both defects were live in
+production. Five checks now cover the device fix, and one online search pays for
+them: the replay checks run offline, where a request costs no rate-limit token.
+
+**The first run of those checks failed, and the store was innocent.** The gate
+already replaces `navigator.geolocation` wholesale in its boot script, hard-coded
+to one coordinate, so `Emulation.setGeolocationOverride` could never reach the
+page. The override moved to 200 m, the app kept answering from the original
+coordinate, and the gate reported *"a fix two hundred metres away does not replay
+it — FAILED · the match is too wide"*. It was grading its own stub. That is the
+exact failure this file exists to catch, arriving from the inside, and it only
+surfaced because it failed loudly instead of passing. The coordinate the page
+will actually report is now read back and asserted before anything is graded —
+without that, a stub which failed to install makes the 200 m check pass for the
+best-looking wrong reason.
+
+Proven able to fail: a worktree with the early return restored, built through the
+same vite pipeline and served locally, fails both address-bar checks. Only
+`permalink.js` differs between the two runs. Honestly, the second check went red
+on its "the bar is empty" clause and not on its "nothing booted" clause — no run
+has yet watched routes render from a stale URL.
+
+### What the attackers found, which is most of the value here
+
+Nine agents, none of whom wrote the code they attacked. The rounding arithmetic
+survived everything — half-value asymmetry, negative zero, float error in
+`deg * 1e4`, the poles, non-finite input. What did not survive:
+
+- **A consent race I introduced.** `readRoutes` checked the flag once and then
+  ran up to nine digests before answering. Press "No" during the first and the
+  payload still came back on the fifth — drawn on the map, announced as a saved
+  copy, and held in React state, exportable to GPX, for the rest of the session.
+  The window was one await wide before the neighbourhood existed. Widening the
+  match widened the window with it. A withdrawal a read can outrun is not a
+  withdrawal.
+- **My anti-vacuity guard was itself vacuous.** "Moves a point the distance it
+  says it does" compared `offsetBy` against `metresBetween` — algebraic inverses
+  sharing one constant, so any error in both cancelled. Doubling the
+  metres-per-degree left it green and silently rewrote the headline measurement
+  to 14.00–51.16 m. It is graded against haversine now, which shares nothing
+  with it.
+- **The grid-line test asserted its own arithmetic.** It computed the cell edge
+  with a local copy of `Math.round(x * 1e4)`. Against a store mutated to
+  `Math.floor` the pair sat mid-square, the case degraded to "the same point
+  replays", and it passed. It bisects with the store's own `gridCell` now, which
+  is why that function is exported.
+- **Nothing distinguished a ±1 probe from a ±2 one.** `nearest > 5` and
+  `furthest < 200` are satisfied by an enormous family, including one where two
+  different searches answer for each other at 38.43 m. There is a band now.
+- **"A few paces" understated the radius by about four times.** Measured
+  envelope 9.56–20.82 m from a fix. Both places say about twenty-five metres.
+- **A sentence that was never true.** "There is one entry, at one fixed URL,
+  readable only by presenting a request that hashes to the stored digest" was
+  false before this session and after it. The digest is a field *inside* the
+  value, not the key: `readRoutes` matches the URL, parses the whole envelope,
+  and only then compares. Two things in this repo already do the digest-free
+  read. Corrected rather than deleted, and the correction says so — otherwise
+  the widening looks like it spent a defence that was never there.
+
+One mutation of mine survived and deserved to: `gridCell` → `Math.floor` shifts
+every boundary by half a square and is otherwise the same grid. A draft test
+killed it by pinning a coordinate pair across the meridian, which would have
+been an arbitrary alignment dressed up as a guarantee. `Math.trunc` is a real
+defect — it folds the square straddling zero to double width — and that one is
+caught, by width and not by alignment.
+
+Session C part one ran at four survivors across 26 agents and two vacuous tests.
+This ran at six survivors across nine, and three vacuous tests, all three mine.
+The rate did not improve. Assuming it would have been the mistake.
+
+### What I did not do
+
+**§10 — the grid is sized for a jitter this app never receives.** `App.jsx:429`
+asks for the position with `enableHighAccuracy: false`, which is the wifi/cell
+provider, which returns centroids stepping by tens of metres rather than the
+sixth decimal the comment claimed. Measured 52.7% replay at σ = 8 m: the
+neighbourhood removed the coin flip caused by grid lines and left the one caused
+by fix error. The comment is corrected and the behaviour is not, because all
+three fixes — `enableHighAccuracy: true`, a coarser grid, or reading
+`coords.accuracy` which `App.jsx:414` discards — widen what "the same spot"
+means, and §1 reserves that.
+
+**§11 — the replay only works with the controls left at their defaults.** The
+grid forgives the origin; everything else is byte-exact, and an empty address bar
+carries no minutes or mode. Tap "1 hr" — a chip `FirstRun` puts directly above
+the locate button — and the reload rebuilds a 35-minute request that misses. Not
+a regression, since the pure geolocated flow never replayed at all before this
+session, but it means the feature works for the search nobody customised. The
+gate presses locate without touching the dial, so it grades exactly that case.
+Written down rather than left as coverage.
+
+**The antimeridian is a dead zone** and above ~85° the feature is off rather
+than degraded. Both documented in `resultsStore.js`, neither fixed.
+
+**`README.md` still opens "What is deployed: Nothing".** That is §4/C3 and the
+brief said not to start it.
+
+**`npm test` dirties the working tree.** `icons.test.js:184` shells out to
+`make-icons.mjs`, which regenerates five PNGs to different bytes every run.
+Pre-existing, noticed here because it kept appearing in `git status`, not fixed.
+
+**Live API calls this phase:** about a dozen route requests across four gate
+runs, most served from the route cache. No run was rate-limited.
