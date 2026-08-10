@@ -292,7 +292,14 @@ Two things stay optional:
 | `ANTHROPIC_API_KEY` | `narration` stays `null` and the card says the description is still being written |
 
 Watch your quota at `/api/health` under `rate_limit.served_today`. The default
-daily ceiling of 120 routed requests is ~360 of the 500 credits.
+daily ceiling is 2,000 routed requests, and the default per-IP rate is 12
+straight away then 1 a minute — 1,440 a day, so no single address can spend the
+ceiling on its own.
+
+This paragraph said "120 routed requests is ~360 of the 500 credits" until now.
+Both halves were about the *hosted* GraphHopper's credit quota, which this
+deployment does not use; the code stopped agreeing with it two commits before
+the sentence was noticed.
 
 ### Frontend
 

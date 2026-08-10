@@ -365,6 +365,25 @@ def test_the_preflight_answers_the_route_request(api_client) -> None:
 # ---------------------------------------------------------------------------
 
 
+def test_one_address_cannot_outspend_the_global_ceiling() -> None:
+    """The per-IP rate and the global ceiling have to be coherent with each other.
+
+    They were not. At 3.0/min a single address sustained 3 x 60 x 24 = 4,320
+    requests a day against a global ceiling of 2,000, so one IP could exhaust
+    the allowance for everybody — accidentally, in about eleven hours — and
+    nothing in the code related the two numbers, so nothing said so.
+
+    This is the relation, not the values: raise the refill rate without raising
+    the ceiling and this fails.
+    """
+    s = config.Settings()
+    sustained_per_day = s.per_ip_refill_per_min * 60 * 24
+    assert sustained_per_day <= s.global_daily_route_ceiling, (
+        f"one IP sustains {sustained_per_day:.0f} requests/day against a "
+        f"{s.global_daily_route_ceiling}/day global ceiling"
+    )
+
+
 def test_a_fractional_refill_rate_survives(monkeypatch: pytest.MonkeyPatch) -> None:
     """int("0.5") raises, and the old code swallowed it into the default of 3."""
     monkeypatch.setenv("MEANDER_RATE_REFILL_PER_MIN", "0.5")
@@ -373,7 +392,10 @@ def test_a_fractional_refill_rate_survives(monkeypatch: pytest.MonkeyPatch) -> N
 
 def test_an_unparseable_refill_rate_still_falls_back(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("MEANDER_RATE_REFILL_PER_MIN", "banana")
-    assert config.load_settings().per_ip_refill_per_min == 3.0
+    # Against the dataclass default rather than a literal. Written as a literal
+    # this asserted 3.0, so lowering the default failed here — in a test about
+    # *parsing*, which has no opinion on what the number should be.
+    assert config.load_settings().per_ip_refill_per_min == config.Settings().per_ip_refill_per_min
 
 
 def test_an_empty_flag_value_means_unset_not_false(

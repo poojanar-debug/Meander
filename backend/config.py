@@ -268,7 +268,28 @@ class Settings:
     # Public deployment guard rails.
     allowed_origins: tuple[str, ...] = ()
     per_ip_bucket_capacity: int = 12
-    per_ip_refill_per_min: float = 3.0
+    # Sustained rate per IP, in requests per minute. Burst is the capacity above
+    # and is deliberately untouched: twelve back-to-back requests still go
+    # through instantly, which is more than a normal session ever asks for.
+    #
+    # This was 3.0, and 3.0 was incoherent with the ceiling below it. 3/min is
+    # 4,320 requests a day from a single address, against a *global* ceiling of
+    # 2,000. One IP could therefore spend the whole day's allowance — with 2,320
+    # to spare — and everyone else got 429 for the rest of the day. It took
+    # 2,000 ÷ 3 ≈ 667 minutes, a little over eleven hours, to do it by accident.
+    #
+    # 1.0 is 1,440 a day, which is 72% of the ceiling: still generous, and no
+    # longer enough for one address to starve the service on its own. The
+    # ceiling binds before any single bucket does, which is the property that
+    # was missing.
+    #
+    # The cost, stated plainly: an empty bucket now says Retry-After: 61 rather
+    # than 21, and refills fully in 12 minutes rather than 4. The same bucket
+    # serves /api/geocode, whose type-ahead is debounced 300 ms
+    # (PlaceInput.jsx:5) and is *not* refunded on a cache hit the way a route is
+    # (main.py:1141), so a long session of place searches will reach the limiter
+    # sooner than before.
+    per_ip_refill_per_min: float = 1.0
     # 120 was sized against the *hosted* GraphHopper's 500-credit day. The router
     # is self-hosted now and that quota is gone, but the ceiling is not
     # redundant: fixtures.budget_applies() skips the per-service budgets entirely
@@ -391,7 +412,7 @@ def load_settings() -> Settings:
         # _env_float, not float(_env_int(...)): the latter parsed "0.5" with
         # int(), hit ValueError, and silently returned the default of 3 — a
         # six-fold difference from what the operator asked for, with no error.
-        per_ip_refill_per_min=_env_float("MEANDER_RATE_REFILL_PER_MIN", 3.0),
+        per_ip_refill_per_min=_env_float("MEANDER_RATE_REFILL_PER_MIN", 1.0),
         global_daily_route_ceiling=_env_int("MEANDER_DAILY_ROUTE_CEILING", 2000),
         route_cache_ttl_s=_env_int("MEANDER_ROUTE_CACHE_TTL_S", 6 * 60 * 60),
         log_level=os.environ.get("MEANDER_LOG_LEVEL", "INFO").upper(),
