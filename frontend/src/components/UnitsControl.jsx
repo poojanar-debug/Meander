@@ -51,7 +51,8 @@ export default function UnitsControl({ units, onUnits, onClearUnits }) {
 
       <p className="field__hint">
         Saved in this browser, alongside your light/dark choice. Those two words are the only
-        things Meander keeps — never a place, never a route.
+        things Meander keeps on its own. One set of routes is kept as well, but only if you ask
+        for it in the privacy note, and only ever the last one.
       </p>
 
       {units.chosen && (

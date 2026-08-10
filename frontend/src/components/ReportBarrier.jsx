@@ -171,7 +171,8 @@ export default function ReportBarrier({ route, units }) {
         This is published. It goes to the OpenStreetMap <strong>development</strong> server
         as a public note holding the point you chose and the words you wrote — not to the
         live map. That data is disposable and no navigation app reads it: the write path is
-        real, but it will not help strangers yet. Nothing else you do in Meander is stored.
+        real, but it will not help strangers yet. Nothing else you do in Meander leaves this
+        device, and nothing is kept on it unless you ask.
       </p>
 
       <div className="report__actions">

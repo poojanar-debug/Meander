@@ -353,7 +353,7 @@ in-memory digest keyed by a salt generated at process start and never written an
 | `meander:units` — `metric`/`imperial` and `12`/`24` | after you pick one | two words, validated against those enums on both read and write, so the key is structurally incapable of holding a coordinate |
 | `meander-shell-<hash>` (CacheStorage) | on first load | the program. Identical bytes for every visitor, derived from the build; it says nothing about anybody, and it is what makes the app open without a network |
 | `meander-prefs` (CacheStorage) | after you answer | one word, `true` or `false`. Deliberately **unversioned**, so a deploy cannot silently re-grant a permission you withdrew |
-| `meander-results-<hash>` (CacheStorage) | only on explicit consent | **one** route response, replaced rather than accumulated, always labelled with its age, and deleted from two independent paths the moment you say no |
+| `meander-results-<hash>` (CacheStorage) | only on explicit consent | **one** route response, at one fixed key so a second cannot sit beside it, always labelled with its age, and deleted the moment you say no. Written by the page (`src/lib/resultsStore.js`), not by the service worker — the worker declines every cross-origin request, and this deployment puts the API on another origin, so a store living there could never run. The request itself is not kept: only a SHA-256 of it, so no coordinate sits in a cache key |
 
 No cookie, no analytics, no history, no map tiles. Every storage read is wrapped in a `try`,
 because Safari in private mode throws on access rather than on write — and the consent flag is
