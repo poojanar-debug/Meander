@@ -112,7 +112,34 @@ export async function setSaveResults(saveResults) {
   // "off" and save nothing, so a UI still showing "Yes, keep them" would be
   // claiming a promise nothing is keeping. Reading back is what makes the
   // control reflect what the app will actually do.
-  const confirmed = await refreshOfflineSetting()
+  let confirmed = await refreshOfflineSetting()
+
+  // A "No" that could not be written is the one failure this must not accept.
+  // With storage full, `cache.put` throws, the flag on disk stays `true`, and
+  // the read-back agrees — so the control springs back to "Yes, keep them" and
+  // the next search stores again. The user pressed No; their existing routes
+  // were deleted by forgetResults() above and then the app carried on saving
+  // new ones.
+  //
+  // Deleting the entry needs no new bytes, which is exactly why it works when
+  // writing one does not. Absence already means "off", so the fallback lands on
+  // the fail-closed side. It costs the record that the question was answered —
+  // `chosen` goes back to false on the next read — and that is the right thing
+  // to lose: being asked twice is a smaller harm than storing after a refusal.
+  if (!saveResults && confirmed.saveResults) {
+    try {
+      if (typeof caches !== 'undefined') {
+        const cache = await caches.open(PREFS_CACHE)
+        await cache.delete(PREF_URL)
+      }
+    } catch {
+      // Nothing further to try. The snapshot below stays "yes", which at least
+      // does not tell the user they are protected when they are not.
+    }
+    await forgetResults()
+    confirmed = await refreshOfflineSetting()
+  }
+
   if (confirmed.saveResults !== saveResults) return
   emit({ saveResults, chosen: true, ready: true })
 }

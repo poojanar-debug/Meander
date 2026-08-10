@@ -194,3 +194,44 @@ describe('a withdrawal that outlives the page', () => {
     expect([...fake.buckets.keys()]).toContain(`${RESULTS_PREFIX}abc`)
   })
 })
+
+describe('a "No" that storage will not let you write', () => {
+  /** A cache whose put always throws, as a full disk does, but which can delete. */
+  const fullDisk = (buckets) => ({
+    open: async (name) => {
+      if (!buckets.has(name)) buckets.set(name, new Map())
+      const store = buckets.get(name)
+      return {
+        match: async (url) => (store.has(url) ? { text: async () => store.get(url) } : undefined),
+        put: async () => {
+          throw new Error('QuotaExceededError')
+        },
+        delete: async (url) => store.delete(url),
+      }
+    },
+    keys: async () => [...buckets.keys()],
+    delete: async (name) => buckets.delete(name),
+  })
+
+  it('still stops storing, by deleting the flag when it cannot write one', async () => {
+    // Confirmed by an agent that did not write this: with the flag already
+    // 'true' and the disk full, pressing No deleted the saved routes and then
+    // left consent standing, so the next search stored again.
+    await setSaveResults(true)
+    globalThis.caches = fullDisk(fake.buckets)
+
+    await setSaveResults(false)
+
+    expect(getOfflineSetting().saveResults).toBe(false)
+    const stored = await (await fake.api.open(PREFS_CACHE)).match(PREF_URL)
+    expect(stored).toBeUndefined()
+    await refreshOfflineSetting()
+    expect(getOfflineSetting().saveResults).toBe(false)
+  })
+
+  it('does not claim a yes it could not write', async () => {
+    globalThis.caches = fullDisk(fake.buckets)
+    await setSaveResults(true)
+    expect(getOfflineSetting().saveResults).toBe(false)
+  })
+})
