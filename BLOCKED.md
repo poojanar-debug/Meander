@@ -2,8 +2,9 @@
 
 Things this run could not finish, what was tried, and what needs a human.
 
-**Two entries are open — §5, a deliberate deferral with a list, and §6, which
-needs one credential only a human can supply.**
+**Three entries are open — §5, a deliberate deferral with a list; §6, which
+needs one credential only a human can supply; and §9, a permalink defect found
+while fixing §8 and left alone because it is a different file.**
 
 | | |
 |---|---|
@@ -16,6 +17,7 @@ needs one credential only a human can supply.**
 | §6 the deployment VM cannot push to GitHub | **open** — needs a credential only a human can supply |
 | §7 the Caddyfile and rate limit are committed, not deployed | **resolved** — the documented commands were not enough; both needed the container replaced, not reloaded |
 | §8 the saved-route store is inert and the UI says otherwise | **resolved** — option 3: the store re-based on the page, and it stores less than the worker did |
+| §9 the address bar freezes on the search before a geolocated one | **open** — pre-existing `permalink.js` defect; reproduced, not fixed, out of §8's scope |
 
 ---
 
@@ -711,3 +713,75 @@ either direction — is exactly the decision that rule reserves.
 
 **Why the entry stayed open until now.** Three options, all of them the
 operator's call rather than a bug fix. The operator chose 3.
+
+---
+
+## 9 · The address bar freezes on the search before a geolocated one — NOT FIXED
+
+**Opened:** 2026-08-10, during Session C. **Not caused by Session C** — this is
+`permalink.js` behaviour that predates the saved-route work. It was found by a
+subagent attacking §8's store, survived an independent attempt to refute it, and
+is recorded here rather than fixed because §8 was the session's scope and this
+is a different file with its own test suite.
+
+`permalink.js:147` refuses to write a device fix to the address bar:
+
+```js
+if (state.origin?.name === GEOLOCATED) return
+```
+
+That refusal is right, and `About.jsx:47-53` is built on it: *"A place taken
+from your device is never written there — only a place you searched for."*
+
+**But it returns before `replaceState`, so it does not clear what is already
+there — and the guard keys on the origin, so nothing else gets written either.**
+Search for a place, then press "Use my location", and the URL stays on the
+abandoned place for the rest of the session. Change the minutes, change the
+mode: still nothing, because the same guard runs first.
+
+**Reproduced** with a `window` stub whose `replaceState` actually mutates
+`location.search`. The existing suite's stub leaves `search: ''`, which is
+exactly why this case has never been covered:
+
+1. `writeUrl` for a named place sets `?from=51.560215,-0.163000&fromName=…`
+2. `writeUrl` for a geolocated origin returns at `:147` — `location.search`
+   unchanged
+3. a later `writeUrl` with `minutes: 90, mode: 'bike'` also no-ops
+4. `decodeState()` off that stale search returns the **old** place, and
+   `App.jsx:98-107` seeds `nonce: 1`, so the fetch effect issues a request for
+   the abandoned search on the next load
+
+**Two consequences, and the second is the one that matters.**
+
+- `About.jsx:51-52` says *"your search is kept in the address bar, so a reload
+  keeps it and the link is shareable."* After a geolocated search, a reload
+  restores **a different search** — the one before it. The sentence is false in
+  that case, and false in the direction that surprises someone.
+- It blunts §8's offline reload. A reload with no network rebuilds the request
+  from the URL, and if the URL holds the wrong search, the digest cannot match
+  the saved set. **The store is not what fails here** — the gate's offline
+  replay passes, because it reloads a permalink that is actually current.
+
+**What the fix probably is**, for whoever picks it up: clear the query rather
+than returning, when the origin is geolocated — `replaceState` to the bare path
+— and move the guard so that it suppresses only the origin rather than the whole
+write. Both need a test with a `replaceState` that mutates `location.search`;
+the stub that does not is why this survived.
+
+**Not attempted here.** `permalink.js` is shared by the share button, the
+permalink round-trip suite and `App.jsx`'s init, and this session was scoped to
+§8.
+
+### Also found, and deliberately not changed
+
+**A geolocated search cannot replay after a reload, and rounding is the only way
+it could.** `App.jsx:419-420` puts `position.coords` into the request body
+unrounded, so a second GPS fix from the same spot is a different body, a
+different SHA-256, and a miss. The saved set is still there and still deleted on
+"No" — nothing about the promise is false — but the walk-out-of-signal journey
+only recovers for a search that came from a link. Making it recover would mean
+matching on **rounded** coordinates, which changes what "the same search" means
+and would replay a saved walk for someone standing some tens of metres away.
+That is a product decision about the privacy surface, not a bug fix, so it is
+the operator's under §1 of the deployment brief. Recommended precision if it is
+taken: 3–4 decimal places, and say so in the copy.
