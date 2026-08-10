@@ -1,8 +1,9 @@
-import { readFileSync } from 'node:fs'
+import { readFileSync, readdirSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 
 import { describe, expect, it } from 'vitest'
 
+import { PAGES_CONTROL_FILES, isPrecachable } from '../../vite.config.js'
 import { PREFS_CACHE, PREF_URL, RESULTS_PREFIX } from './offlineStore.js'
 
 // sw.js runs in a worker, cannot import from src/, and cannot be unit-tested in
@@ -109,6 +110,47 @@ describe('a saved route cannot become a history', () => {
     const fn = code.slice(code.indexOf('async function handleRoutes'))
     const body = fn.slice(0, fn.indexOf('\n}\n'))
     expect(body.indexOf('routeCacheKey')).toBeLessThan(body.indexOf('await fetch('))
+  })
+})
+
+describe('the precache never names a file Cloudflare Pages will not serve', () => {
+  // cache.addAll() is atomic. One 404 in the manifest rejects the install and
+  // the app has no service worker at all — so a Pages control file reaching
+  // this list does not degrade offline, it deletes it.
+
+  it('grades every file that is actually in public/, whatever is in there', () => {
+    // Written against the real directory rather than a fixed list, so it starts
+    // grading _headers the moment _headers exists — and keeps grading whatever
+    // anyone adds next, which is the only way this stays true.
+    const present = readdirSync(fileURLToPath(new URL('../../public', import.meta.url)))
+    expect(present.length).toBeGreaterThan(0)
+    for (const name of present) {
+      expect(isPrecachable(`/${name}`)).toBe(!PAGES_CONTROL_FILES.includes(name))
+    }
+  })
+
+  it('excludes each control file by name, whether or not one exists yet', () => {
+    // Literals, deliberately. The directory-driven test above cannot catch the
+    // regression that matters while public/ happens to hold no control file:
+    // deleting the exclusion entirely left all 20 tests green, which is how
+    // this assertion came to be written.
+    for (const name of PAGES_CONTROL_FILES) {
+      expect(isPrecachable(`/${name}`)).toBe(false)
+    }
+    expect(PAGES_CONTROL_FILES).toContain('_headers')
+    expect(PAGES_CONTROL_FILES).toContain('_redirects')
+  })
+
+  it('proves its own predicate — the things that should stay, stay', () => {
+    // Without this, isPrecachable could `return false` for everything and the
+    // tests above would still pass while the precache shipped empty.
+    expect(isPrecachable('/assets/index-abc123.js')).toBe(true)
+    expect(isPrecachable('/index.html')).toBe(true)
+    expect(isPrecachable('/manifest.webmanifest')).toBe(true)
+    expect(isPrecachable('/icon-512.png')).toBe(true)
+    expect(isPrecachable('/')).toBe(true)
+    expect(isPrecachable('/sw.js')).toBe(false)
+    expect(isPrecachable('/assets/index-abc123.js.map')).toBe(false)
   })
 })
 

@@ -19,6 +19,30 @@ const API_PROXY = {
 }
 
 /**
+ * Files Cloudflare Pages reads as configuration and does not serve as assets.
+ *
+ * They have to sit in public/, because that is where Pages looks for them in
+ * the build output — but they must never reach the precache manifest.
+ * `cache.addAll()` is atomic (sw.js:49): one non-OK response rejects the whole
+ * promise, the install event fails, and *no* service worker registers. So a
+ * single unserved URL in this list does not cost you one cached file, it costs
+ * you the entire offline shell, and the only trace is a failed install.
+ *
+ * This is a list rather than a `_`-prefix rule on purpose. `_headers` and
+ * `_redirects` are the two that exist today; the other two are the rest of the
+ * Pages control surface, added now so that reaching for one later does not
+ * quietly reintroduce the same failure.
+ */
+export const PAGES_CONTROL_FILES = ['_headers', '_redirects', '_routes.json', '_worker.js']
+
+/** Does this build-output URL belong in the service worker's precache? */
+export function isPrecachable(url) {
+  if (url.endsWith('/sw.js')) return false
+  if (url.endsWith('.map')) return false
+  return !PAGES_CONTROL_FILES.includes(url.slice(1))
+}
+
+/**
  * Emit sw.js with a real precache list and a version derived from the build.
  *
  * `enforce: 'post'` is load-bearing: without it the plugin runs before the
@@ -41,9 +65,7 @@ function meanderServiceWorker() {
       const extras = existsSync(publicDir)
         ? readdirSync(publicDir).map((name) => `/${name}`)
         : []
-      const precache = ['/', ...assets, ...extras].filter(
-        (url) => !url.endsWith('/sw.js') && !url.endsWith('.map'),
-      )
+      const precache = ['/', ...assets, ...extras].filter(isPrecachable)
       const version = createHash('sha256').update(precache.join('\n')).digest('hex').slice(0, 12)
 
       const source = readFileSync(join(here, 'sw.js'), 'utf8')
