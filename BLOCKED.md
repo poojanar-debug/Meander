@@ -2,8 +2,8 @@
 
 Things this run could not finish, what was tried, and what needs a human.
 
-**Three entries are open — §5, a deliberate deferral with a list; §6, which needs
-one command from a human; and §8, which needs a decision rather than a fix.**
+**Two entries are open — §5, a deliberate deferral with a list, and §6, which
+needs one credential only a human can supply.**
 
 | | |
 |---|---|
@@ -15,7 +15,7 @@ one command from a human; and §8, which needs a decision rather than a fix.**
 | §5 the merge took main's frontend entirely | **open** — deliberate; §5 lists what has to come back and when |
 | §6 the deployment VM cannot push to GitHub | **open** — needs a credential only a human can supply |
 | §7 the Caddyfile and rate limit are committed, not deployed | **resolved** — the documented commands were not enough; both needed the container replaced, not reloaded |
-| §8 the saved-route store is inert and the UI says otherwise | **open** — needs a decision, not a fix; §1 reserves the privacy surface to the operator |
+| §8 the saved-route store is inert and the UI says otherwise | **resolved** — option 3: the store re-based on the page, and it stores less than the worker did |
 
 ---
 
@@ -612,7 +612,53 @@ should carry the single-file bind-mount trap; Session C's C3 covers that file.
 
 ---
 
-## 8 · The saved-route store does nothing in production, and the UI says it does — NEEDS A DECISION
+## 8 · ~~The saved-route store does nothing in production, and the UI says it does~~ — RESOLVED
+
+**Resolved:** 2026-08-10, during Session C, by **option 3** — the operator's
+choice. The store is re-based on the page: `frontend/src/lib/resultsStore.js`,
+written by `client.js` after a completed stream. `sw.js`'s cross-origin early
+return is untouched, because it was never the thing that was wrong.
+
+What the live gate measures now, against `https://meander-eoc.pages.dev`, each
+promise on its own rather than one "something was stored" check:
+
+```
+ok  nothing is saved before the user has been asked      [0 entries in 0 bucket(s)]
+ok  a route is actually saved when the user consents     [1 entry at /__meander__/last-routes]
+ok  the two searches are actually different requests     [114B vs 114B, differing]
+ok  only the most recent set is kept, after a second search   [1 entry across 1 bucket(s)]
+ok  the saved set is stamped with the time it was written [X-Meander-Cached … (4s ago)]
+ok  the saved set comes back on a reload with no network
+ok  the replayed set is labelled as saved, with its age, on screen
+      [pill: Showing a saved copy from just now. · badge: Saved · just now]
+ok  the search before it is gone, not merely hidden      [no replay, as promised]
+ok  choosing "No" deletes the saved set immediately, without a reload
+      [1 entry before, 0 after, 0 bucket(s) left]
+```
+
+**It stores less than the worker did**, not more, which is what let this happen
+without re-opening the privacy question:
+
+- the final payload rather than the raw stream, so no progress events and no
+  duplicate routes from the two-pass enrichment;
+- a SHA-256 of the request rather than the request, so no unrounded GPS fix sits
+  in a cache key any script on the origin can enumerate — the worker's key was
+  `url#body`;
+- one entry at one fixed key, so "only the most recent" is structural rather
+  than a delete-then-put two tabs can interleave.
+
+**Retention is unchanged.** The bucket is named for the installed shell cache,
+so it is versioned against the same build the worker versions itself against, a
+deploy still replaces it, and `forgetResults()` still finds it by prefix. With
+no shell installed there is no version to bind to and it stores nothing — which
+is also why iOS does not quietly start storing (see DEPLOY.md's iOS table).
+
+**Three shipped sentences had to change**, because they were true only while the
+store was inert: `UnitsControl.jsx` ("the only things Meander keeps — never a
+place, never a route"), `ReportBarrier.jsx` ("Nothing else you do in Meander is
+stored"), and `README.md`'s "deleted from two independent paths" — one path now
+that the worker no longer sweeps. About.jsx needed no change; everything it
+promised is now true.
 
 **Opened:** 2026-08-10, during Session B. Not caused by Session B.
 
@@ -663,5 +709,5 @@ the consent control *is* the privacy surface: it is the only place the app asks
 permission to store anything about a person. Changing it unilaterally — in
 either direction — is exactly the decision that rule reserves.
 
-**Until then** the live gate fails on this check, deliberately, and
-`DEPLOY.md`'s table names it.
+**Why the entry stayed open until now.** Three options, all of them the
+operator's call rather than a bug fix. The operator chose 3.
