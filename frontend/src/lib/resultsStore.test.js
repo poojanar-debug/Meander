@@ -266,6 +266,245 @@ describe('a saved route cannot become a history', () => {
   })
 })
 
+describe('the same spot, measured', () => {
+  // Everything here is in metres on the ground, not in decimal places, because
+  // the claim being tested is about a person standing still — not about a
+  // constant. The threshold is never asserted; it is searched for and reported,
+  // and the only assertions are the two claims the change was made on: a few
+  // metres replays, two hundred metres does not.
+
+  const METRES_PER_DEG_LAT = 111320
+  const rad = (deg) => (deg * Math.PI) / 180
+
+  /** Move a point `metres` along `bearing` (0 = north, 90 = east). */
+  const offsetBy = ({ lat, lon }, metres, bearing) => ({
+    lat: lat + (metres * Math.cos(rad(bearing))) / METRES_PER_DEG_LAT,
+    lon: lon + (metres * Math.sin(rad(bearing))) / (METRES_PER_DEG_LAT * Math.cos(rad(lat))),
+  })
+
+  /** What the offset actually came out as, computed back from the coordinates. */
+  const metresBetween = (a, b) => {
+    const dy = (b.lat - a.lat) * METRES_PER_DEG_LAT
+    const dx = (b.lon - a.lon) * METRES_PER_DEG_LAT * Math.cos(rad((a.lat + b.lat) / 2))
+    return Math.hypot(dx, dy)
+  }
+
+  const BEARINGS = Array.from({ length: 36 }, (_, i) => i * 10)
+  const at = (origin) => ({ ...REQ, origin })
+
+  /**
+   * Saved fixes spread across one grid square, corners included.
+   *
+   * REQ.origin is 51.5074, -0.1278 — both of which land exactly on a grid line,
+   * so it sits dead centre of its square. That is the *most* favourable place a
+   * saved fix can be, and measuring only from there would report a boundary
+   * nobody standing anywhere else would get. These nine cover the square: centre,
+   * edges and corners.
+   */
+  const CELL = 1e-4
+  const WITHIN_CELL = [-0.49, 0, 0.49].flatMap((fy) =>
+    [-0.49, 0, 0.49].map((fx) => ({
+      lat: REQ.origin.lat + fy * CELL,
+      lon: REQ.origin.lon + fx * CELL,
+      where: `${fy > 0 ? 'N' : fy < 0 ? 'S' : '-'}${fx > 0 ? 'E' : fx < 0 ? 'W' : '-'}`,
+    })),
+  )
+
+  it('moves a point the distance it says it does', () => {
+    // The guard against the whole block being vacuous. If offsetBy were wrong —
+    // a missing cos(lat), a degrees/radians slip — every "5 metres" below would
+    // really be some other distance and the measurements would be fiction.
+    for (const bearing of BEARINGS) {
+      for (const metres of [0.5, 5, 25, 200]) {
+        const moved = offsetBy(REQ.origin, metres, bearing)
+        expect(metresBetween(REQ.origin, moved), `${metres}m @ ${bearing}°`).toBeCloseTo(metres, 2)
+      }
+    }
+  })
+
+  it('replays a fix five metres away, from every direction and anywhere in the square', async () => {
+    await setSaveResults(true)
+    for (const saved of WITHIN_CELL) {
+      await saveRoutes(at(saved), payloadOf())
+      for (const bearing of BEARINGS) {
+        const moved = offsetBy(saved, 5, bearing)
+        expect(await readRoutes(at(moved)), `5m @ ${bearing}° from ${saved.where}`).not.toBeNull()
+      }
+    }
+  })
+
+  it('refuses a fix two hundred metres away, from every direction and anywhere in the square', async () => {
+    await setSaveResults(true)
+    for (const saved of WITHIN_CELL) {
+      await saveRoutes(at(saved), payloadOf())
+      for (const bearing of BEARINGS) {
+        const moved = offsetBy(saved, 200, bearing)
+        expect(await readRoutes(at(moved)), `200m @ ${bearing}° from ${saved.where}`).toBeNull()
+      }
+    }
+  })
+
+  it('replays across a grid line, which rounding on its own would not', async () => {
+    // The case that makes plain rounding a coin flip. These two fixes are a
+    // fraction of a millimetre apart and fall either side of a cell boundary,
+    // so their rounded coordinates differ. Two people could not stand this
+    // close together; if this misses, "the same spot" means "the same spot
+    // unless a grid line happens to run through it".
+    const line = (Math.round(REQ.origin.lat * 1e4) + 0.5) / 1e4
+    const below = { lat: line - 1e-9, lon: REQ.origin.lon }
+    const above = { lat: line + 1e-9, lon: REQ.origin.lon }
+    // Both halves stated, so the test cannot pass by accident: the two really
+    // are in different cells, and they really are that close together.
+    expect(Math.round(below.lat * 1e4)).not.toBe(Math.round(above.lat * 1e4))
+    expect(metresBetween(below, above)).toBeLessThan(0.001)
+
+    await setSaveResults(true)
+    await saveRoutes(at(below), payloadOf())
+    expect(await readRoutes(at(above))).not.toBeNull()
+  })
+
+  it('measures where the replay actually stops', async () => {
+    await setSaveResults(true)
+
+    // Along one bearing the cell distance only grows, so the flip is a single
+    // point and a bisection finds it. Reported rather than pinned: the exact
+    // number depends on latitude and on where in the square the saved fix sat,
+    // and hard-coding it here would turn a measurement back into the assertion
+    // this block exists to avoid.
+    const flipFor = async (saved, bearing) => {
+      let hit = 0
+      let miss = 400
+      for (let i = 0; i < 24; i += 1) {
+        const mid = (hit + miss) / 2
+        if (await readRoutes(at(offsetBy(saved, mid, bearing)))) hit = mid
+        else miss = mid
+      }
+      return miss
+    }
+
+    const flips = []
+    for (const saved of WITHIN_CELL) {
+      await saveRoutes(at(saved), payloadOf())
+      for (const bearing of BEARINGS) flips.push(await flipFor(saved, bearing))
+    }
+    const nearest = Math.min(...flips)
+    const furthest = Math.max(...flips)
+
+    // eslint-disable-next-line no-console
+    console.log(
+      `replay stops between ${nearest.toFixed(2)} m and ${furthest.toFixed(2)} m of the saved ` +
+        `fix (lat ${REQ.origin.lat}, ${WITHIN_CELL.length} positions across one square × ` +
+        `${BEARINGS.length} bearings); 5 m and 200 m sit either side`,
+    )
+
+    // The two claims, and nothing about 4 decimal places.
+    expect(nearest).toBeGreaterThan(5)
+    expect(furthest).toBeLessThan(200)
+  })
+
+  it('does not round the request it was handed', async () => {
+    // The grid lives in the key. The body api/client.js posts to the router is
+    // the caller's object, and it must come back untouched — a store that
+    // rounded in place would quietly degrade routing accuracy to 11 m.
+    const precise = at({ lat: 51.50749123, lon: -0.16220987 })
+    const before = JSON.stringify(precise)
+    await setSaveResults(true)
+    await saveRoutes(precise, payloadOf())
+    await readRoutes(precise)
+    expect(JSON.stringify(precise)).toBe(before)
+    expect(precise.origin.lat).toBe(51.50749123)
+    expect(precise.origin.lon).toBe(-0.16220987)
+  })
+
+  it('writes neither the coordinate nor the cell it was snapped to', async () => {
+    // Rounding a coordinate is still recording one if the rounded value is
+    // written down. Only the digest may be.
+    await setSaveResults(true)
+    await saveRoutes(REQ, payloadOf())
+    const stored = await (await fake.api.open(`${RESULTS_PREFIX}deadbeef1234`)).match(ENTRY_URL)
+    const raw = await stored.text()
+    const envelope = JSON.parse(raw)
+    expect(Object.keys(envelope).sort()).toEqual(['fingerprint', 'payload', 'v'])
+    expect(envelope.fingerprint).toMatch(/^[0-9a-f]{64}$/)
+    for (const trace of ['51.5074', '515074', '-0.1278', '-1278', '1278']) {
+      expect(envelope.fingerprint, trace).not.toContain(trace)
+    }
+  })
+
+  it('keeps one set when two fixes a few metres apart search in a row', async () => {
+    // The ordinary case for someone walking: two searches, two fixes, same
+    // pavement. Still one entry — and it is the second walk, which is also what
+    // the first fix now gets back. Four metres apart, so it is the same walk;
+    // stated because it is a real consequence of the widening, not a surprise.
+    await setSaveResults(true)
+    const first = REQ
+    const second = at(offsetBy(REQ.origin, 4, 45))
+    await saveRoutes(first, payloadOf(1))
+    await saveRoutes(second, payloadOf(2))
+
+    expect(fake.entries(`${RESULTS_PREFIX}deadbeef1234`)).toEqual([ENTRY_URL])
+    expect(
+      [...fake.buckets.keys()].filter((n) => n.startsWith(RESULTS_PREFIX)),
+    ).toHaveLength(1)
+    expect((await readRoutes(second)).payload.routes).toHaveLength(2)
+    expect((await readRoutes(first)).payload.routes).toHaveLength(2)
+  })
+
+  it('still refuses a different search from the identical spot', async () => {
+    // The widening is only ever about the origin. Everything else stays exact,
+    // or "the same search" would stop meaning the same search.
+    await setSaveResults(true)
+    await saveRoutes(REQ, payloadOf())
+    for (const other of [
+      { ...REQ, minutes: 45 },
+      { ...REQ, mode: 'bike' },
+      { ...REQ, objectives: ['nature'] },
+      { ...REQ, destination: { lat: 51.5079, lon: -0.1283 } },
+    ]) {
+      expect(await readRoutes(other), JSON.stringify(other)).toBeNull()
+    }
+  })
+
+  it('will not treat two destinations a metre apart as the same search', async () => {
+    // A destination is picked from search and comes back byte-identical every
+    // time, so there is no jitter to absorb — and two different places must not
+    // answer for each other, however close.
+    //
+    // One metre, deliberately, and the assertion below proves why: it is well
+    // inside a single grid square, so this can only miss because the
+    // destination is hashed exactly. The first version of this test used eleven
+    // metres, which crosses a square all by itself — it passed whether the
+    // destination was rounded or not, and a mutant that rounded it survived.
+    await setSaveResults(true)
+    const dest = { lat: 51.5079, lon: -0.1283 }
+    const withDest = { ...REQ, destination: dest }
+    await saveRoutes(withDest, payloadOf())
+
+    const nudged = { ...withDest, destination: offsetBy(dest, 1, 90) }
+    expect(Math.round(nudged.destination.lat * 1e4)).toBe(Math.round(dest.lat * 1e4))
+    expect(Math.round(nudged.destination.lon * 1e4)).toBe(Math.round(dest.lon * 1e4))
+    expect(metresBetween(dest, nudged.destination)).toBeCloseTo(1, 2)
+
+    expect(await readRoutes(nudged)).toBeNull()
+    // …while the origin of that same search still tolerates a step.
+    expect(await readRoutes({ ...withDest, origin: offsetBy(REQ.origin, 5, 90) })).not.toBeNull()
+  })
+
+  it('stores nothing and replays nothing without a usable origin', async () => {
+    await setSaveResults(true)
+    for (const broken of [
+      { ...REQ, origin: undefined },
+      { ...REQ, origin: {} },
+      { ...REQ, origin: { lat: Number.NaN, lon: 0 } },
+      { ...REQ, origin: { lat: 0, lon: Number.POSITIVE_INFINITY } },
+    ]) {
+      expect(await saveRoutes(broken, payloadOf()), JSON.stringify(broken)).toBe(false)
+      expect(await readRoutes(broken), JSON.stringify(broken)).toBeNull()
+    }
+    expect(fake.entries(`${RESULTS_PREFIX}deadbeef1234`)).toEqual([])
+  })
+})
+
 describe('the age it is labelled with', () => {
   it('is written as the header client.js reads', async () => {
     await setSaveResults(true)
