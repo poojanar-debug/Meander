@@ -214,6 +214,92 @@ describe('when the network is gone', () => {
     ).rejects.toThrow(/Could not reach the Meander server/)
   })
 
+  /** Headers arrive, then the link dies inside the body. */
+  const diesMidStream = () => {
+    let sent = false
+    return {
+      ok: true,
+      headers: new Headers({ 'content-type': 'text/event-stream' }),
+      body: {
+        getReader: () => ({
+          read: async () => {
+            if (sent) throw new TypeError('network error')
+            sent = true
+            return {
+              done: false,
+              value: new TextEncoder().encode(
+                `data: ${JSON.stringify({ type: 'progress', done: 1 })}\n\n`,
+              ),
+            }
+          },
+        }),
+      },
+    }
+  }
+
+  it('answers from the saved set when the link dies mid-stream', async () => {
+    await setSaveResults(true)
+    await call(sseResponse({}))
+    const { payload } = await call(diesMidStream)
+    expect(payload.routes[0]).toMatchObject({ id: 'fastest', servedFromCache: true })
+  })
+
+  it('raises written copy, not the browser’s string, when it dies mid-stream', async () => {
+    await expect(call(diesMidStream)).rejects.toThrow(/connection dropped part-way through/)
+    await expect(call(diesMidStream)).rejects.not.toThrow(/network error/)
+  })
+
+  it('does not replay over routes it has already delivered', async () => {
+    // Replaying after some routes have been dispatched would deliver them a
+    // second time and the list would grow duplicates rather than recover.
+    await setSaveResults(true)
+    await call(sseResponse({}))
+    let sent = 0
+    const halfThenDie = () => ({
+      ok: true,
+      headers: new Headers({ 'content-type': 'text/event-stream' }),
+      body: {
+        getReader: () => ({
+          read: async () => {
+            if (sent >= 1) throw new TypeError('network error')
+            sent += 1
+            return {
+              done: false,
+              value: new TextEncoder().encode(
+                `data: ${JSON.stringify({ type: 'route', route: ROUTE })}\n\n`,
+              ),
+            }
+          },
+        }),
+      },
+    })
+    const seen = []
+    vi.stubGlobal('fetch', vi.fn(async () => halfThenDie()))
+    await expect(
+      fetchRoutes(REQ, { onProgress: () => {}, onRoute: (r) => seen.push(r) }),
+    ).rejects.toThrow(/connection dropped part-way through/)
+    expect(seen).toHaveLength(1)
+  })
+
+  it('keeps the server’s own message when the stream reports an error event', async () => {
+    const bytes = new TextEncoder().encode(
+      `data: ${JSON.stringify({ type: 'error', message: 'The router ran out of time.' })}\n\n`,
+    )
+    let sent = false
+    await expect(
+      call({
+        ok: true,
+        headers: new Headers({ 'content-type': 'text/event-stream' }),
+        body: {
+          getReader: () => ({
+            read: async () =>
+              sent ? { done: true } : ((sent = true), { done: false, value: bytes }),
+          }),
+        },
+      }),
+    ).rejects.toThrow(/The router ran out of time/)
+  })
+
   it('raises the network error after consent is withdrawn', async () => {
     await setSaveResults(true)
     await call(sseResponse({}))

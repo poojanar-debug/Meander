@@ -149,33 +149,61 @@ async function realFetchRoutes(req, { signal, onProgress, onRoute }) {
   const decoder = new TextDecoder()
   let buffer = ''
   let final = null
+  let delivered = 0
 
-  for (;;) {
-    const { value, done } = await reader.read()
-    if (done) break
-    buffer += decoder.decode(value, { stream: true })
-    const parts = buffer.split('\n\n')
-    buffer = parts.pop() ?? ''
-    for (const part of parts) {
-      const line = part.split('\n').find((l) => l.startsWith('data:'))
-      if (!line) continue
-      let evt
-      try {
-        evt = JSON.parse(line.slice(5))
-      } catch {
-        // A truncated frame is not fatal; the next read completes it.
-        continue
-      }
-      if (evt.type === 'progress') onProgress(evt)
-      else if (evt.type === 'route') onRoute(mark(evt.route))
-      else if (evt.type === 'done') final = markPayload(evt.payload)
-      else if (evt.type === 'error') {
-        throw new ApiError(evt.message ?? 'The server stopped part-way through.', {
-          kind: evt.kind ?? 'stream',
-        })
+  // The loop is guarded, and the guard is not decoration. The `fetch` above
+  // covers being offline when the request is *issued*; this covers the link
+  // dying after the headers arrived and before the body finished — a walk into
+  // a dead zone mid-search, which is the same situation from the user's side
+  // and used to behave completely differently. Unguarded, `reader.read()`
+  // rejects with a raw TypeError that is not an ApiError, so it reached the
+  // banner as the browser's untranslated string while the store sat there
+  // holding an answer nobody asked it for.
+  try {
+    for (;;) {
+      const { value, done } = await reader.read()
+      if (done) break
+      buffer += decoder.decode(value, { stream: true })
+      const parts = buffer.split('\n\n')
+      buffer = parts.pop() ?? ''
+      for (const part of parts) {
+        const line = part.split('\n').find((l) => l.startsWith('data:'))
+        if (!line) continue
+        let evt
+        try {
+          evt = JSON.parse(line.slice(5))
+        } catch {
+          // A truncated frame is not fatal; the next read completes it.
+          continue
+        }
+        if (evt.type === 'progress') onProgress(evt)
+        else if (evt.type === 'route') {
+          delivered += 1
+          onRoute(mark(evt.route))
+        } else if (evt.type === 'done') final = markPayload(evt.payload)
+        else if (evt.type === 'error') {
+          throw new ApiError(evt.message ?? 'The server stopped part-way through.', {
+            kind: evt.kind ?? 'stream',
+          })
+        }
       }
     }
+  } catch (err) {
+    if (err?.name === 'AbortError') throw err
+    // The server announcing its own failure is not a transport failure, and it
+    // already carries written copy. Rewrapping it would replace a specific
+    // message with a generic one.
+    if (err instanceof ApiError) throw err
+    // Only replay if nothing has been handed over yet. Replaying after some
+    // routes have already been dispatched would deliver them a second time,
+    // and the list would grow duplicates rather than recover.
+    if (delivered === 0) {
+      const replay = await replayFromStore(req, onRoute)
+      if (replay) return replay
+    }
+    throw new ApiError('The connection dropped part-way through. Check your connection and try again.')
   }
+
   await keep(req, final, { stamp, signal })
   return final
 }
