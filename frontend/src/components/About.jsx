@@ -44,12 +44,20 @@ const About = forwardRef(function About({ cache }, ref) {
             makes it work at all for a starting point taken from the device —
             two fixes from the same doorstep are never identical. That is a
             thing the reader can observe, so it is stated rather than left to be
-            noticed. See KEY_DP in lib/resultsStore.js. */}
+            noticed. See KEY_DP in lib/resultsStore.js.
+
+            ⚠ "a few paces" was the first wording here and it was wrong by about
+            four times. An agent measured the real envelope at 9.6–20.8 m from a
+            fix, against resultsStore.js's own 7.00–25.58 m across positions —
+            so the far edge is nearer thirty paces than a few. Understating a
+            radius is the same kind of error as overstating what is stored, and
+            it is the kind this file exists to not make. A number, not an
+            adjective. */}
         <p>
           If you turn on “keep the last routes”, one set of routes is kept too, always labelled
           with its age and deleted the moment you turn it off. It is handed back when you ask for
-          the same walk from roughly the same place — within a few paces, not a street — because a
-          phone’s idea of where you are shifts by a few metres each time you ask it.
+          the same walk again from within about twenty-five metres of where you saved it, because a
+          phone’s idea of where you are shifts by several metres each time you ask it.
         </p>
 
         <OfflineControl />
