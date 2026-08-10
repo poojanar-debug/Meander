@@ -2,9 +2,10 @@
 
 Things this run could not finish, what was tried, and what needs a human.
 
-**Three entries are open — §5, a deliberate deferral with a list; §6, which
-needs one credential only a human can supply; and §9, a permalink defect found
-while fixing §8 and left alone because it is a different file.**
+**Four entries are open — §5, a deliberate deferral with a list; §6, which
+needs one credential only a human can supply; and §10 and §11, both found by
+agents attacking the fix for §9 rather than reviewing it, and both needing a
+decision about the privacy surface rather than a patch.**
 
 | | |
 |---|---|
@@ -17,7 +18,9 @@ while fixing §8 and left alone because it is a different file.**
 | §6 the deployment VM cannot push to GitHub | **open** — needs a credential only a human can supply |
 | §7 the Caddyfile and rate limit are committed, not deployed | **resolved** — the documented commands were not enough; both needed the container replaced, not reloaded |
 | §8 the saved-route store is inert and the UI says otherwise | **resolved** — option 3: the store re-based on the page, and it stores less than the worker did |
-| §9 the address bar freezes on the search before a geolocated one | **open** — pre-existing `permalink.js` defect; reproduced, not fixed, out of §8's scope |
+| §9 the address bar freezes on the search before a geolocated one | **resolved** — the refusal now clears the bar instead of declining to touch it, and the key rounds so a device fix can replay at all |
+| §10 the grid is calibrated for a precision this app does not ask for | **open** — `enableHighAccuracy: false` returns tens of metres, not fractions; ~53% replay at σ = 8 m. Three fixes, all of them privacy decisions |
+| §11 a geolocated search only replays with the controls at their defaults | **open** — an empty address bar carries no minutes or mode, so the reload rebuilds a different request |
 
 ---
 
@@ -716,7 +719,7 @@ operator's call rather than a bug fix. The operator chose 3.
 
 ---
 
-## 9 · The address bar freezes on the search before a geolocated one — NOT FIXED
+## 9 · ~~The address bar freezes on the search before a geolocated one~~ — RESOLVED
 
 **Opened:** 2026-08-10, during Session C. **Not caused by Session C** — this is
 `permalink.js` behaviour that predates the saved-route work. It was found by a
@@ -772,6 +775,32 @@ the stub that does not is why this survived.
 permalink round-trip suite and `App.jsx`'s init, and this session was scoped to
 §8.
 
+### Resolved: 2026-08-10, the session after
+
+`writeUrl` now writes an empty query instead of returning, so a geolocated
+origin **clears** the address bar rather than declining to touch it. The refusal
+was always right; returning was the bug. `About.jsx` says what clearing means —
+a reload starts fresh rather than reopening the search before it — so the
+sentence at `:51-52` is no longer false in either direction.
+
+The test stub was the other half, exactly as predicted above. `replaceState` now
+moves `location.search`, and the device-fix test asserts on the *content* of
+every write rather than on a call count, because the count was the weaker claim
+and the fix makes it the wrong one.
+
+Proven able to fail rather than assumed: a worktree with the early return
+restored, built through the same vite pipeline and served locally, fails both of
+the new live-gate checks. Only `permalink.js` differs between the two runs.
+
+```
+early return restored   bar after: ?from=51.507400,-0.127800&…&min=30&mode=foot   FAIL
+fix in place            bar after: (empty)                                        PASS
+```
+
+The second half of the entry below is closed too: the key now hashes the origin
+snapped to a 4 dp grid with a 3×3 neighbourhood probe, so a device fix replays.
+Measured 7.01–25.59 m at 51.5074 — 5 m always replays, 200 m never does.
+
 ### Also found, and deliberately not changed
 
 **A geolocated search cannot replay after a reload, and rounding is the only way
@@ -785,3 +814,120 @@ and would replay a saved walk for someone standing some tens of metres away.
 That is a product decision about the privacy surface, not a bug fix, so it is
 the operator's under §1 of the deployment brief. Recommended precision if it is
 taken: 3–4 decimal places, and say so in the copy.
+
+---
+
+## 10 · The grid is calibrated for a precision this app does not ask for — OPEN
+
+**Opened:** 2026-08-10, by an agent attacking the rounded cache key it had not
+written. Not a defect in the arithmetic — that survived every attack — but in
+the premise the arithmetic was chosen on.
+
+`resultsStore.js` snaps the origin to a 4 dp grid and probes the eight
+neighbouring squares, which gives a guaranteed match to 7 m and a far edge at
+~26 m. The comment justifying that used to say two fixes from one doorstep
+"differ in the sixth decimal", i.e. 0.11 m. **That is wrong about this app.**
+
+`App.jsx:429` is the only `getCurrentPosition` feeding the origin:
+
+```js
+{ enableHighAccuracy: false, timeout: 10000, maximumAge: 60000 }
+```
+
+`enableHighAccuracy: false` is an explicit request for the wifi/cell provider
+rather than GPS. That provider returns access-point and cell centroids which
+step by tens of metres, not fractions of one. Measured, two independent fixes of
+one standing person, 2-D Gaussian, 200k trials per cell:
+
+| σ of one fix | 1 m | 3 m | 5 m | 8 m | 10 m | 20 m |
+|---|---|---|---|---|---|---|
+| London | 100% | 96.6% | 81.0% | **52.7%** | 39.1% | 12.6% |
+| equator | 100% | 99.6% | 92.7% | 70.7% | 55.3% | 18.9% |
+| Tromsø | 99.8% | 81.1% | 55.5% | 32.4% | 23.6% | 7.1% |
+
+At σ = 8 m the store replays about half the time. `resultsStore.js` says of the
+grid-line problem that *"a store that replayed on a coin flip would be worse
+than one that never replayed, because it would look intermittent rather than
+absent"* — the neighbourhood removed the coin flip caused by grid lines and left
+the one caused by fix error.
+
+**What was done:** the comment was corrected, so the file no longer claims a
+jitter magnitude the app does not receive. The behaviour was not changed.
+
+**What a human has to decide,** because all three widen what "the same spot"
+means and that is a privacy decision rather than a bug fix — §1 of the
+deployment brief reserves it:
+
+1. `enableHighAccuracy: true` in `App.jsx:429`. Costs battery and a slower first
+   fix; makes the existing grid fit the data.
+2. A coarser `KEY_DP`, or a 5×5 probe. 5×5 takes the guaranteed match to 13.9 m
+   and the far edge to 39.3 m — and 39 m is far enough that "the same spot" is
+   no longer a fair description of what was matched.
+3. Read `position.coords.accuracy`, which `App.jsx:414` currently discards, and
+   choose the grid from it. The most honest of the three and the most code: it
+   makes the match as wide as the fix deserves and no wider.
+
+**Do not take (2) without changing the copy again.** About and the consent hint
+now say "about twenty-five metres", measured.
+
+### Two smaller things found in the same round, both left alone deliberately
+
+**The antimeridian is a dead zone.** Two points 2 m apart either side of ±180°
+longitude are 3,600,000 squares apart, so nothing on one side ever replays for
+anything on the other, at any separation — measured at 2.13 m, 10.6 m, 21.3 m,
+42.6 m, 106 m and 213 m, all misses, with a same-side control at 6.39 m
+replaying. Same at the pole for two longitudes 180° apart. Cost of the gap is
+one network request; cost of closing it is a second wrap-around rule inside the
+one function that decides whether two searches are the same. Documented in
+`resultsStore.js` rather than fixed.
+
+**Above ~85° latitude the feature is off rather than degraded.** 3 m due east is
+15 squares at 89°, and 15,454 at 89.999°. The existing comment covers this in
+kind; it now covers it in degree.
+
+---
+
+## 11 · A geolocated search only replays with the controls left at their defaults — OPEN
+
+**Opened:** 2026-08-10, by an agent tracing the end-to-end journey rather than
+the module. This is the direct cost of §9's fix, and it is worth stating plainly
+because it blunts the feature §10 exists to serve.
+
+The grid forgives the origin and nothing else — deliberately, since a
+destination is a geocoded place with no jitter to absorb. But `keyedRequest`
+spreads the rest of the request byte-exact, and **an empty address bar carries no
+minutes, mode, objectives or departure time.** So after a reload:
+
+```
+online:  tap "1 hr" → Use my location → saved at minutes: 60
+offline: reload → minutes back to the default 35 → Use my location, 4 m away
+expected:  the saved walk comes back
+actual:    miss → "Could not reach the Meander server."
+proof:     the same request with minutes: 60 replays
+```
+
+`FirstRun.jsx:56-59` offers 20 / 35 / 1 hr / 2 hr as one-tap chips directly above
+"Use my location", so a non-default search is the ordinary path, not the corner.
+Retry rebuilds the same defaulted request and misses again, and the user is
+never told a saved walk exists — `OfflineBar` is gated on routes that have not
+arrived.
+
+**Not a regression.** Before this session the pure geolocated flow left the bar
+empty too, and the byte-exact key meant it never replayed at all. The flow where
+bar *content* changed is permalink-then-locate, and there the old behaviour was
+the §9 defect: the controls survived only because the whole abandoned search
+did, and a reload re-ran it.
+
+**The live gate grades the case that works.** `live-gate.mjs` presses locate
+without touching the dial, so its "a fix five metres away replays" check is true
+and narrow. Recorded here rather than quietly left as coverage.
+
+**What the fix probably is:** write the non-location fields to the address bar
+even when the origin is a device fix — `min`, `mode`, `obj`, `at` are not
+location and are already in the URL for a searched place — and teach
+`decodeState`/`init` to restore them from an origin-less query **without**
+seeding `nonce: 1`, so a reload rebuilds the controls and asks for nothing. That
+keeps every promise §9 made: no coordinate in the bar, nothing booted on reload.
+Not done here because it changes `decodeState`'s contract, which the permalink
+round-trip suite pins, and this session was scoped to the two defects above.
+
