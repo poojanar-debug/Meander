@@ -78,6 +78,22 @@ REJECTED_SMOOTHNESS = frozenset(
 
 REJECTED_BARRIERS = frozenset({"GATE", "STILE", "TURNSTILE", "KISSING_GATE"})
 
+# Barrier values that mean "there is nothing in the way here". Named rather than
+# inline in assess_barrier() so enrich.py can ask Overpass for exactly the values
+# this module has an opinion about — see BARRIER_VALUES_WITH_A_VERDICT.
+ACCEPTED_BARRIERS = frozenset({"NO", "NONE", "ENTRANCE"})
+
+# Every barrier value that changes an answer. Anything outside this set assesses
+# to UNKNOWN, and an UNKNOWN barrier span produces no finding and does not enter
+# coverage — coverage is surface and smoothness only — so it has no effect on
+# the response at all.
+#
+# That is what makes it safe for the Overpass query to ask only for these, and
+# the reason the set is derived here rather than written out in a query string:
+# adding a value to REJECTED_BARRIERS has to widen the question automatically,
+# or the engine would start rejecting something nobody is fetching any more.
+BARRIER_VALUES_WITH_A_VERDICT = REJECTED_BARRIERS | ACCEPTED_BARRIERS
+
 # highway=steps, plus GraphHopper's road_class spelling of it.
 REJECTED_ROAD_CLASSES = frozenset({"STEPS"})
 
@@ -205,7 +221,7 @@ def assess_barrier(value: Any) -> Verdict:
     key = normalise(value)
     if key in REJECTED_BARRIERS:
         return Verdict.FAIL
-    if key in {"NO", "NONE", "ENTRANCE"}:
+    if key in ACCEPTED_BARRIERS:
         return Verdict.PASS
     log.info("unrecognised_barrier", extra={"value": key})
     return Verdict.UNKNOWN
