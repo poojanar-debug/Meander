@@ -305,6 +305,36 @@ async def http_error(request: Request, exc: StarletteHTTPException) -> JSONRespo
     )
 
 
+@app.exception_handler(Exception)
+async def unhandled_error(request: Request, exc: Exception) -> JSONResponse:
+    """Anything nobody anticipated, in the shape every other error here has.
+
+    Without this, an exception that is not a RoutingError escaped `post_routes`
+    entirely and Starlette rendered it as `text/plain` 500 "Internal Server
+    Error" — not the `{"error": {"kind", "message"}}` envelope this endpoint's
+    own error handling exists to guarantee, and not what
+    `frontend/src/api/client.js` parses. The client fell back to "The server
+    returned 500", which is what it says when it could not read the body at all.
+
+    SSE handled the same case correctly, so the two transports for one endpoint
+    disagreed about the shape of a failure as well as its kind.
+
+    The message is deliberately generic. The detail goes to the log, which is
+    scrubbed; the caller gets something true and useless to an attacker.
+    """
+    metrics.incr("unhandled_errors_total")
+    log.exception("unhandled_error", extra={"path": request.url.path})
+    return JSONResponse(
+        status_code=500,
+        content={
+            "error": {
+                "kind": "internal",
+                "message": "Something went wrong on our side. Please try again.",
+            }
+        },
+    )
+
+
 def _too_large(request: Request) -> JSONResponse:
     """413, carrying the CORS headers the middleware below it never got to add.
 
@@ -431,6 +461,18 @@ async def request_context(request: Request, call_next: Any) -> Response:
         )
     request_id_var.reset(token)
     return response
+
+
+# SSE carries its error inside a 200 body, so the kind is the whole of what it
+# says. The JSON transport has to turn that same kind into a status line, and
+# these are the only kinds route_events_with_deadline and _stream can produce.
+# Anything unlisted falls back to 502, which is the honest default for "an
+# upstream did not give us an answer".
+_STATUS_FOR_ERROR_KIND: dict[str, int] = {
+    "timeout": 504,
+    "shutting_down": 503,
+    "internal": 500,
+}
 
 
 def _error(kind: str, message: str, status: int) -> JSONResponse:
@@ -1338,15 +1380,44 @@ async def post_routes(req: RouteRequest, request: Request, response: Response) -
             headers={**SSE_HEADERS, "X-Meander-Cache": "miss"},
         )
 
+    # Counted and drained like a stream, because it is one — just one the client
+    # sees as a single body. Without this a JSON request in flight at SIGTERM was
+    # invisible to the drain loop in lifespan, which waited only on _open_streams
+    # and then let the process exit from under it.
+    global _open_streams
+    _open_streams += 1
     try:
         payload: dict[str, Any] | None = None
+        failure: dict[str, Any] | None = None
         async for event in route_events_with_deadline(req):
+            if _shutting_down.is_set():
+                return _error(
+                    "shutting_down",
+                    "This server is restarting. Your request was not finished — "
+                    "please try again in a moment.",
+                    503,
+                )
             if event["type"] == "done":
                 payload = event["payload"]
+            # **The error event used to be dropped on the floor here.** The loop
+            # looked only for "done", so a deadline that produced nothing left
+            # `payload` as None and fell through to the generic 502 below: the
+            # client was told "No route could be produced for that request" with
+            # kind "upstream" when SSE, for the identical request, said kind
+            # "timeout" and explained that the request had run out of time. Two
+            # transports for one endpoint disagreeing about what happened.
+            elif event["type"] == "error":
+                failure = event
     except RoutingError as exc:
         metrics.incr("upstream_failures_total")
         return _error(exc.kind, exc.human_message, exc.status_code)
+    finally:
+        _open_streams -= 1
 
+    if payload is None and failure is not None:
+        return _error(
+            failure["kind"], failure["message"], _STATUS_FOR_ERROR_KIND.get(failure["kind"], 502)
+        )
     if payload is None:
         return _error("upstream", "No route could be produced for that request.", 502)
 
