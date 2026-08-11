@@ -43,18 +43,21 @@ lists the seven pieces of it that have to come back, and why each one is wanted.
 
 ### What is proven
 
-**652 backend tests and 334 frontend tests pass offline**, at 87.71% statement coverage against an
+**697 backend tests and 442 frontend tests pass offline**, at 87.71% statement coverage against an
 85% floor. The suite never opens a socket, and a job in CI runs it under `unshare -n` to prove
 that rather than trust it. The deploy image imports with torch absent, checked against the real
 requirements file, and `backend.main` is imported in that environment to prove absence is not the
 only thing being measured.
 
-The WCAG 2.1 AA line that used to sit here is withdrawn rather than restated. It was produced by
-`scripts/gate.mjs`, running axe-core at light desktop, dark desktop and 390 px — and that gate left
-the tree in the reconciliation merge along with the frontend it graded. `axe-core` is still a
-devDependency and nothing runs it. [BLOCKED.md](BLOCKED.md) §5 tracks bringing it back re-targeted
-at the component tree that actually shipped; until then there is no automated accessibility pass to
-report, and claiming one would be the easiest lie in this file to tell.
+**WCAG 2.1 AA, checked rather than asserted.** `frontend/scripts/gate.mjs` runs axe-core against a
+real headless Chrome in both themes and reports no wcag2a/wcag2aa violations, alongside a 44 x 44
+target sweep, a no-horizontal-scroll check at 320 px and 390 px, and an assertion that every route
+row carries its own text. 25 checks in total, and the gate refuses to run any of them if its
+selector manifest does not match — the difference between grading the app and grading nothing.
+
+`.github/workflows/ci.yml` runs it on every push and `make check` includes it. The paragraph that
+used to sit here said axe-core was "still a devDependency and nothing runs it", which was true when
+the gate left the tree in the reconciliation merge and stopped being true when it came back.
 
 All three presets route against a self-hosted server. `scripts/verify_selfhosted.py` asserts it at
 **three** of its four locations under the default `demo` region set: all three presets answer, their
@@ -388,11 +391,27 @@ nothing recorded against it. Every result states the fraction of its length that
 checked, and below 30% the wording changes to say plainly that you should not rely on it. That
 sentence is not boilerplate — it is the most important thing on the card.
 
+**The sentence names what was examined, not just how much.** Gates, stiles, turnstiles and kissing
+gates are checked against OSM barrier nodes fetched for the route, and the sentence reads
+"Accessibility data covers N% of this route" only when that check actually ran. When Overpass could
+not be reached — or answered with a set too truncated to be a survey — it reads "Surface data covers
+N% … Gates and stiles were not checked" instead, because a percentage that silently covers a
+dimension nobody looked at is the wrong kind of confident.
+
+Until recently it was always the second case wearing the first case's words: the request path called
+the accessibility engine without ever passing it barrier data, so `GATE`, `STILE`, `TURNSTILE` and
+`KISSING_GATE` could not fire at all, and a route through a kissing gate came back `ok` with
+confidence 1.0 and an empty blocker list.
+
 What Meander cannot see at all:
 
 - temporary obstructions — roadworks, parked cars, bins, market stalls, snow
 - door widths, lift outages, and anything indoors
 - kerb heights where `kerb` is untagged, which is most kerbs
+- barriers OSM records with a value the engine has no verdict for — a bollard, a block, a cycle
+  barrier. These are fetched only for the values that can change an answer, because asking for all
+  of them returns thousands of nodes for a city-sized area and truncates the query
+- barriers mapped onto a way rather than as a node, which the projection does not see
 - whether a "step-free" route is actually navigable in a particular chair, with a particular gait,
   on a particular day
 - gradients where the elevation model is coarse; it smooths over short sharp ramps
@@ -447,6 +466,17 @@ Benches, drinking water, toilets and shelters within 35 m of the line. Under-rec
 everywhere, and the app cannot tell a usable bench from a broken one. When Overpass is unreachable
 the field is `null` — "we could not look" — which is deliberately distinct from `[]`, "we looked
 and found none".
+
+That was documentation of an intention rather than of the code until recently: `rest_stops` was
+typed `list[RestStop]` with a default of `[]`, so the `null` this paragraph describes could not be
+emitted, and an unreachable Overpass was indistinguishable on the wire from a route with no benches
+on it. The model now carries the distinction the sentence claims. The frontend had been branching
+on `rest_stops == null` all along.
+
+The same `null` is returned when Overpass answers but truncates. It caps at a fixed element count
+and truncates by element id, which is uncorrelated with position along a route — so a full page is a
+perforated sample of the area rather than a shortened one, and presenting it as a survey would drop
+benches from the middle of a route with no indication.
 
 ### The keyless demo runs on hand-built routing data
 

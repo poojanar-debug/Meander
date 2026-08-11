@@ -667,7 +667,7 @@ def _scored_route(
         elevation=(
             ElevationProfile(**vars(assessment.elevation)) if assessment.elevation else None
         ),
-        rest_stops=[
+        rest_stops=None if rest_stops is None else [
             RestStop(lat=s.lat, lon=s.lon, type=s.type, at_m=s.at_m)
             for s in (rest_stops or [])
         ],

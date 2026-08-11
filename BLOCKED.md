@@ -2,7 +2,8 @@
 
 Things this run could not finish, what was tried, and what needs a human.
 
-**Four entries are open — §5, a deliberate deferral with a list; §6, which
+**Five entries are open — §12, four findings from the review round that were
+not fixed; §5, a deliberate deferral with a list; §6, which
 needs one credential only a human can supply; and §10 and §11, both found by
 agents attacking the fix for §9 rather than reviewing it, and both needing a
 decision about the privacy surface rather than a patch.**
@@ -931,3 +932,91 @@ keeps every promise §9 made: no coordinate in the bar, nothing booted on reload
 Not done here because it changes `decodeState`'s contract, which the permalink
 round-trip suite pins, and this session was scoped to the two defects above.
 
+
+---
+
+## 12 · Four findings from the review round were left unfixed — OPEN
+
+The review that produced this round listed 21 items. Seventeen are fixed on
+`review-fixes`; these four are not, and none of them is blocked on a decision —
+they are simply not done. Written here rather than left implicit, because a
+branch that fixes most of a list reads as though it fixed all of it.
+
+### The route cache grows without bound and never reclaims space — OPEN
+
+`purge_expired_routes` has exactly one caller, at startup. Between restarts,
+expired rows go only when their exact key is asked for again: there is no row
+cap, no periodic sweep, no `VACUUM` and no `wal_checkpoint(TRUNCATE)`.
+**Measured by the review: 200 expired route payloads occupy 5,586,944 bytes,
+and after `purge_expired_routes()` deleted all 200 rows the file grew to
+7,012,352 bytes.** `data/cache.db` is baked into the image with no volume
+mount, so this fills the container's writable layer on a 12 GB VM.
+
+Two of the three parts are done. `route_cache_size()` no longer counts expired
+rows, so `/api/health` has stopped overstating, and `close()` now closes every
+connection it handed out — leaked readers pin the WAL and prevent
+checkpointing, which was compounding the growth.
+
+What is left is the reclamation itself: a sweep on a timer or every N writes, a
+row or byte ceiling with LRU eviction by `created_at`, and a `VACUUM` after a
+large purge. The growth curve is measurable on this VM and the number belongs
+in the comment.
+
+### The JSON transport's error shapes differ from SSE's — OPEN
+
+Both measured by the review, side by side against the same requests:
+
+- **A deadline with nothing ready returns 502 `kind: "upstream"`**, "No route
+  could be produced for that request." — `post_routes` ignores the `error`
+  event, so `payload` stays `None` and the generic 502 fires. SSE returns
+  `kind: "timeout"` with the right copy for the same request.
+- **Any non-`RoutingError` exception escapes as `text/plain` 500 "Internal
+  Server Error"**, not the `{"error": {"kind", "message"}}` envelope the
+  endpoint's own error handling exists to guarantee and that
+  `frontend/src/api/client.js` parses. There is no
+  `@app.exception_handler(Exception)`. SSE handles the same case correctly.
+
+Also: the JSON path never checks `_shutting_down` and is not counted in
+`_open_streams`, so a JSON request in flight is not drained at SIGTERM.
+
+### `access_segments` is a dead table and corrupt rows are immortal — OPEN
+
+`put_access_tags` / `get_access_tags` still have no callers outside the module
+and its own tests, and `get_access_tags` counts JSON-corrupt rows and logs a
+count without ever deleting them, so the same warning repeats forever.
+
+The review suggested the barrier work might give this table its purpose, and it
+did not. Barriers are fetched per request from Overpass and cached by the
+whole-route cache in front of them; a segment-level barrier cache would need to
+record "this cell was surveyed and had nothing" for every cell in the bbox,
+because a missing row is otherwise indistinguishable from an unsurveyed one —
+which is the exact ambiguity this project refuses everywhere else. That is a
+design, not a wiring job.
+
+So the honest options remain the two the review named: build that design, or
+delete the table and its methods. Deleting means a `SCHEMA_VERSION` bump, and
+mismatches are now fatal rather than silently overstamped, so it also means
+migrating the committed `data/cache.db` in the same commit.
+
+### Presentational duplication in the stylesheet — OPEN
+
+Three verified cases, none touched:
+
+- **The pill button exists three times** — `.preset`, `.chip`, `.hour` — same
+  intent, different `gap`, `font-size` and `padding`, with a byte-identical
+  pressed rule in all three.
+- **The score meter exists three times** — `.score__track`/`__fill` at 5 px,
+  `.scores__track`/`__fill` at 6 px, `.banner__progress`/`__bar` at 6 px. The
+  first two render the same three scores from an identical row shape at two
+  different bar heights.
+- **The dash swatch exists four times at three sizes** — `.chip__swatch`,
+  `.legend__line`, `.route__pattern`, `.detail__pattern`, all fed by the same
+  `swatchBackground()`.
+
+And `.score` / `.scores` are two blocks whose names differ by one character and
+whose element classes differ by the same character, so a typo applies the wrong
+meter geometry and is invisible in review.
+
+The work is to collapse each to one block with modifiers, rename the pair that
+cannot be told apart, and keep the rendered result pixel-identical with the
+25-check gate green.

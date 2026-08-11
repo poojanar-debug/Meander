@@ -171,7 +171,16 @@ class Route(BaseModel):
     scores: Scores
     scoring_method: ScoringMethod
     confidence: float
-    rest_stops: list[RestStop] = Field(default_factory=list)
+    # **Null when nobody could look.** A list — including an empty one — means
+    # Overpass answered and this is what it found. The two are different claims
+    # and the difference is the whole discipline of this project, so the type
+    # carries it rather than a note in the README saying it does.
+    #
+    # It used to be `list[RestStop]` defaulting to `[]`, which made "we could
+    # not look" unrepresentable: an unreachable Overpass and a route with no
+    # benches on it produced the same wire value, and README.md documented a
+    # `null` the model could never emit.
+    rest_stops: list[RestStop] | None = None
     blockers: list[Blocker] = Field(default_factory=list)
     # Turn-by-turn directions. Empty when the router gave none — which is
     # different from a route with no turns, but the UI says "no directions"
@@ -192,15 +201,21 @@ class Route(BaseModel):
     # contract, and the UI has to be able to say it.
     status_note: str | None = None
 
-    # True on the first of two passes: the geometry, duration, accessibility
-    # assessment and coverage are final, but air, shade and rest stops have not
-    # been fetched yet and a second `route` event with the same id will follow.
+    # True on the first of two passes: the geometry and duration are final, but
+    # air, shade, rest stops and the barrier half of the accessibility check
+    # have not been fetched yet, and a second `route` event with the same id
+    # will follow. The verdict itself can move on that second event — a gate
+    # found on the route blocks it — which is why "the assessment is final
+    # here" is no longer part of this comment.
     #
-    # This exists because `rest_stops` cannot be null. An empty list means "we
-    # looked and found none", which would be a false claim about a route we have
-    # not looked at yet — and the whole project turns on absence of data never
-    # being reported as a finding. The UI must not render rest stops or the air
-    # and shade scores as measured while this is true.
+    # `rest_stops` is null on this pass for the reason this flag was invented:
+    # an empty list means "we looked and found none", and the whole project
+    # turns on absence of data never being reported as a finding. The flag still
+    # earns its place now that the field can say that itself — air and shade are
+    # scalars, so null on them does not distinguish "not yet" from "could not".
+    #
+    # The UI must not render rest stops or the air and shade scores as measured
+    # while this is true.
     enrichment_pending: bool = False
 
 

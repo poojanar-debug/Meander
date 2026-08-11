@@ -219,6 +219,13 @@ async def test_a_pending_route_never_claims_it_found_no_rest_stops(
 
     On the first pass we have not looked, and the whole project turns on
     absence of data never being reported as a finding.
+
+    **The field is now null there**, rather than `[]` guarded by a flag. It used
+    to be typed `list[RestStop]` with a default of `[]`, which made "we could
+    not look" unrepresentable — so `enrichment_pending` existed partly to say in
+    a second field what the first one was unable to say. It can say it itself
+    now. The flag is still asserted below, because air and shade are scalars and
+    null alone does not tell the UI that a second event is coming.
     """
 
     async def fake_post(body, mode, preset):
@@ -229,9 +236,9 @@ async def test_a_pending_route_never_claims_it_found_no_rest_stops(
     async for event in main_mod.route_events(_req(objectives=["fastest"])):
         if event["type"] == "route" and event["route"]["enrichment_pending"]:
             route = event["route"]
-            assert route["rest_stops"] == []
+            assert route["rest_stops"] is None
             assert route["enrichment_pending"] is True, (
-                "the flag is what stops [] being read as a measurement"
+                "the flag is what tells the UI a second event is still coming"
             )
             # The parts that ARE final on the first pass.
             assert route["geometry"]

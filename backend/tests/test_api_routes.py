@@ -149,7 +149,9 @@ def test_killing_every_enrichment_service_at_once_still_returns_200(api_client, 
 
     assert len(ok) >= 2
     assert payload["best_departure"] is None
-    assert all(r["rest_stops"] == [] for r in ok)
+    # Null, not []. Every enrichment service is dead in this test, so nobody
+    # looked — and "we looked and found none" would be a finding we did not make.
+    assert all(r["rest_stops"] is None for r in ok)
 
 
 def test_killing_scoring_still_returns_200(api_client, monkeypatch) -> None:
