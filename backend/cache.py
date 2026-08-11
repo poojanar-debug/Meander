@@ -28,7 +28,7 @@ from .logging_setup import get_logger
 
 log = get_logger(__name__)
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 
 
 class CacheClosed(RuntimeError):
@@ -36,16 +36,57 @@ class CacheClosed(RuntimeError):
 
 
 class SchemaVersionMismatch(RuntimeError):
-    """The cache file was written by a schema this build does not read.
+    """The cache file was written by a schema this build cannot migrate.
 
-    Raised rather than migrated: there is no migration path, and there never was
-    one. Stamping the current version over an older file — which is what used to
-    happen — left the old columns in place and the new number on top.
+    Raised rather than silently accepted. Stamping the current version over an
+    older file — which is what this class replaced — left the old columns in
+    place and the new number on top, so the version recorded which process last
+    opened the file rather than what shape it was in.
     """
+
+
+# Ordered, applied one step at a time from whatever the file says up to
+# SCHEMA_VERSION. A version with no entry here cannot be migrated and is
+# refused; a cache is safe to delete, so refusing costs a recomputation rather
+# than data.
+#
+# 3 -> 4 drops access_segments. It was written by nothing and read by nothing
+# for the whole life of the project, and the barrier work did not give it a
+# purpose: barriers are fetched per request over a bbox and memoised by the
+# whole-route cache in front of them. A segment-level barrier cache would have
+# to record "this cell was surveyed and had nothing" for every cell in the
+# area, because a missing row is otherwise indistinguishable from an unsurveyed
+# one, and that ambiguity is the one thing this project refuses everywhere
+# else. Dropping it is honest; leaving it was an invitation to wire it up
+# wrongly later.
+_MIGRATIONS: dict[int, tuple[str, ...]] = {
+    3: ("DROP TABLE IF EXISTS access_segments;",),
+}
 
 # ~11 m at the equator. Segment scores are a property of a place, not a route,
 # so neighbouring requests share cache entries.
 SEGMENT_GRID_DECIMALS = 4
+
+# The route cache is a cost control, not a database: it exists so a repeated
+# request does not spend GraphHopper credits again, and losing an entry costs
+# one recomputation. So it gets a ceiling rather than being allowed to grow to
+# whatever the disk holds.
+#
+# 500 rows against a measured ~30 KB per payload (6.0 MB for 200 rows of three
+# routes with geometry and steps) is about 15 MB — small beside the image it
+# ships in, and far more than a free-tier daily quota of 2,000 routes can fill
+# with distinct answers inside the 6-hour TTL.
+ROUTE_CACHE_MAX_ROWS = 500
+
+# Often enough that a burst cannot run away, rarely enough that the common path
+# is still a single INSERT. At the ceiling above this is roughly one sweep per
+# 10% of the table.
+SWEEP_EVERY_N_WRITES = 50
+
+# VACUUM rewrites the whole file and holds a write lock while it does, so it is
+# worth doing once a meaningful number of rows have gone — counted across
+# sweeps, since one sweep rarely drops more than SWEEP_EVERY_N_WRITES rows.
+VACUUM_AFTER_ROWS_REMOVED = 100
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS meta (
@@ -72,13 +113,6 @@ CREATE TABLE IF NOT EXISTS route_cache (
 );
 CREATE INDEX IF NOT EXISTS idx_route_cache_expires ON route_cache(expires_at);
 
-CREATE TABLE IF NOT EXISTS access_segments (
-    segment_key  TEXT PRIMARY KEY,
-    lat          REAL NOT NULL,
-    lon          REAL NOT NULL,
-    tags_json    TEXT NOT NULL,
-    updated_at   TEXT NOT NULL
-);
 """
 
 
@@ -133,6 +167,9 @@ class Cache:
         self._all: list[sqlite3.Connection] = []
         self._all_lock = threading.Lock()
         self._closed = False
+        self._writes_since_sweep = 0
+        self._removed_since_reclaim = 0
+        self._writes_lock = threading.Lock()
         # An in-memory database only survives while its connection is open, so a
         # single shared connection is required for that case.
         self._shared: sqlite3.Connection | None = None
@@ -185,11 +222,10 @@ class Cache:
         nothing to a table that already exists. `stats()` then reported the
         module constant, so `/api/health` asserted a migration that never ran.
 
-        There is no migration path, and inventing one for versions that were
-        never deployed would be fiction. So the honest behaviour is to say so
-        and stop: a wrong answer from a half-migrated cache is worse than a
-        process that will not start, and the fix — delete the file, it is a
-        cache — is one line in an error message.
+        Where a step exists in _MIGRATIONS it is applied; where none does, the
+        file is refused rather than opened and hoped for. A wrong answer out of
+        a half-migrated cache is worse than a process that will not start, and
+        the fix — delete the file, it is a cache — fits in the error message.
         """
         with self.conn as conn:
             conn.executescript(_SCHEMA)
@@ -204,12 +240,22 @@ class Cache:
                 found = int(row["value"])
             except (TypeError, ValueError):
                 found = -1
-            if found != SCHEMA_VERSION:
-                raise SchemaVersionMismatch(
-                    f"{self.path} was written by schema version {row['value']}, and this "
-                    f"build reads version {SCHEMA_VERSION}. There is no migration between "
-                    f"them. This file is a cache and can be deleted: rm {self.path}"
-                )
+
+            while found != SCHEMA_VERSION:
+                steps = _MIGRATIONS.get(found)
+                if steps is None:
+                    raise SchemaVersionMismatch(
+                        f"{self.path} was written by schema version {row['value']}, and "
+                        f"this build reads version {SCHEMA_VERSION} with no migration "
+                        f"from there. This file is a cache and can be deleted: "
+                        f"rm {self.path}"
+                    )
+                for statement in steps:
+                    conn.execute(statement)
+                found += 1
+                conn.execute("UPDATE meta SET value = ? WHERE key='schema_version'",
+                             (str(found),))
+                log.info("cache_schema_migrated", extra={"to": found})
 
     def schema_version(self) -> int | None:
         """The version recorded in the file, not the constant this build holds."""
@@ -319,52 +365,6 @@ class Cache:
         ).fetchone()
         return int(row["n"]) if row else 0
 
-    # ---- accessibility tags ---------------------------------------------
-
-    def get_access_tags(self, keys: Iterable[str]) -> dict[str, dict[str, Any]]:
-        keys = list(keys)
-        if not keys:
-            return {}
-        out: dict[str, dict[str, Any]] = {}
-        corrupt = 0
-        for i in range(0, len(keys), 400):
-            chunk = keys[i : i + 400]
-            placeholders = ",".join("?" * len(chunk))
-            rows = self.conn.execute(
-                f"SELECT segment_key, tags_json FROM access_segments "
-                f"WHERE segment_key IN ({placeholders})",
-                chunk,
-            ).fetchall()
-            for row in rows:
-                try:
-                    out[row["segment_key"]] = json.loads(row["tags_json"])
-                except json.JSONDecodeError:
-                    # The key is a rounded coordinate, so it is counted, not logged.
-                    corrupt += 1
-        if corrupt:
-            log.warning("access_tags_corrupt", extra={"rows": corrupt})
-        return out
-
-    def put_access_tags(self, lat: float, lon: float, tags: dict[str, Any]) -> str:
-        key = segment_key(lat, lon)
-        with self.conn as conn:
-            conn.execute(
-                """
-                INSERT INTO access_segments (segment_key, lat, lon, tags_json, updated_at)
-                VALUES (?,?,?,?,?)
-                ON CONFLICT(segment_key) DO UPDATE SET
-                    tags_json=excluded.tags_json, updated_at=excluded.updated_at
-                """,
-                (
-                    key,
-                    round(lat, SEGMENT_GRID_DECIMALS),
-                    round(lon, SEGMENT_GRID_DECIMALS),
-                    json.dumps(tags, separators=(",", ":")),
-                    _iso(_now()),
-                ),
-            )
-        return key
-
     # ---- whole-route cache ----------------------------------------------
 
     def get_route(self, cache_key: str) -> dict[str, Any] | None:
@@ -422,6 +422,102 @@ class Cache:
                     _iso(now + timedelta(seconds=ttl_s)),
                 ),
             )
+        self._maybe_sweep()
+
+    def _maybe_sweep(self) -> None:
+        """Sweep every SWEEP_EVERY_N_WRITES writes.
+
+        The only caller of purge_expired_routes used to be startup, so between
+        restarts an expired row went only when its exact key was asked for
+        again — and a key that is never asked for again is exactly the kind that
+        expires. There was no row cap, no periodic sweep and nothing that
+        returned space to the filesystem.
+        """
+        with self._writes_lock:
+            self._writes_since_sweep += 1
+            if self._writes_since_sweep < SWEEP_EVERY_N_WRITES:
+                return
+            self._writes_since_sweep = 0
+        self.sweep()
+
+    def sweep(self) -> int:
+        """Drop expired rows, then the oldest rows above the ceiling. Reclaims space.
+
+        Returns the number of rows removed.
+
+        **Deleting rows does not shrink a SQLite file, and in WAL mode it grows
+        it.** Measured on this VM with 200 expired route payloads: the file plus
+        its WAL was 6,086,136 bytes, and after `DELETE`-ing all 200 rows it was
+        **8,012,632** — 1.9 MB larger for holding nothing. A `VACUUM` on its own
+        did not help either, because the pages it rewrites go to the WAL too.
+
+        What actually reclaims is checkpoint, then VACUUM, then checkpoint
+        again: 6,086,136 -> 2,949,120 -> 2,990,352 -> **73,728**, an empty file.
+        The first checkpoint is what lets VACUUM see the freed pages; the second
+        returns what VACUUM itself wrote.
+
+        That matters here more than it would elsewhere: `data/cache.db` is baked
+        into the image with no volume mount, so this grows the container's
+        writable layer, on a 12 GB VM, until something falls over.
+
+        Only done after a large purge — VACUUM rewrites the whole file and takes
+        a write lock for the duration, which is not a thing to do on every
+        request.
+        """
+        removed = self.purge_expired_routes()
+        removed += self._evict_over_ceiling()
+        if not removed:
+            return 0
+
+        # Accumulated across sweeps, not measured within one. A sweep runs every
+        # SWEEP_EVERY_N_WRITES writes and so rarely finds more than that many
+        # rows to drop; comparing a single sweep's yield against the VACUUM
+        # threshold meant the threshold was never reached and nothing was ever
+        # reclaimed — which was this fix quietly not working.
+        with self._writes_lock:
+            self._removed_since_reclaim += removed
+            due = self._removed_since_reclaim >= VACUUM_AFTER_ROWS_REMOVED
+            if due:
+                self._removed_since_reclaim = 0
+        if due:
+            self._reclaim()
+        log.info("route_cache_swept", extra={"rows": removed, "reclaimed": due})
+        return removed
+
+    def _evict_over_ceiling(self) -> int:
+        """Oldest-first eviction down to ROUTE_CACHE_MAX_ROWS.
+
+        By `created_at`, which for this table is the last time the entry was
+        *written* — `put_route` refreshes it on conflict. That is the closest
+        thing to recency the table records, and it is the right direction: an
+        answer nobody has asked for since it was stored is the one to lose.
+        """
+        with self.conn as conn:
+            over = conn.execute(
+                "SELECT COUNT(*) AS n FROM route_cache"
+            ).fetchone()["n"] - ROUTE_CACHE_MAX_ROWS
+            if over <= 0:
+                return 0
+            cur = conn.execute(
+                "DELETE FROM route_cache WHERE cache_key IN ("
+                "  SELECT cache_key FROM route_cache ORDER BY created_at ASC LIMIT ?"
+                ")",
+                (over,),
+            )
+            return cur.rowcount or 0
+
+    def _reclaim(self) -> None:
+        """Return freed pages to the filesystem. See sweep() for the numbers."""
+        conn = self.conn
+        try:
+            # Outside a transaction — VACUUM cannot run inside one.
+            conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+            conn.execute("VACUUM")
+            conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+        except sqlite3.Error as exc:
+            # A busy database is a reason to try again later, not to fail a
+            # request. The rows are already gone; only the space is not back.
+            log.warning("route_cache_reclaim_failed", extra={"error": type(exc).__name__})
 
     def purge_expired_routes(self) -> int:
         """Delete every expired row, and every row whose expiry cannot be read.

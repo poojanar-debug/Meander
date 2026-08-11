@@ -29,7 +29,7 @@ Two modes:
 ``--scrub``   delete every ``route_cache`` row, checkpoint the WAL and VACUUM,
               leaving the segment scores untouched.
 
-Neither mode ever touches ``segment_scores`` or ``access_segments``.
+Neither mode ever touches ``segment_scores``.
 """
 
 from __future__ import annotations
