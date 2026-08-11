@@ -125,7 +125,32 @@ export default function FollowMode({ route, units, onExit, onAnnounce }) {
 
   // --- everything derived from the position, all of it local ---------------
 
-  const at = position ? locateOnRoute(position, geometry, cumulative) : null
+  // The previous match, carried so the projection can be anchored. A ref
+  // rather than state: it is an input to the next match, not something the
+  // render reads, and putting it in state would re-render on every fix for no
+  // visible change. See locateOnRoute for why a loop cannot be matched without
+  // it — the outbound and return legs are the same street, and whichever is
+  // nearest at a given instant is decided by GPS noise.
+  //
+  // Written in an effect and never during render. Under StrictMode a render
+  // runs twice, and advancing the anchor in the render body would feed the
+  // second pass an anchor the first had already moved — the match would then
+  // depend on how many times React chose to render, which is not a property a
+  // position on a line may have.
+  const anchorM = useRef(null)
+  const at = useMemo(
+    () => (position ? locateOnRoute(position, geometry, cumulative, anchorM.current) : null),
+    [position, geometry, cumulative],
+  )
+  useEffect(() => {
+    if (at) anchorM.current = at.alongM
+  }, [at])
+
+  // A different route is a different line, and an anchor measured along the old
+  // one would window the search around a distance that means nothing here.
+  useEffect(() => {
+    anchorM.current = null
+  }, [geometry])
   const stepIndex = at ? stepAt(route.steps, at.index) : -1
   const currentStep = stepIndex >= 0 ? route.steps?.[stepIndex] : null
   const toTurn = at ? metresToNextTurn(route.steps, stepIndex, at.alongM, cumulative) : null
