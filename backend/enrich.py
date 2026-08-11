@@ -24,6 +24,7 @@ from typing import Any
 import httpx
 import numpy as np
 
+from .accessibility import BARRIER_VALUES_WITH_A_VERDICT
 from .config import OPEN_METEO_AQ_URL, OPEN_METEO_URL, OVERPASS_URL
 from .fixtures import BudgetExhausted, FixtureMissing, fetch
 from .geometry import (
@@ -44,9 +45,37 @@ AQI_WORST = 100.0
 
 # How far off the polyline a bench still counts as being "on the route".
 REST_STOP_CORRIDOR_M = 35.0
+
+# Much tighter than the rest-stop corridor, and tight for the opposite reason —
+# see barrier_spans_on_route. Roughly the width of a road: wide enough for the
+# disagreement between an OSM node and a simplified polyline, narrow enough not
+# to reach the parallel path across the street.
+BARRIER_CORRIDOR_M = 10.0
 REST_STOP_TARGET_SPACING_M = 200.0
 OVERPASS_TIMEOUT_S = 25
-OVERPASS_MAX_RESULTS = 200
+# Raised from 200, which real routes were hitting. Overpass truncates by element
+# id, and element id has nothing to do with position along a route, so reaching
+# the cap does not shorten the survey — it perforates it, and the result was
+# presented as a complete look either way.
+#
+# Measured on the committed corpus at the old value: two of the eleven recorded
+# fixtures held exactly 200 elements and a third held 199, so a wheelchair user
+# planning rest breaks was already being shown a survey with holes in it and no
+# way to tell.
+#
+# 6,000 is sized against the largest bbox this project actually produces. The
+# Vondelpark scenario is a 60-minute *bike* loop, so the box covering its three
+# routes is about 8 x 7 km and holds **4,762** amenity nodes — counted with
+# `out count`, not guessed. A 35-minute walk is an order of magnitude smaller.
+#
+# The cap still exists because an unbounded `out body` over a large bbox is how
+# a client earns a ban, and because a runaway query should fail rather than
+# stream. Where it is reached anyway, OverpassNodes.truncated refuses to let the
+# partial answer pass for a whole one.
+#
+# It lives inside the query string, so changing it rekeys every committed
+# Overpass fixture. They were re-recorded for this value.
+OVERPASS_MAX_RESULTS = 6000
 
 REST_STOP_AMENITIES = ("bench", "drinking_water", "toilets", "shelter")
 
@@ -177,7 +206,11 @@ async def fetch_air_quality(point: LatLon, when: datetime | None = None) -> AirQ
                 "latitude": round(point.lat, 3),
                 "longitude": round(point.lon, 3),
                 "hourly": "pm2_5,european_aqi",
-                "forecast_days": 1,
+                # Two days, not one. The departure strip offers six hours
+                # forward, so a late-evening request routinely asks about
+                # tomorrow — and a 24-value series cannot answer that, it can
+                # only return today's value for the same hour. See _hour_index.
+                "forecast_days": 2,
             },
             headers={"Accept": "application/json"},
             cost=1,
@@ -205,7 +238,7 @@ async def fetch_air_quality(point: LatLon, when: datetime | None = None) -> AirQ
         metrics.incr("enrichment_failures_total")
         return None
 
-    index = _hour_index(when, len(aqi_series))
+    index = _hour_index(when, hourly)
     aqi = _value_at(aqi_series, index)
     pm2_5 = _value_at(pm_series, index)
     if aqi is None:
@@ -218,17 +251,51 @@ async def fetch_air_quality(point: LatLon, when: datetime | None = None) -> AirQ
     )
 
 
-def _hour_index(when: datetime | None, length: int) -> int:
-    if length == 0:
-        return 0
+def _hour_index(when: datetime | None, hourly: dict[str, Any]) -> int | None:
+    """Position of ``when`` in the series, found by the series' own timestamps.
+
+    Two defects met here, and one answer closes both.
+
+    **The day mattered, not just the hour.** This indexed by ``moment.hour``
+    into a 24-value array, so a departure after UTC midnight read *today's*
+    value for that hour: a request at 23:30 with `depart_at` 01:00 got index 1,
+    a reading close to 23 hours old, presented as the air quality for the walk.
+    `models.py` puts no bound on `depart_at` and the departure strip offers six
+    hourly chips forward, so crossing midnight is ordinary.
+
+    **Replay served last year's forecast as a current measurement.** A recorded
+    fixture holds the forecast for the day it was recorded. Indexing it by
+    today's hour returns a number with provenance `recorded` and no degradation
+    — a real measurement of a day that has passed. Replay is a documented
+    deployment mode, so this is not hypothetical.
+
+    Open-Meteo returns `hourly.time` alongside every series, so the series can
+    say for itself which hours it covers. Matching against that is both the fix
+    for the midnight case and the reason a stale fixture now answers ``None``:
+    the hour being asked about is simply not in it. Nothing has to know how old
+    the fixture is, or guess a threshold past which it stops being true.
+    """
+    stamps = hourly.get("time") or []
+    if not stamps:
+        return None
+
     moment = when or datetime.now(UTC)
     if moment.tzinfo is None:
         moment = moment.replace(tzinfo=UTC)
-    return max(0, min(length - 1, moment.astimezone(UTC).hour))
+    # Open-Meteo's timestamps are naive and in the requested timezone, which is
+    # UTC by default here. Truncated to the hour because that is the resolution
+    # the series has.
+    wanted = moment.astimezone(UTC).replace(minute=0, second=0, microsecond=0)
+    wanted_key = wanted.strftime("%Y-%m-%dT%H:00")
+
+    try:
+        return stamps.index(wanted_key)
+    except ValueError:
+        return None
 
 
-def _value_at(series: list[Any], index: int) -> float | None:
-    if not series or index >= len(series):
+def _value_at(series: list[Any], index: int | None) -> float | None:
+    if index is None or not series or index >= len(series):
         return None
     value = series[index]
     if value is None:
@@ -256,7 +323,11 @@ async def fetch_cloud_cover(point: LatLon, when: datetime | None = None) -> floa
                 "latitude": round(point.lat, 3),
                 "longitude": round(point.lon, 3),
                 "hourly": "cloud_cover",
-                "forecast_days": 1,
+                # Two days, for the same reason as the air-quality call above:
+                # this feeds the shade score through the same _hour_index, so a
+                # departure past UTC midnight would otherwise fall off the end
+                # of the series and take the shade score to null with it.
+                "forecast_days": 2,
             },
             headers={"Accept": "application/json"},
             cost=1,
@@ -271,11 +342,12 @@ async def fetch_cloud_cover(point: LatLon, when: datetime | None = None) -> floa
         metrics.incr("enrichment_failures_total")
         return None
     try:
-        series = response.json().get("hourly", {}).get("cloud_cover") or []
+        hourly = response.json().get("hourly", {})
+        series = hourly.get("cloud_cover") or []
     except (ValueError, AttributeError):
         return None
 
-    value = _value_at(series, _hour_index(when, len(series)))
+    value = _value_at(series, _hour_index(when, hourly))
     return None if value is None else round(max(0.0, min(1.0, value / 100.0)), 4)
 
 
@@ -313,53 +385,229 @@ def overpass_query(points: Sequence[LatLon]) -> str:
     )
 
 
-async def fetch_rest_stop_nodes(points: Sequence[LatLon]) -> list[dict[str, Any]] | None:
-    """Raw amenity nodes in the bounding box covering ``points``.
+def overpass_barrier_query(points: Sequence[LatLon]) -> str:
+    """Barrier nodes over the same bbox, as a sibling query rather than a union.
 
-    Separate from the per-route filtering so one Overpass query can serve every
-    route in a request. Overpass rate-limits hard, and three queries per page
-    load would earn a ban within minutes.
+    A union with the amenity query would be one request instead of two, which is
+    what the rate limit cares about, and it was the first thing tried. It is not
+    worth what it costs: a fixture is keyed on a hash of the request body, so
+    editing the amenity query invalidates all eleven committed Overpass
+    fixtures at once and the offline suite goes dark on a change that has
+    nothing to do with rest stops. Two queries per request is still one query
+    per *request* — the thing the rest-stop comment warns against is one per
+    route, which multiplies by three.
+
+    The value filter is not an optimisation that trades away correctness, and it
+    is derived from ``BARRIER_VALUES_WITH_A_VERDICT`` rather than written out
+    here so that widening the engine widens the question automatically.
+
+    Asking for every barrier value was the first version, on the reasoning that
+    assess_barrier() should own the decision and an unrecognised value should
+    arrive as UNKNOWN rather than as absence. Measured, that does not hold: the
+    bbox covering three Vondelpark routes returns **more than 2,000 barrier
+    nodes**, of which 603 are bollards, 310 blocks, 181 lift gates and 50 kerbs.
+    The query truncated, and a truncated answer cannot support a claim at all —
+    so asking for everything produced *no* barrier check rather than a thorough
+    one.
+
+    Nothing is lost by narrowing it. A value outside the set assesses to
+    UNKNOWN; an UNKNOWN barrier span yields no finding and does not enter
+    coverage, which is computed from surface and smoothness. It cannot change
+    the response, so not fetching it cannot change the response either. The same
+    bbox returns 676 gates.
+    """
+    south, west, north, east = _bbox(points)
+    values = "|".join(sorted(v.lower() for v in BARRIER_VALUES_WITH_A_VERDICT))
+    return (
+        f"[out:json][timeout:{OVERPASS_TIMEOUT_S}];"
+        f'node["barrier"~"^({values})$"]({south:.5f},{west:.5f},{north:.5f},{east:.5f});'
+        f"out body {OVERPASS_MAX_RESULTS};"
+    )
+
+
+@dataclass(frozen=True)
+class OverpassNodes:
+    """What one Overpass query returned, and whether it returned all of it.
+
+    ``truncated`` is the reason this is a type rather than a list. ``out body N``
+    stops at N elements ordered by element id, which has nothing to do with
+    position along any route — so a truncated answer is a *biased sample* of the
+    bbox, not a prefix of it. Presented as a complete survey it would drop
+    benches from the second half of a route with no indication, and drop
+    barriers from anywhere at all.
+    """
+
+    elements: list[dict[str, Any]]
+    truncated: bool
+
+    @property
+    def usable(self) -> list[dict[str, Any]] | None:
+        """The elements, or None when the answer cannot support a claim.
+
+        A truncated answer is a biased sample of the bbox, not a short one, so
+        it is folded into the same None that an unreachable Overpass produces
+        and read the same way everywhere downstream.
+        """
+        return None if self.truncated else self.elements
+
+
+async def fetch_overpass(
+    points: Sequence[LatLon], query: str, what: str
+) -> OverpassNodes | None:
+    """Run one Overpass query over the bbox covering ``points``.
+
+    Separate from the per-route filtering so one query can serve every route in
+    a request. Overpass rate-limits hard, and three queries per page load —
+    which is what one query per route would be — would earn a ban within
+    minutes.
 
     Returns ``None`` when Overpass could not be reached — which is different
     from an empty list, and the caller reports it differently.
     """
     if len(points) < 2:
-        return []
+        return OverpassNodes([], False)
 
     try:
         response = await fetch(
             "POST",
             OVERPASS_URL,
-            data={"data": overpass_query(points)},
+            data={"data": query},
             headers={"Content-Type": "application/x-www-form-urlencoded"},
             cost=1,
             service="overpass",
         )
     except (FixtureMissing, BudgetExhausted) as exc:
-        log.info("rest_stops_unavailable", extra={"reason": type(exc).__name__})
+        log.info("overpass_unavailable", extra={"what": what, "reason": type(exc).__name__})
         metrics.incr("enrichment_failures_total")
         return None
     except httpx.HTTPError as exc:
-        log.warning("overpass_transport_error", extra={"error": type(exc).__name__})
+        log.warning("overpass_transport_error", extra={"what": what, "error": type(exc).__name__})
         metrics.incr("enrichment_failures_total")
         return None
 
     if response.status_code == 429:
         # Overpass rate-limits hard. Back off by giving up on this request
         # rather than retrying into a longer ban.
-        log.warning("overpass_rate_limited")
+        log.warning("overpass_rate_limited", extra={"what": what})
         metrics.incr("enrichment_failures_total")
         return None
     if response.status_code >= 400:
-        log.warning("overpass_error", extra={"status": response.status_code})
+        log.warning("overpass_error", extra={"what": what, "status": response.status_code})
         metrics.incr("enrichment_failures_total")
         return None
 
     try:
-        return response.json().get("elements", [])
+        elements = response.json().get("elements", [])
     except (ValueError, AttributeError):
         metrics.incr("enrichment_failures_total")
         return None
+
+    # Overpass gives no "there was more" flag, so a full page is the only signal
+    # available. It over-reports by exactly the case where the bbox holds
+    # precisely the cap — rare, and erring toward "we might not have seen
+    # everything" is the right direction for both consumers.
+    truncated = len(elements) >= OVERPASS_MAX_RESULTS
+    if truncated:
+        log.warning("overpass_truncated", extra={"what": what, "limit": OVERPASS_MAX_RESULTS})
+        metrics.incr("overpass_truncated_total")
+    return OverpassNodes(elements, truncated)
+
+
+async def fetch_rest_stop_nodes(points: Sequence[LatLon]) -> OverpassNodes | None:
+    return await fetch_overpass(points, overpass_query(points), "rest_stops")
+
+
+async def fetch_barrier_nodes(points: Sequence[LatLon]) -> OverpassNodes | None:
+    return await fetch_overpass(points, overpass_barrier_query(points), "barriers")
+
+
+def barrier_spans_on_route(
+    points: Sequence[LatLon], elements: list[dict[str, Any]]
+) -> list[tuple[int, int, str]]:
+    """Barrier nodes projected onto ``(start, end, value)`` spans of this route.
+
+    ## How a point becomes a span
+
+    A barrier is a node — a gate is at a place, not along a stretch — while the
+    accessibility engine reasons in spans of route geometry. The conversion has
+    to be stated rather than assumed, because every way of getting it wrong is a
+    false claim about whether someone can get through.
+
+    **A barrier blocks the single segment it sits on.** The node is matched to
+    its nearest vertex `i`, and the span is `(i, i + 1)`: one segment, the one
+    the walker is on when they reach it. It is not widened to the surrounding
+    vertices, not to the step, and not to a radius. Widening would report a gate
+    as blocking stretches of path that are demonstrably clear, and — because a
+    FAIL anywhere blocks the whole route — would turn one mis-projected node
+    into a refusal to offer the route at all.
+
+    ## The corridor
+
+    ``BARRIER_CORRIDOR_M`` is deliberately much tighter than the 35 m used for
+    rest stops, and they are tight and loose for opposite reasons. A bench 30 m
+    away is plausibly *for* this path and listing it costs nothing if it is not.
+    A gate 30 m away is probably on a different path, and claiming it blocks
+    this one denies a route that is fine.
+
+    10 m is the width of a road. It absorbs the few metres of disagreement
+    between OSM's node position and GraphHopper's simplified polyline, without
+    reaching across to the parallel way on the other side of a street.
+
+    A node beyond the corridor is dropped rather than clamped. It is evidence
+    about somewhere else.
+    """
+    if len(points) < 2 or not elements:
+        return []
+
+    candidates: list[tuple[LatLon, str]] = []
+    for element in elements:
+        value = (element.get("tags") or {}).get("barrier")
+        if not value:
+            continue
+        try:
+            node = LatLon(float(element["lat"]), float(element["lon"]))
+        except (KeyError, TypeError, ValueError):
+            continue
+        candidates.append((node, str(value)))
+
+    if not candidates:
+        return []
+
+    # Same broadcast haversine as rest_stops_on_route, for the same reason: a
+    # Python loop over every node times every vertex, per route, on the event
+    # loop is the one thing this must not be.
+    node_lat = np.radians(np.fromiter((n.lat for n, _ in candidates), float, len(candidates)))
+    node_lon = np.radians(np.fromiter((n.lon for n, _ in candidates), float, len(candidates)))
+    pt_lat = np.radians(np.fromiter((p.lat for p in points), float, len(points)))
+    pt_lon = np.radians(np.fromiter((p.lon for p in points), float, len(points)))
+
+    dlat = pt_lat[None, :] - node_lat[:, None]
+    dlon = pt_lon[None, :] - node_lon[:, None]
+    h = (
+        np.sin(dlat / 2.0) ** 2
+        + np.cos(node_lat)[:, None] * np.cos(pt_lat)[None, :] * np.sin(dlon / 2.0) ** 2
+    )
+    distances = 2.0 * EARTH_RADIUS_M * np.arcsin(np.sqrt(np.minimum(1.0, h)))
+
+    nearest = distances.argmin(axis=1)
+    nearest_m = distances[np.arange(len(candidates)), nearest]
+
+    # Deduplicated: two gates a few metres apart match the same vertex, and the
+    # Finding built from a span takes its position from that vertex — so the
+    # route would carry two identical blockers at one point. Measured on the
+    # Hyde Park accessible route, which matched (18, 19, "gate") twice.
+    # Collapsing them loses nothing: one gate on a segment already blocks it.
+    seen: set[tuple[int, int, str]] = set()
+    last_segment = len(points) - 2
+    for i, (_, value) in enumerate(candidates):
+        if nearest_m[i] > BARRIER_CORRIDOR_M:
+            continue
+        # The last vertex has no segment after it; a barrier at the very end of
+        # the route sits on the segment that arrives there.
+        start = min(int(nearest[i]), last_segment)
+        seen.add((start, start + 1, value))
+
+    return sorted(seen)
 
 
 def rest_stops_on_route(points: Sequence[LatLon], elements: list[dict[str, Any]]
@@ -557,6 +805,11 @@ class EnrichContext:
     """
 
     rest_stop_nodes: list[dict[str, Any]] | None = None
+    # Barrier nodes from the same query. None means the same thing it means
+    # everywhere else here — nobody could look — and it is what keeps
+    # `barriers_checked` false rather than letting an unreachable Overpass read
+    # as "no gates on this route".
+    barrier_nodes: list[dict[str, Any]] | None = None
     air: AirQuality | None = None
     shade_score: float | None = None
     sun: SunPosition | None = None
@@ -585,8 +838,10 @@ async def enrich_context(
     #
     # _degrade() already swallows every failure into None, so gather cannot
     # raise here and one slow or broken service cannot take the other two down.
-    nodes, air, cloud = await asyncio.gather(
-        _degrade("rest_stops", fetch_rest_stop_nodes(_sampled_for_overpass(all_points))),
+    sampled = _sampled_for_overpass(all_points)
+    stops_found, barriers_found, air, cloud = await asyncio.gather(
+        _degrade("rest_stops", fetch_rest_stop_nodes(sampled)),
+        _degrade("barriers", fetch_barrier_nodes(sampled)),
         _degrade("air_quality", fetch_air_quality(midpoint, when)),
         _degrade("cloud_cover", fetch_cloud_cover(midpoint, when)),
     )
@@ -603,7 +858,8 @@ async def enrich_context(
     )
 
     return EnrichContext(
-        rest_stop_nodes=nodes,
+        rest_stop_nodes=stops_found.usable if stops_found else None,
+        barrier_nodes=barriers_found.usable if barriers_found else None,
         air=air,
         shade_score=shade,
         sun=sun,

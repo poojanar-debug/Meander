@@ -159,10 +159,18 @@ async def test_a_rejection_says_nothing_was_recorded(osm) -> None:
 
 
 def test_the_endpoint_is_rate_limited(api_client, monkeypatch: pytest.MonkeyPatch) -> None:
-    """It is an unauthenticated write path to a public database."""
-    from backend.main import limiter
+    """It is an unauthenticated write path to a public database.
 
-    monkeypatch.setattr(limiter, "daily_ceiling", 0)
+    Via the per-IP bucket, not the daily routing ceiling. This endpoint spends
+    no GraphHopper credits, so it no longer counts against the quota that keeps
+    routing inside the free tier — but it is still bounded per caller, which is
+    the limit that matters for a write path.
+    """
+    from backend import main
+    from backend.ratelimit import RateLimiter
+
+    monkeypatch.setattr(main, "limiter",
+                        RateLimiter(capacity=0, refill_per_min=0.0, daily_ceiling=100))
     response = api_client.post("/api/report-barrier", json=VALID)
     assert response.status_code == 429
 

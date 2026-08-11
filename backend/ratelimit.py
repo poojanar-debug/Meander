@@ -90,15 +90,33 @@ class RateLimiter:
         )
         return max(1, int((midnight - now).total_seconds()))
 
-    def check(self, ip: str | None, now: float | None = None) -> Decision:
-        """Consume one token. Does not raise; the caller shapes the response."""
+    def check(
+        self, ip: str | None, now: float | None = None, *, counts_against_ceiling: bool = True
+    ) -> Decision:
+        """Consume one token. Does not raise; the caller shapes the response.
+
+        ``counts_against_ceiling`` is False for endpoints that spend no
+        GraphHopper credits. The daily ceiling exists to keep the routing quota
+        inside the free tier, and /api/geocode hits Nominatim while
+        /api/report-barrier hits nothing at all — but both were spending one of
+        the 2,000 daily routing slots, and unlike a route neither was ever
+        refunded.
+
+        The cheapest full-day denial that bought: **167 source addresses x 12
+        burst tokens of `GET /api/geocode?q=xx`**, after which every user gets
+        "Meander has used up its routing allowance for today" until midnight
+        UTC, with no cache to soften it and not one route ever computed.
+
+        The per-IP bucket still applies to all three. That one is about the load
+        a single caller puts on this process, which a geocode does make.
+        """
         now = time.monotonic() if now is None else now
         key = client_digest(ip)
 
         with self._lock:
             self._roll_day_locked()
 
-            if self._served_today >= self.daily_ceiling:
+            if counts_against_ceiling and self._served_today >= self.daily_ceiling:
                 return Decision(
                     allowed=False,
                     reason="daily_ceiling",
@@ -136,7 +154,8 @@ class RateLimiter:
                 )
 
             bucket.tokens -= 1.0
-            self._served_today += 1
+            if counts_against_ceiling:
+                self._served_today += 1
             return Decision(allowed=True)
 
     def refund(self, ip: str | None) -> None:

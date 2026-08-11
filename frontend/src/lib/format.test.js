@@ -3,8 +3,12 @@ import { describe, expect, it } from 'vitest'
 import {
   announceRoutes,
   announceSelection,
+  BIKE_MAX_STRAIGHT_M,
   confidenceSentence,
+  deriveModeForDistance,
+  FOOT_MAX_STRAIGHT_M,
   durationParts,
+  effectiveMode,
   fmtDur,
   fmtDurSpoken,
   restStopSentence,
@@ -160,5 +164,40 @@ describe('unknown coverage is not zero coverage', () => {
     const spoken = announceSelection(route, METRIC_24)
     expect(spoken).not.toMatch(/\d+%/)
     expect(spoken).toMatch(/unknown/i)
+  })
+})
+
+describe('the auto-mode ladder', () => {
+  it('reads the time budget for a loop', () => {
+    expect(effectiveMode('auto', 30, null)).toBe('foot')
+    expect(effectiveMode('auto', 60, null)).toBe('bike')
+    expect(effectiveMode('auto', 300, null)).toBe('car')
+  })
+
+  it('reads the straight-line distance once there is a destination', () => {
+    // The defect the distance ladder exists for: the dial used to pick the mode
+    // for a journey whose length it cannot change, so leaving it at its
+    // 35-minute default called a 40 km drive a walk, and nudging it to 46
+    // turned the same trip into a bike ride without the destination moving.
+    expect(effectiveMode('auto', 35, 1_000)).toBe('foot')
+    expect(effectiveMode('auto', 35, 40_000)).toBe('car')
+    expect(effectiveMode('auto', 360, 1_000)).toBe('foot')
+  })
+
+  it('lets an explicit mode win over either ladder', () => {
+    expect(effectiveMode('foot', 300, 40_000)).toBe('foot')
+    expect(effectiveMode('car', 20, 100)).toBe('car')
+  })
+
+  it('agrees with the backend on where the rungs fall', () => {
+    // backend/models.py derives these from the loop speeds over the minute
+    // rungs. If the two drift, the UI names one mode and the router uses
+    // another — which is why both sides carry the derivation, not the number.
+    expect(FOOT_MAX_STRAIGHT_M).toBeCloseTo((75 * 45) / 1.3, 6)
+    expect(BIKE_MAX_STRAIGHT_M).toBeCloseTo((220 * 120) / 1.3, 6)
+    expect(deriveModeForDistance(FOOT_MAX_STRAIGHT_M)).toBe('foot')
+    expect(deriveModeForDistance(FOOT_MAX_STRAIGHT_M + 1)).toBe('bike')
+    expect(deriveModeForDistance(BIKE_MAX_STRAIGHT_M)).toBe('bike')
+    expect(deriveModeForDistance(BIKE_MAX_STRAIGHT_M + 1)).toBe('car')
   })
 })

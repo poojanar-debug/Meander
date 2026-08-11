@@ -8,6 +8,7 @@ the response always states which scoring path produced its numbers.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import hashlib
 import importlib.util
 import json
@@ -15,7 +16,7 @@ import time
 import uuid
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC
 from typing import Any
 
@@ -46,6 +47,7 @@ from .elevation import build_profile
 from .enrich import (
     AirQuality,
     EnrichContext,
+    barrier_spans_on_route,
     enrich_context,
     rest_stops_on_route,
 )
@@ -303,6 +305,70 @@ async def http_error(request: Request, exc: StarletteHTTPException) -> JSONRespo
     )
 
 
+@app.exception_handler(Exception)
+async def unhandled_error(request: Request, exc: Exception) -> JSONResponse:
+    """Anything nobody anticipated, in the shape every other error here has.
+
+    Without this, an exception that is not a RoutingError escaped `post_routes`
+    entirely and Starlette rendered it as `text/plain` 500 "Internal Server
+    Error" — not the `{"error": {"kind", "message"}}` envelope this endpoint's
+    own error handling exists to guarantee, and not what
+    `frontend/src/api/client.js` parses. The client fell back to "The server
+    returned 500", which is what it says when it could not read the body at all.
+
+    SSE handled the same case correctly, so the two transports for one endpoint
+    disagreed about the shape of a failure as well as its kind.
+
+    The message is deliberately generic. The detail goes to the log, which is
+    scrubbed; the caller gets something true and useless to an attacker.
+    """
+    metrics.incr("unhandled_errors_total")
+    log.exception("unhandled_error", extra={"path": request.url.path})
+    return JSONResponse(
+        status_code=500,
+        content={
+            "error": {
+                "kind": "internal",
+                "message": "Something went wrong on our side. Please try again.",
+            }
+        },
+    )
+
+
+def _too_large(request: Request) -> JSONResponse:
+    """413, carrying the CORS headers the middleware below it never got to add.
+
+    This middleware sits *outside* CORSMiddleware, so a response returned from
+    here short-circuits before CORS runs. Measured: a 200 KB body with an
+    `Origin:` header came back 413 with no `Access-Control-Allow-Origin`, which
+    a browser reports to the page as a generic network failure — so the
+    carefully worded message was unreadable by the only client that would ever
+    see it. The deployment is cross-origin by construction (`*.pages.dev` ->
+    `meander-app.duckdns.org`), so this is the normal path, not an edge case.
+
+    The 429 in post_routes gets this right for free by being inside the router.
+    Rather than reorder the middleware stack — which would change the gzip and
+    request-id ordering too — this reflects the one header that matters, and
+    only for an origin already on the allowlist.
+    """
+    headers = {}
+    origin = request.headers.get("origin")
+    allowed = settings.allowed_origins
+    if origin and (origin in allowed or "*" in allowed):
+        headers["Access-Control-Allow-Origin"] = origin
+        headers["Vary"] = "Origin"
+    return JSONResponse(
+        status_code=413,
+        content={
+            "error": {
+                "kind": "payload_too_large",
+                "message": "That request body is too large.",
+            }
+        },
+        headers=headers,
+    )
+
+
 @app.middleware("http")
 async def limit_body_size(request: Request, call_next: Any) -> Response:
     """Reject an oversized body before it is parsed.
@@ -310,18 +376,40 @@ async def limit_body_size(request: Request, call_next: Any) -> Response:
     Every legitimate request here is two coordinates and a handful of scalars —
     a few hundred bytes. Without a ceiling, an unauthenticated caller can make
     the service buffer as much as it likes.
+
+    `Content-Length` alone was not a ceiling. A chunked request declares no
+    length, so the check never fired: measured, 256 KB with a declared length
+    returned 413 while **the same bytes sent chunked reached the JSON parser**,
+    and a 5 MB chunked body was buffered and parsed in full.
+
+    Caddy's `request_body max_size 64KB` covers the four allowlisted paths in
+    the VM deploy, but `infra/20-services.yaml` runs this container behind an
+    ALB with no Caddy and no body limit, so the bypass is live in the AWS path.
+    A limit the application states should not depend on which edge is in front
+    of it.
+
+    So the body is counted as it arrives. The stream is consumed here and
+    replayed downstream, which is the only way to bound something whose size is
+    not declared until it has all arrived.
     """
     declared = request.headers.get("content-length")
     if declared and declared.isdigit() and int(declared) > MAX_BODY_BYTES:
-        return JSONResponse(
-            status_code=413,
-            content={
-                "error": {
-                    "kind": "payload_too_large",
-                    "message": "That request body is too large.",
-                }
-            },
-        )
+        return _too_large(request)
+
+    if request.method in {"POST", "PUT", "PATCH"} and not declared:
+        body = b""
+        async for chunk in request.stream():
+            body += chunk
+            if len(body) > MAX_BODY_BYTES:
+                return _too_large(request)
+
+        # The stream is now spent, so downstream is given one that replays what
+        # was read. Without this the handler sees an empty body.
+        async def replay() -> dict[str, Any]:
+            return {"type": "http.request", "body": body, "more_body": False}
+
+        request._receive = replay  # the documented way to re-feed a consumed body
+
     return await call_next(request)
 
 
@@ -373,6 +461,18 @@ async def request_context(request: Request, call_next: Any) -> Response:
         )
     request_id_var.reset(token)
     return response
+
+
+# SSE carries its error inside a 200 body, so the kind is the whole of what it
+# says. The JSON transport has to turn that same kind into a status line, and
+# these are the only kinds route_events_with_deadline and _stream can produce.
+# Anything unlisted falls back to 502, which is the honest default for "an
+# upstream did not give us an answer".
+_STATUS_FOR_ERROR_KIND: dict[str, int] = {
+    "timeout": 504,
+    "shutting_down": 503,
+    "internal": 500,
+}
 
 
 def _error(kind: str, message: str, status: int) -> JSONResponse:
@@ -442,7 +542,12 @@ def route_cache_key(req: RouteRequest) -> str:
         {
             "origin": origin,
             "destination": dest,
-            "minutes": req.minutes,
+            # None for a point-to-point trip, where the time budget is not an
+            # input to the answer. Keying on it there split one answer across as
+            # many rows as the dial has positions: the same two places at 30 and
+            # at 35 minutes produce byte-identical payloads and used to miss the
+            # cache and spend a fresh set of routing credits every time.
+            "minutes": req.budget_minutes(),
             "mode": req.mode,
             "objectives": list(req.resolved_objectives()),
             # depart_at drives best_departure, the air-quality hour index and
@@ -477,11 +582,16 @@ def _departure_bucket(req: RouteRequest) -> str | None:
 
 @dataclass
 class _Assessment:
-    """The expensive, enrichment-independent half of scoring a route.
+    """The expensive half of scoring a route.
 
     Split out because a route is now emitted twice — once as soon as it is
     routed, once when enrichment lands — and assess_route() plus
     score_geometry() must not run twice for that.
+
+    "Enrichment-independent" until barriers were wired: the barrier constraint
+    reads OSM nodes that only the Overpass call has, so the accessibility half
+    *is* re-run on the second pass, and only that half. See
+    _reassess_with_barriers.
     """
 
     scores: Any
@@ -490,7 +600,7 @@ class _Assessment:
     elevation: Any = None
 
 
-def _assess(raw: RawRoute) -> _Assessment:
+def _assess(raw: RawRoute, osm_tags: dict[str, Any] | None = None) -> _Assessment:
     # Cache read only — this never imports torch, and returns nothing for any
     # region batch_score.py has not pre-warmed.
     clip = _guard("clip_lookup", clip_term_for_route, raw.points)
@@ -503,12 +613,37 @@ def _assess(raw: RawRoute) -> _Assessment:
         raw.details,
         clip_score=clip_score,
     )
-    access = _guard("accessibility", assess_route, raw.points, raw.elevations or None, raw.details)
+    access = _guard(
+        "accessibility", assess_route, raw.points, raw.elevations or None, raw.details,
+        osm_tags=osm_tags,
+    )
     # Same input, same threshold, computed in the same place as the verdict.
     profile = _guard("elevation_profile", build_profile, raw.points, raw.elevations or None)
     return _Assessment(
         scores=scores, access=access, clip_score=clip_score, elevation=profile
     )
+
+
+def _reassess_with_barriers(
+    assessment: _Assessment, raw: RawRoute, spans: list[tuple[int, int, str]]
+) -> _Assessment:
+    """The first pass's assessment, with the barrier constraint actually applied.
+
+    Only the accessibility half is redone. The CLIP lookup, the geometry scoring
+    and the elevation profile read nothing that enrichment provides, and
+    repeating them would cost a cache round trip and a numpy pass per route to
+    arrive at the same numbers.
+
+    A route can go from `ok` to `blocked` here, and that is the point: until
+    this ran, `REJECTED_BARRIERS` could never fire on the request path at all,
+    so a route through a kissing gate came back ok with confidence 1.0. The
+    client merges route events by id, so the second event corrects the first.
+    """
+    access = _guard(
+        "accessibility", assess_route, raw.points, raw.elevations or None, raw.details,
+        osm_tags={"barrier": spans},
+    )
+    return replace(assessment, access=access) if access is not None else assessment
 
 
 def _scored_route(
@@ -574,7 +709,7 @@ def _scored_route(
         elevation=(
             ElevationProfile(**vars(assessment.elevation)) if assessment.elevation else None
         ),
-        rest_stops=[
+        rest_stops=None if rest_stops is None else [
             RestStop(lat=s.lat, lon=s.lon, type=s.type, at_m=s.at_m)
             for s in (rest_stops or [])
         ],
@@ -707,7 +842,7 @@ async def route_events(req: RouteRequest) -> AsyncIterator[dict[str, Any]]:
 
     yield {"type": "progress", "pct": 5, "text": "Looking for routable roads", "segments_scored": 0}
 
-    mode = effective_mode(req.mode, req.minutes)
+    mode = effective_mode(req.mode, req.minutes, req.straight_line_m())
     origin = req.origin.to_latlon()
     destination = req.destination.to_latlon() if req.destination else None
     objectives = req.resolved_objectives()
@@ -892,9 +1027,22 @@ async def route_events(req: RouteRequest) -> AsyncIterator[dict[str, Any]]:
             if context.rest_stop_nodes is not None
             else None
         )
+        assessment = assessments.get(objective)
+        # None means Overpass could not be reached, or answered with a truncated
+        # set we cannot treat as a survey. Either way nobody looked, so the
+        # first pass's assessment stands — barriers_checked stays false and the
+        # sentence keeps saying gates and stiles were not checked. Absence of
+        # data must never arrive as absence of barriers.
+        if assessment is not None and context.barrier_nodes is not None:
+            spans = await run_in_threadpool(
+                barrier_spans_on_route, raw.points, context.barrier_nodes
+            )
+            assessment = await run_in_threadpool(
+                _reassess_with_barriers, assessment, raw, spans
+            )
         route = _scored_route(
             objective, label, raw, stops, context.air, context.shade_score,
-            assessment=assessments.get(objective),
+            assessment=assessment,
         )
         routes.append(route)
         yield {"type": "route", "route": route.model_dump()}
@@ -915,10 +1063,15 @@ async def route_events(req: RouteRequest) -> AsyncIterator[dict[str, Any]]:
     routes.sort(key=lambda r: order.get(r.id, 99))
 
     reason = None
+    budget = req.budget_minutes()
     ok_routes = [r for r in routes if r.status == "ok"]
-    if ok_routes and all(r.duration_min > req.minutes for r in ok_routes):
+    # Only a loop has a budget to overrun. Asked of a point-to-point trip this
+    # said "longer than your 35-minute budget" about a journey whose length the
+    # destination fixes — the user chose the other end, not the duration, and
+    # there is no shorter option to show them first.
+    if budget is not None and ok_routes and all(r.duration_min > budget for r in ok_routes):
         reason = (
-            f"Every route found is longer than your {req.minutes}-minute budget. "
+            f"Every route found is longer than your {budget}-minute budget. "
             "The shortest option is shown first."
         )
     yield {
@@ -956,24 +1109,46 @@ async def route_events_with_deadline(
     Everything below the routing itself is best-effort and already degrades to
     null, so a truncated response is a real response — it just has less on it,
     and says so.
+
+    The clock measures time spent *producing* events, not wall-clock time from
+    the first one. See the comment on `remaining`.
     """
     deadline_s = REQUEST_DEADLINE_S if deadline_s is None else deadline_s
     partial: dict[str, dict[str, Any]] = {}
     agen = route_events(req).__aiter__()
-    expires_at = time.monotonic() + deadline_s
+    # A budget that is spent, not a wall-clock instant that passes.
+    #
+    # This used to be `expires_at = time.monotonic() + deadline_s`, recomputed
+    # each turn — so every second suspended at `yield event`, waiting for a
+    # slow client to accept the write, came out of the time allowed for
+    # *producing* the answer. The docstring below asserted the opposite, in as
+    # many words, and had done since it was written.
+    #
+    # Reproduced with an instantaneous producer, a consumer taking 0.1 s per
+    # event and a 0.3 s deadline: it timed out on the consumer alone, having
+    # done no work slowly at all. The deadline exists to bound how long this
+    # service will spend on a request, and a phone on a train is not this
+    # service being slow. Combined with the caching of partial answers, one slow
+    # client used to poison the shared cache for everyone behind that key.
+    remaining = deadline_s
 
     try:
         while True:
-            remaining = expires_at - time.monotonic()
             if remaining <= 0:
                 raise TimeoutError
+            started = time.monotonic()
             try:
-                # wait_for rather than wrapping the loop in asyncio.timeout: the
-                # clock must not run while this generator is suspended at a
-                # yield waiting on a slow client.
+                # wait_for, and here the cancellation it performs is wanted: a
+                # deadline that does not stop the work is not a deadline. (The
+                # keepalive in _stream wants the opposite, and uses asyncio.wait
+                # for exactly that reason.)
                 event = await asyncio.wait_for(agen.__anext__(), timeout=remaining)
             except StopAsyncIteration:
                 return
+            finally:
+                # Charged before the yield below, so only the producer's time is
+                # ever deducted.
+                remaining -= time.monotonic() - started
             if event["type"] == "route":
                 partial[event["route"]["id"]] = event["route"]
             yield event
@@ -1057,6 +1232,9 @@ async def _stream(req: RouteRequest, cache_key: str) -> AsyncIterator[str]:
     agen = route_events_with_deadline(req).__aiter__()
     finished: dict[str, Any] | None = None
     cached = False
+    # The in-flight pull, held across keepalive frames. See the loop below for
+    # why it is a task and not a bare await.
+    pending: asyncio.Task[dict[str, Any]] | None = None
 
     try:
         while True:
@@ -1070,14 +1248,38 @@ async def _stream(req: RouteRequest, cache_key: str) -> AsyncIterator[str]:
                     ),
                 })
                 return
-            try:
-                event = await asyncio.wait_for(agen.__anext__(), timeout=KEEPALIVE_S)
-            except TimeoutError:
+
+            # asyncio.wait, not asyncio.wait_for. wait_for *cancels* what it is
+            # waiting on when the timeout fires, and what it was waiting on here
+            # is the generator producing the answer — so the keepalive killed
+            # the request it exists to keep alive. The generator took the
+            # CancelledError at whatever await it was suspended on, and the next
+            # __anext__() then raised StopAsyncIteration, which this loop reads
+            # as a clean end of stream: the client got a truncated response with
+            # a `progress` event and no `done`, no error, and nothing cached.
+            #
+            # Measured on a three-event generator with a 300 ms middle stage
+            # against a 50 ms keepalive: the old loop delivered 1 of 3 events
+            # and reported success; the new one delivers 3 of 3 with 5
+            # keepalives in between. Any stage slower than KEEPALIVE_S triggers
+            # it, which is exactly the slow-Overpass case the keepalive was
+            # added for.
+            #
+            # asyncio.wait leaves a timed-out task running, so the same pull is
+            # still in flight on the next turn of the loop and is awaited again.
+            if pending is None:
+                pending = asyncio.ensure_future(agen.__anext__())
+            done, _ = await asyncio.wait({pending}, timeout=KEEPALIVE_S)
+            if not done:
                 # A comment frame. SSE clients ignore it; proxies see traffic.
                 yield ": keepalive\n\n"
                 continue
+            try:
+                event = pending.result()
             except StopAsyncIteration:
                 return
+            finally:
+                pending = None
 
             if event["type"] == "done":
                 finished = event["payload"]
@@ -1115,6 +1317,21 @@ async def _stream(req: RouteRequest, cache_key: str) -> AsyncIterator[str]:
         })
     finally:
         _open_streams -= 1
+        # Cancelling here is correct where cancelling on timeout was not: this
+        # runs only once nothing further will be read, so there is no work left
+        # to protect. Without it a pull still in flight outlives the stream and
+        # asyncio reports "Task was destroyed but it is pending".
+        #
+        # It has to be *awaited*, not just cancelled. cancel() only schedules
+        # the CancelledError; until the task has actually taken it the generator
+        # is still running, and aclose() on a running async generator raises
+        # "RuntimeError: aclose(): asynchronous generator is already running" —
+        # which the disconnect test caught, because a client hanging up mid-pull
+        # is precisely when this path runs.
+        if pending is not None:
+            pending.cancel()
+            with contextlib.suppress(BaseException):
+                await pending
         await agen.aclose()
 
 
@@ -1163,15 +1380,44 @@ async def post_routes(req: RouteRequest, request: Request, response: Response) -
             headers={**SSE_HEADERS, "X-Meander-Cache": "miss"},
         )
 
+    # Counted and drained like a stream, because it is one — just one the client
+    # sees as a single body. Without this a JSON request in flight at SIGTERM was
+    # invisible to the drain loop in lifespan, which waited only on _open_streams
+    # and then let the process exit from under it.
+    global _open_streams
+    _open_streams += 1
     try:
         payload: dict[str, Any] | None = None
+        failure: dict[str, Any] | None = None
         async for event in route_events_with_deadline(req):
+            if _shutting_down.is_set():
+                return _error(
+                    "shutting_down",
+                    "This server is restarting. Your request was not finished — "
+                    "please try again in a moment.",
+                    503,
+                )
             if event["type"] == "done":
                 payload = event["payload"]
+            # **The error event used to be dropped on the floor here.** The loop
+            # looked only for "done", so a deadline that produced nothing left
+            # `payload` as None and fell through to the generic 502 below: the
+            # client was told "No route could be produced for that request" with
+            # kind "upstream" when SSE, for the identical request, said kind
+            # "timeout" and explained that the request had run out of time. Two
+            # transports for one endpoint disagreeing about what happened.
+            elif event["type"] == "error":
+                failure = event
     except RoutingError as exc:
         metrics.incr("upstream_failures_total")
         return _error(exc.kind, exc.human_message, exc.status_code)
+    finally:
+        _open_streams -= 1
 
+    if payload is None and failure is not None:
+        return _error(
+            failure["kind"], failure["message"], _STATUS_FOR_ERROR_KIND.get(failure["kind"], 502)
+        )
     if payload is None:
         return _error("upstream", "No route could be produced for that request.", 502)
 
@@ -1202,7 +1448,7 @@ async def geocode(request: Request, q: str = Query(min_length=2, max_length=120)
     so one script pointed at /api/geocode gets place search banned for every
     user of the deployment, not for the script.
     """
-    decision = limiter.check(_client_ip(request))
+    decision = limiter.check(_client_ip(request), counts_against_ceiling=False)
     if not decision.allowed:
         metrics.incr("rate_limited_total")
         return JSONResponse(
@@ -1235,7 +1481,7 @@ async def report_barrier(report: BarrierReport, request: Request) -> Any:
     as configured, because a copy-paste that pointed this at production would
     put junk into the map everyone else relies on.
     """
-    decision = limiter.check(_client_ip(request))
+    decision = limiter.check(_client_ip(request), counts_against_ceiling=False)
     if not decision.allowed:
         metrics.incr("rate_limited_total")
         return JSONResponse(

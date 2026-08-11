@@ -80,6 +80,17 @@ class FixtureMissing(RuntimeError):
         )
 
 
+# Generous against what these APIs actually return — the largest committed
+# fixture is a few hundred KB — and small against a 1 GB container.
+MAX_RESPONSE_BYTES = 32 * 1024 * 1024
+
+
+class ResponseTooLarge(RuntimeError):
+    """An upstream sent more than MAX_RESPONSE_BYTES. Treated as a failure, not
+    truncated: half a JSON document is not a smaller answer, it is not an answer.
+    """
+
+
 class BudgetExhausted(RuntimeError):
     """A service hit its hard live-call cap and has no fixture for this request."""
 
@@ -392,7 +403,19 @@ def read_fixture(service: str, sig: str) -> httpx.Response | None:
         return None
 
     resp_spec = envelope.get("response", {})
-    provenance = envelope.get("_meander_provenance", PROVENANCE_RECORDED)
+    # Defaults to synthetic, not recorded. The missing key used to mean
+    # "recorded", which fails open in the one direction this project cannot
+    # afford: a file with no provenance is stamped as a real measurement, so
+    # is_synthetic() is False, synthetic_upstream stays False, and
+    # scoring_method is never forced to "placeholder" — invented terrain
+    # shipped as a measurement, which is exactly what SYNTHETIC_NOTE exists to
+    # prevent.
+    #
+    # It is reachable by the route FixtureMissing itself recommends: its message
+    # tells a developer to "add a synthetic fixture at <path>", and a
+    # hand-written file that omits the key is the obvious result. Every
+    # committed fixture carries the key, so nothing changes for them.
+    provenance = envelope.get("_meander_provenance", PROVENANCE_SYNTHETIC)
     headers = dict(resp_spec.get("headers") or {})
     headers[PROVENANCE_HEADER] = provenance
 
@@ -514,7 +537,19 @@ def get_client() -> httpx.AsyncClient:
                 _client = httpx.AsyncClient(
                     timeout=httpx.Timeout(HTTP_TIMEOUT_S, connect=HTTP_CONNECT_TIMEOUT_S),
                     headers={"User-Agent": USER_AGENT},
-                    follow_redirects=True,
+                    # None of the seven APIs this client talks to redirects.
+                    # Following them meant this process would chase up to 20
+                    # hops to any host a response named, from inside the
+                    # container: `graphhopper:8989` and `:8990` are an
+                    # unauthenticated Dropwizard admin interface on the same
+                    # compose network, and the cloud IMDS is one hop away.
+                    # /api/geocode reflects `display_name`, `lat` and `lon` from
+                    # whatever came back, so it is a narrow read channel out.
+                    #
+                    # A redirect is now a response like any other. If one of
+                    # these APIs ever starts issuing them, the call fails
+                    # visibly rather than silently following.
+                    follow_redirects=False,
                 )
     return _client
 
@@ -629,7 +664,15 @@ async def fetch(
 
     client = get_client()
     started = time.monotonic()
-    response = await client.request(
+    # Streamed rather than read whole, so the body can be capped as it arrives.
+    #
+    # httpx decompresses gzip and brotli transparently, so a declared
+    # Content-Length is not a bound on what lands in memory — a small compressed
+    # body can expand to an arbitrarily large one, in a container limited to
+    # 1 GB. Counting decoded bytes as they arrive is the only cap that holds
+    # against that, and it applies to every upstream rather than to the ones
+    # that happen to be honest about their size.
+    request = client.build_request(
         method.upper(),
         url,
         params=dict(params) if params else None,
@@ -637,6 +680,41 @@ async def fetch(
         data=dict(data) if data else None,
         content=content,
         headers=dict(headers) if headers else None,
+    )
+    response = await client.send(request, stream=True)
+    try:
+        chunks: list[bytes] = []
+        size = 0
+        async for chunk in response.aiter_bytes():
+            size += len(chunk)
+            if size > MAX_RESPONSE_BYTES:
+                await response.aclose()
+                raise ResponseTooLarge(
+                    f"{service_for_url(url)} sent more than "
+                    f"{MAX_RESPONSE_BYTES // (1024 * 1024)} MB and was cut off."
+                )
+            chunks.append(chunk)
+        body = b"".join(chunks)
+    finally:
+        await response.aclose()
+    # The body is already read *and already decoded* — aiter_bytes() yields
+    # decompressed bytes — so the hop-by-hop encoding headers must not travel
+    # with it. Passing Content-Encoding through made httpx try to gunzip
+    # plaintext on the way back out, and every live call failed with a
+    # DecodingError that no offline test could see, because the offline suite
+    # never goes live. Content-Length would be a lie for the same reason.
+    passthrough = httpx.Headers(
+        [
+            (k, v)
+            for k, v in response.headers.multi_items()
+            if k.lower() not in {"content-encoding", "content-length", "transfer-encoding"}
+        ]
+    )
+    response = httpx.Response(
+        status_code=response.status_code,
+        headers=passthrough,
+        content=body,
+        request=request,
     )
     # Logged after, with the duration, so "which upstream is slow" is answerable
     # from the logs rather than by guessing. This is how Overpass at 13.6 s

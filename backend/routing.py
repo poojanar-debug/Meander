@@ -824,9 +824,18 @@ async def route_nature(
         green = greenness(candidate)
         within = cap is None or candidate.duration_min <= cap
         greener = floor is None or green > floor
+        # Budget fit is a loop-only term. A point-to-point candidate's duration
+        # is set by where the user is going, so scoring it against the time dial
+        # ranked candidates on how close an unrelated number happened to fall:
+        # at the 35-minute default a 12-minute trip across town scored every
+        # candidate near zero on fit, and the 0.4 weight then reordered them on
+        # noise rather than on greenness — which is the only thing that
+        # distinguishes them for this shape of request.
         merit = (
             NATURE_GREENNESS_WEIGHT * green
             + NATURE_BUDGET_FIT_WEIGHT * _budget_fit(candidate.duration_min, minutes)
+            if is_loop
+            else green
         )
 
         if within and greener:
@@ -852,7 +861,9 @@ async def route_nature(
     if acceptable:
         acceptable.sort(key=lambda pair: pair[0], reverse=True)
         chosen = acceptable[0][1]
-        if minutes > 0 and chosen.duration_min < minutes * NATURE_BUDGET_UNDERSHOOT:
+        # Loop-only for the same reason the merit term is: "shorter than the
+        # time you asked for" is not a defect a point-to-point route can have.
+        if is_loop and minutes > 0 and chosen.duration_min < minutes * NATURE_BUDGET_UNDERSHOOT:
             chosen.preset_note = (
                 "This is the greenest route available near you, but it is "
                 "noticeably shorter than the time you asked for — nothing "

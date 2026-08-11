@@ -11,6 +11,7 @@ from backend.config import TEST_LOCATIONS_BY_SLUG
 COLOMBO = TEST_LOCATIONS_BY_SLUG["colombo-fort"]
 VIHARA = TEST_LOCATIONS_BY_SLUG["viharamahadevi"]
 HYDE = TEST_LOCATIONS_BY_SLUG["hyde-park-london"]
+VONDEL = TEST_LOCATIONS_BY_SLUG["amsterdam-vondelpark"]
 
 
 def _body(**overrides: Any) -> dict[str, Any]:
@@ -148,7 +149,9 @@ def test_killing_every_enrichment_service_at_once_still_returns_200(api_client, 
 
     assert len(ok) >= 2
     assert payload["best_departure"] is None
-    assert all(r["rest_stops"] == [] for r in ok)
+    # Null, not []. Every enrichment service is dead in this test, so nobody
+    # looked — and "we looked and found none" would be a finding we did not make.
+    assert all(r["rest_stops"] is None for r in ok)
 
 
 def test_killing_scoring_still_returns_200(api_client, monkeypatch) -> None:
@@ -208,15 +211,37 @@ def test_routes_built_from_synthetic_fixtures_say_so(api_client) -> None:
 
 
 def test_auto_mode_resolves_to_foot_under_45_minutes(api_client) -> None:
-    routes = api_client.post("/api/routes", json=_body(minutes=25)).json()["routes"]
+    # A loop: the time budget is the whole of the request, so the ladder reads it.
+    body = {"origin": {"lat": HYDE.lat, "lon": HYDE.lon}, "minutes": 35, "mode": "auto"}
+    routes = api_client.post("/api/routes", json=body).json()["routes"]
 
     assert all(r["mode"] == "foot" for r in routes if r["status"] == "ok")
 
 
-def test_auto_mode_resolves_to_car_over_120_minutes(api_client) -> None:
-    routes = api_client.post("/api/routes", json=_body(minutes=150)).json()["routes"]
+def test_auto_mode_resolves_to_bike_for_a_longer_loop(api_client) -> None:
+    """The middle rung, end to end. The car rung is covered by the unit tests in
+    test_routing.py — there is no committed loop fixture over 120 minutes, and
+    inventing one to assert a pure function would be the expensive way to test it.
+    """
+    body = {"origin": {"lat": VONDEL.lat, "lon": VONDEL.lon}, "minutes": 60, "mode": "auto"}
+    routes = api_client.post("/api/routes", json=body).json()["routes"]
 
-    assert all(r["mode"] == "car" for r in routes if r["status"] == "ok")
+    assert all(r["mode"] == "bike" for r in routes if r["status"] == "ok")
+
+
+def test_auto_mode_for_a_trip_with_a_destination_ignores_the_dial(api_client) -> None:
+    """**Changed behaviour.** This used to assert that minutes=150 made the same
+    two places a car journey, which is the defect: Colombo Fort to
+    Viharamahadevi is 2.4 km whatever the dial says, and the dial cannot make it
+    further. The mode now comes from the straight-line distance, so the same
+    destination gives the same mode at both ends of the dial's range.
+    """
+    near = [
+        api_client.post("/api/routes", json=_body(minutes=m)).json()["routes"] for m in (20, 360)
+    ]
+
+    for routes in near:
+        assert all(r["mode"] == "foot" for r in routes if r["status"] == "ok")
 
 
 def test_omitting_destination_returns_a_loop(api_client) -> None:
@@ -303,10 +328,19 @@ def test_cache_key_ignores_sub_100m_coordinate_noise(api_client) -> None:
     assert api_client.post("/api/routes", json=jittered).headers["X-Meander-Cache"] == "hit"
 
 
-def test_a_different_time_budget_is_a_different_cache_entry(api_client) -> None:
-    api_client.post("/api/routes", json=_body(minutes=25))
+def test_the_time_budget_is_not_part_of_a_point_to_point_cache_key(api_client) -> None:
+    """The other half: two dial positions, one destination, one cached answer.
 
-    assert api_client.post("/api/routes", json=_body(minutes=40)).headers["X-Meander-Cache"] == "miss"
+    Before this, the dial was in the cache key for every request shape, so a
+    drag from 20 to 60 was eight cache misses and eight full sets of routing
+    credits for eight byte-identical payloads.
+    """
+    first = api_client.post("/api/routes", json=_body(minutes=25))
+    second = api_client.post("/api/routes", json=_body(minutes=40))
+
+    assert first.headers["X-Meander-Cache"] == "miss"
+    assert second.headers["X-Meander-Cache"] == "hit"
+    assert first.json()["routes"] == second.json()["routes"]
 
 
 def test_a_cache_hit_does_not_consume_a_rate_limit_token(api_client) -> None:
@@ -329,9 +363,15 @@ def test_429_fires_when_the_per_ip_bucket_empties(api_client, monkeypatch) -> No
     monkeypatch.setattr(main, "limiter",
                         RateLimiter(capacity=2, refill_per_min=0.0, daily_ceiling=100))
 
-    # Distinct time budgets so every request is a cache miss and is charged.
-    codes = [api_client.post("/api/routes", json=_body(minutes=20 + 5 * i)).status_code
-             for i in range(4)]
+    # Distinct objective sets so every request is a cache miss and is charged.
+    # This used to vary `minutes`, which no longer distinguishes two requests
+    # that share a destination — all four collapsed onto one cache key, the
+    # last three were hits, and a hit spends no token, so nothing ever reached
+    # the limit. Objectives are still part of the key and select which presets
+    # run, so each of these is a genuine miss against the same fixtures.
+    objectives = [["fastest"], ["nature"], ["accessible"], ["fastest", "nature"]]
+    codes = [api_client.post("/api/routes", json=_body(objectives=o)).status_code
+             for o in objectives]
 
     assert codes == [200, 200, 429, 429]
 

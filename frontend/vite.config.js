@@ -152,9 +152,21 @@ function requireApiBaseOnPages() {
  * `enforce: 'post'` is load-bearing: without it the plugin runs before the
  * bundle is assembled and the precache ends up with no document in it.
  *
- * The version is derived from the file list, never stamped with a clock. A
- * timestamp changes the worker's bytes on every build and evicts every user's
- * shell whether or not anything actually changed.
+ * The version is derived from the build's *contents*, never stamped with a
+ * clock. A timestamp changes the worker's bytes on every build and evicts every
+ * user's shell whether or not anything actually changed — that property is
+ * deliberate and is kept.
+ *
+ * It used to hash the file *names* instead, which has the opposite failure and
+ * a worse one. Hashed names are stable whenever the names are, so any change
+ * that does not rename a file produced a byte-identical `sw.js`. Measured:
+ * change only the `<title>` in index.html, rebuild, and both builds emit
+ * `VERSION = '0ed7d9268540'` and identical worker bytes while `dist/index.html`
+ * differs. The browser's update check byte-compares the worker, finds no
+ * change, installs nothing, and `handleShell` — cache-first, never
+ * revalidating — serves the old shell forever. The same holds for any in-place
+ * edit under `public/`. The `_headers` mitigation cannot help: it never reaches
+ * a client the old worker is already controlling.
  */
 function meanderServiceWorker() {
   return {
@@ -170,7 +182,31 @@ function meanderServiceWorker() {
         ? readdirSync(publicDir).map((name) => `/${name}`)
         : []
       const precache = ['/', ...assets, ...extras].filter(isPrecachable)
-      const version = createHash('sha256').update(precache.join('\n')).digest('hex').slice(0, 12)
+
+      // Contents, not names. Each precached entry contributes its own bytes:
+      // bundle entries are in memory at this point (`code` for a chunk,
+      // `source` for an asset), and public/ files are read from disk because
+      // they are copied verbatim and never enter the bundle.
+      //
+      // The path is hashed alongside the bytes so that moving a file also
+      // changes the version, and the list is sorted so a directory-order
+      // difference between machines cannot produce two versions of one build.
+      const digest = createHash('sha256')
+      for (const url of [...precache].sort()) {
+        digest.update(url)
+        digest.update('\0')
+        const name = url.slice(1)
+        const entry = bundle[name]
+        if (entry) {
+          digest.update(entry.code ?? entry.source ?? '')
+        } else if (name && existsSync(join(publicDir, name))) {
+          digest.update(readFileSync(join(publicDir, name)))
+        }
+        // '/' has no file of its own — it is served by index.html, which is in
+        // the bundle under its own name and hashed there.
+        digest.update('\0')
+      }
+      const version = digest.digest('hex').slice(0, 12)
 
       const source = readFileSync(join(here, 'sw.js'), 'utf8')
       // replaceAll, not replace: a non-global replace hits only the first

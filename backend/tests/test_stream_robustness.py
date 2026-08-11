@@ -138,6 +138,47 @@ async def test_a_long_silence_produces_a_comment_frame(
     assert any(f.startswith(": ") for f in frames), "expected a keepalive comment"
     # A comment frame must not look like an event to the client.
     assert not any(f.startswith(": ") and "data:" in f for f in frames)
+    # **Added.** This test passed against a loop that cancelled the generator on
+    # every keepalive: the comment frame it asserts was emitted, and the event
+    # behind it was destroyed. Asserting the silence is broken says nothing
+    # about whether the answer survived it, which is the only reason to break it.
+    assert [json.loads(f[6:]) for f in frames if f.startswith("data: ")] == [
+        {"type": "progress", "pct": 5, "text": "x", "segments_scored": 0}
+    ]
+
+
+@pytest.mark.asyncio
+async def test_a_keepalive_does_not_cancel_the_work_it_is_protecting(
+    tmp_cache_db, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The keepalive used to kill the request it exists to keep alive.
+
+    `asyncio.wait_for` cancels what it waits on when the timeout fires, and what
+    it waited on was the generator producing the answer. The generator took the
+    CancelledError at its current await, the next pull raised
+    StopAsyncIteration, and `_stream` read that as a clean end: the client got
+    the events before the slow stage, no `done`, no error, and nothing cached.
+
+    Three events with a slow middle stage, so more than one keepalive elapses
+    inside a single pull.
+    """
+    monkeypatch.setattr(main_mod, "KEEPALIVE_S", 0.05)
+
+    async def slow_middle(req, deadline_s=None):
+        yield {"type": "progress", "pct": 5, "text": "a", "segments_scored": 0}
+        await asyncio.sleep(0.3)
+        yield {"type": "progress", "pct": 60, "text": "b", "segments_scored": 0}
+        yield {"type": "done", "payload": {"routes": []}}
+
+    monkeypatch.setattr(main_mod, "route_events_with_deadline", slow_middle)
+
+    req = RouteRequest(origin=Point(lat=51.5, lon=-0.16), minutes=30)
+    frames = [f async for f in main_mod._stream(req, "k")]
+
+    events = [json.loads(f[6:]) for f in frames if f.startswith("data: ")]
+    assert [e["type"] for e in events] == ["progress", "progress", "done"]
+    # And the silence was still covered while that middle stage ran.
+    assert sum(1 for f in frames if f.startswith(": ")) >= 2
 
 
 # ---------------------------------------------------------------------------
@@ -239,3 +280,110 @@ async def test_the_stream_counter_returns_to_zero(
     async for _ in main_mod._stream(req, "k"):
         pass
     assert main_mod._open_streams == before
+
+
+# ---------------------------------------------------------------------------
+# the JSON transport must fail in the same shape as SSE
+# ---------------------------------------------------------------------------
+#
+# One endpoint, two transports. A client that asks for JSON and a client that
+# asks for a stream are asking the same question, and they were getting
+# different answers about what went wrong.
+
+
+def test_a_deadline_with_nothing_ready_says_timeout_not_upstream(
+    api_client, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The JSON loop looked only for "done" and dropped the error event.
+
+    So a request that ran out of time fell through to the generic 502 — "No
+    route could be produced for that request", kind "upstream" — while SSE, for
+    the identical request, said kind "timeout" and explained that it had run out
+    of time. The first is a claim about the router; the second is what happened.
+    """
+
+    async def only_timeout(req, deadline_s=None):
+        yield {"type": "error", "kind": "timeout", "message": "That request ran out of time."}
+
+    monkeypatch.setattr(main_mod, "route_events_with_deadline", only_timeout)
+
+    response = api_client.post("/api/routes", json=BODY)
+
+    assert response.status_code == 504
+    assert response.json()["error"]["kind"] == "timeout"
+    assert "ran out of time" in response.json()["error"]["message"]
+
+
+def test_the_two_transports_agree_on_the_kind(
+    api_client, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The same request, asked both ways, must not describe the failure
+    differently."""
+
+    async def only_timeout(req, deadline_s=None):
+        yield {"type": "error", "kind": "timeout", "message": "That request ran out of time."}
+
+    monkeypatch.setattr(main_mod, "route_events_with_deadline", only_timeout)
+
+    as_json = api_client.post("/api/routes", json=BODY).json()["error"]
+    as_sse = _events(api_client.post("/api/routes", json=BODY, headers=SSE))[-1]
+
+    assert as_json["kind"] == as_sse["kind"]
+    assert as_json["message"] == as_sse["message"]
+
+
+def test_an_unanticipated_exception_still_gets_the_error_envelope(
+    api_client, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Anything that is not a RoutingError escaped post_routes entirely, and
+    Starlette rendered it as `text/plain` 500 "Internal Server Error" — not the
+    envelope this endpoint's error handling exists to guarantee, and not what
+    frontend/src/api/client.js parses. The client fell back to "The server
+    returned 500", which is what it says when it could not read the body at all.
+    """
+
+    async def boom(req, deadline_s=None):
+        raise ValueError("nobody anticipated this")
+        yield  # pragma: no cover — makes this an async generator
+
+    monkeypatch.setattr(main_mod, "route_events_with_deadline", boom)
+
+    # `raise_server_exceptions=False`, because the shared api_client fixture
+    # re-raises instead of letting the app answer — which is TestClient's
+    # default and useful everywhere else, but here it would test Starlette's
+    # debugging behaviour rather than what a real client receives.
+    from fastapi.testclient import TestClient
+
+    with TestClient(main_mod.app, raise_server_exceptions=False) as client:
+        response = client.post("/api/routes", json=BODY)
+
+    assert response.status_code == 500
+    assert response.headers["content-type"].startswith("application/json")
+    assert response.json()["error"]["kind"] == "internal"
+    # And it does not leak the internal detail to the caller.
+    assert "nobody anticipated" not in response.json()["error"]["message"]
+
+
+@pytest.mark.asyncio
+async def test_a_json_request_in_flight_is_drained_at_shutdown(
+    tmp_cache_db, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`_open_streams` is what the drain loop in lifespan waits on, and the JSON
+    path never incremented it — so a JSON request in flight at SIGTERM was
+    invisible and the process exited from under it. It is a stream too; the
+    client just sees one body at the end of it."""
+    from fastapi.testclient import TestClient
+
+    seen: list[int] = []
+
+    async def slow(req, deadline_s=None):
+        seen.append(main_mod._open_streams)
+        yield {"type": "done", "payload": {"routes": [], "cache": {}}}
+
+    monkeypatch.setattr(main_mod, "route_events_with_deadline", slow)
+
+    with TestClient(main_mod.app) as client:
+        client.post("/api/routes", json=BODY)
+
+    assert seen and seen[0] >= 1, "the JSON path was not counted as an open stream"
+    assert main_mod._open_streams == 0, "and it must be given back"

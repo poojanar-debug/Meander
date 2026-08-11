@@ -23,12 +23,32 @@ const roundTrip = (state) => ({ ...state, ...decodeState(encodeState(state)) })
 
 describe('encode / decode round trip', () => {
   it('preserves every field', () => {
+    // **Changed:** `minutes` is no longer among them for a trip with a
+    // destination. client.js stopped putting it in that request body, and this
+    // module's contract is that a link reproduces the body — so carrying it
+    // here would now break that sentence rather than uphold it. The loop case
+    // below is where the dial still round-trips.
     const back = decodeState(encodeState(FULL))
     expect(back.origin).toEqual(FULL.origin)
     expect(back.dest).toEqual(FULL.dest)
-    expect(back.minutes).toBe(65)
+    expect(back.minutes).toBeUndefined()
     expect(back.mode).toBe('bike')
     expect(back.objectives).toEqual(['nature', 'accessible'])
+  })
+
+  it('carries the dial for a loop, where it is the whole request', () => {
+    const loop = { ...FULL, dest: null }
+    const back = decodeState(encodeState(loop))
+    expect(back.minutes).toBe(65)
+    expect(buildRouteRequest(roundTrip(loop)).minutes).toBe(65)
+  })
+
+  it('puts no time budget in a shared point-to-point link', () => {
+    // A `min=` in one of these URLs reads as though it constrained the journey.
+    // It never did — the destination sets the length — and after this it is not
+    // in the request body either, so it would be a number that survives sharing
+    // and changes nothing.
+    expect(encodeState(FULL)).not.toContain('min=')
   })
 
   it('produces the same request body on the other side — the contract', () => {
@@ -90,10 +110,12 @@ describe('departure time', () => {
   it('carries every optional field through the encoder itself', () => {
     // The same masking applies to all of them, so each is checked on the
     // decoded object rather than on the merge.
+    // `minutes` is deliberately absent: this state carries a destination, and
+    // the encoder no longer writes a budget for one. See the round-trip block.
     const state = { ...FULL, departAt: hoursFromNow(1) }
     const decoded = decodeState(encodeState(state))
     expect(decoded.dest).toEqual(state.dest)
-    expect(decoded.minutes).toBe(state.minutes)
+    expect(decoded.minutes).toBeUndefined()
     expect(decoded.mode).toBe(state.mode)
     expect(decoded.objectives).toEqual(state.objectives)
     expect(decoded.departAt).toBe(state.departAt)
@@ -311,5 +333,30 @@ describe('writeUrl and shareUrl', () => {
     expect(encodeState({ ...FULL, origin: { lat: 6.9, lon: 79.8, name: GEOLOCATED } })).not.toContain(
       'fromName',
     )
+  })
+})
+
+describe('the request body a link reproduces', () => {
+  it('omits the time budget for a trip with a destination', () => {
+    // The dial cannot change the length of a journey whose ends are both
+    // fixed. Sending it made it part of the backend's cache key, so the same
+    // two places at 30 and at 35 minutes were two rows holding one answer and
+    // every nudge of the dial re-spent a full set of routing credits.
+    const body = buildRouteRequest(FULL)
+    expect('minutes' in body).toBe(false)
+    expect(body.destination).toEqual({ lat: FULL.dest.lat, lon: FULL.dest.lon })
+  })
+
+  it('sends the time budget for a loop, where it sets the loop length', () => {
+    const body = buildRouteRequest({ ...FULL, dest: null })
+    expect(body.minutes).toBe(65)
+    expect('destination' in body).toBe(false)
+  })
+
+  it('still round-trips identically through a link, both shapes', () => {
+    // The headline contract, checked on the shape that changed.
+    for (const state of [FULL, { ...FULL, dest: null }]) {
+      expect(buildRouteRequest(roundTrip(state))).toEqual(buildRouteRequest(state))
+    }
   })
 })

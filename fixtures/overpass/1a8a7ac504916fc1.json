@@ -1,0 +1,2533 @@
+{
+  "_meander_provenance": "recorded",
+  "_meander_recorded_at": "2026-08-11T08:51:04.803114+00:00",
+  "_meander_note": "Written by backend/fixtures.py. Secrets are redacted and excluded from the request signature.",
+  "request": {
+    "method": "POST",
+    "url": "https://overpass-api.de/api/interpreter",
+    "params": {},
+    "json": null,
+    "data": {
+      "data": "[out:json][timeout:25];node[\"barrier\"~\"^(entrance|gate|kissing_gate|no|none|stile|turnstile)$\"](51.50649,-0.16457,51.52581,-0.13753);out body 6000;"
+    },
+    "content": null,
+    "headers": {
+      "Content-Type": "application/x-www-form-urlencoded"
+    }
+  },
+  "response": {
+    "status": 200,
+    "headers": {
+      "date": "Tue, 11 Aug 2026 08:50:57 GMT",
+      "content-type": "application/json"
+    },
+    "json": {
+      "version": 0.6,
+      "generator": "Overpass API 0.7.62.11 87bfad18",
+      "osm3s": {
+        "timestamp_osm_base": "2026-08-11T08:50:06Z",
+        "copyright": "The data included in this document is from www.openstreetmap.org. The data is made available under ODbL."
+      },
+      "elements": [
+        {
+          "type": "node",
+          "id": 99878,
+          "lat": 51.5243509,
+          "lon": -0.1529802,
+          "tags": {
+            "access": "permissive",
+            "barrier": "gate",
+            "bicycle": "no",
+            "motor_vehicle": "no",
+            "opening_hours": "dawn-dusk",
+            "wheelchair": "yes"
+          }
+        },
+        {
+          "type": "node",
+          "id": 20958596,
+          "lat": 51.5247211,
+          "lon": -0.1582076,
+          "tags": {
+            "barrier": "gate",
+            "maxwidth:physical": "3.5",
+            "name": "Clarence Gate",
+            "opening_hours": "dawn-dusk"
+          }
+        },
+        {
+          "type": "node",
+          "id": 25473561,
+          "lat": 51.509453,
+          "lon": -0.1461926,
+          "tags": {
+            "barrier": "gate",
+            "opening_hours": "10:00-17:00"
+          }
+        },
+        {
+          "type": "node",
+          "id": 25473567,
+          "lat": 51.5098298,
+          "lon": -0.1454319,
+          "tags": {
+            "barrier": "gate",
+            "opening_hours": "10:00-17:00"
+          }
+        },
+        {
+          "type": "node",
+          "id": 25498586,
+          "lat": 51.5168636,
+          "lon": -0.1447141,
+          "tags": {
+            "barrier": "gate"
+          }
+        },
+        {
+          "type": "node",
+          "id": 25532341,
+          "lat": 51.5155762,
+          "lon": -0.1511288,
+          "tags": {
+            "barrier": "gate"
+          }
+        },
+        {
+          "type": "node",
+          "id": 265106466,
+          "lat": 51.5220455,
+          "lon": -0.1571721,
+          "tags": {
+            "access": "no",
+            "barrier": "gate",
+            "bicycle": "no",
+            "foot": "permissive",
+            "horse": "no",
+            "motor_vehicle": "no",
+            "opening_hours:covid19": "closed",
+            "wheelchair": "no"
+          }
+        },
+        {
+          "type": "node",
+          "id": 295924698,
+          "lat": 51.5243377,
+          "lon": -0.1531499,
+          "tags": {
+            "access": "permissive",
+            "barrier": "gate",
+            "bicycle": "no",
+            "opening_hours": "dawn-dusk",
+            "wheelchair": "yes"
+          }
+        },
+        {
+          "type": "node",
+          "id": 298210427,
+          "lat": 51.5193145,
+          "lon": -0.1603327,
+          "tags": {
+            "barrier": "gate"
+          }
+        },
+        {
+          "type": "node",
+          "id": 298212959,
+          "lat": 51.5200496,
+          "lon": -0.161169,
+          "tags": {
+            "barrier": "gate"
+          }
+        },
+        {
+          "type": "node",
+          "id": 298219501,
+          "lat": 51.5201709,
+          "lon": -0.1643949,
+          "tags": {
+            "access": "private",
+            "barrier": "gate"
+          }
+        },
+        {
+          "type": "node",
+          "id": 333731863,
+          "lat": 51.5221965,
+          "lon": -0.1380399,
+          "tags": {
+            "barrier": "gate"
+          }
+        },
+        {
+          "type": "node",
+          "id": 333740018,
+          "lat": 51.5232046,
+          "lon": -0.1403344,
+          "tags": {
+            "access": "private",
+            "barrier": "gate",
+            "locked": "yes"
+          }
+        },
+        {
+          "type": "node",
+          "id": 452168089,
+          "lat": 51.5159939,
+          "lon": -0.1607775,
+          "tags": {
+            "barrier": "gate"
+          }
+        },
+        {
+          "type": "node",
+          "id": 452396950,
+          "lat": 51.5134031,
+          "lon": -0.1642009,
+          "tags": {
+            "access": "no",
+            "barrier": "gate",
+            "foot": "private"
+          }
+        },
+        {
+          "type": "node",
+          "id": 452413249,
+          "lat": 51.5083563,
+          "lon": -0.1550688,
+          "tags": {
+            "access": "yes",
+            "barrier": "gate"
+          }
+        },
+        {
+          "type": "node",
+          "id": 677559413,
+          "lat": 51.5235461,
+          "lon": -0.1556856,
+          "tags": {
+            "access": "private",
+            "barrier": "gate",
+            "height": "1.5"
+          }
+        },
+        {
+          "type": "node",
+          "id": 701600721,
+          "lat": 51.5132755,
+          "lon": -0.1376798,
+          "tags": {
+            "barrier": "gate"
+          }
+        },
+        {
+          "type": "node",
+          "id": 734984880,
+          "lat": 51.5090415,
+          "lon": -0.1590968,
+          "tags": {
+            "barrier": "gate",
+            "bicycle": "no",
+            "foot": "no",
+            "location": "underground",
+            "motorcar": "yes",
+            "motorcycle": "yes"
+          }
+        },
+        {
+          "type": "node",
+          "id": 734984897,
+          "lat": 51.5113998,
+          "lon": -0.1613727,
+          "tags": {
+            "barrier": "gate",
+            "bicycle": "no",
+            "foot": "no",
+            "location": "underground",
+            "motorcar": "yes",
+            "motorcycle": "yes"
+          }
+        },
+        {
+          "type": "node",
+          "id": 742961421,
+          "lat": 51.5161577,
+          "lon": -0.1453694,
+          "tags": {
+            "barrier": "gate"
+          }
+        },
+        {
+          "type": "node",
+          "id": 811960968,
+          "lat": 51.509043,
+          "lon": -0.1450717,
+          "tags": {
+            "barrier": "gate",
+            "opening_hours": "10:00-17:00"
+          }
+        },
+        {
+          "type": "node",
+          "id": 811961014,
+          "lat": 51.5102371,
+          "lon": -0.1465587,
+          "tags": {
+            "barrier": "gate",
+            "opening_hours": "10:00-17:00"
+          }
+        },
+        {
+          "type": "node",
+          "id": 812004134,
+          "lat": 51.5092444,
+          "lon": -0.1509583,
+          "tags": {
+            "barrier": "gate",
+            "foot": "yes"
+          }
+        },
+        {
+          "type": "node",
+          "id": 812004160,
+          "lat": 51.5097766,
+          "lon": -0.1492292,
+          "tags": {
+            "barrier": "gate"
+          }
+        },
+        {
+          "type": "node",
+          "id": 884227170,
+          "lat": 51.5205487,
+          "lon": -0.1546698,
+          "tags": {
+            "barrier": "gate"
+          }
+        },
+        {
+          "type": "node",
+          "id": 942820490,
+          "lat": 51.5211409,
+          "lon": -0.1589055,
+          "tags": {
+            "access": "private",
+            "barrier": "gate"
+          }
+        },
+        {
+          "type": "node",
+          "id": 942820546,
+          "lat": 51.5196081,
+          "lon": -0.1622335,
+          "tags": {
+            "barrier": "gate"
+          }
+        },
+        {
+          "type": "node",
+          "id": 942820553,
+          "lat": 51.5197424,
+          "lon": -0.1622893,
+          "tags": {
+            "access": "permissive",
+            "barrier": "gate",
+            "opening_hours": "Mo-Fr 08:00-18:00",
+            "wheelchair": "yes"
+          }
+        },
+        {
+          "type": "node",
+          "id": 942839027,
+          "lat": 51.5186783,
+          "lon": -0.1643357,
+          "tags": {
+            "barrier": "gate"
+          }
+        },
+        {
+          "type": "node",
+          "id": 942839088,
+          "lat": 51.5179507,
+          "lon": -0.1633171,
+          "tags": {
+            "barrier": "gate"
+          }
+        },
+        {
+          "type": "node",
+          "id": 972535565,
+          "lat": 51.5171343,
+          "lon": -0.1547893,
+          "tags": {
+            "barrier": "gate"
+          }
+        },
+        {
+          "type": "node",
+          "id": 972535634,
+          "lat": 51.5175149,
+          "lon": -0.1536481,
+          "tags": {
+            "barrier": "gate",
+            "name": "St. Paul Church",
+            "name:en": "St. Paul Church"
+          }
+        },
+        {
+          "type": "node",
+          "id": 1137900142,
+          "lat": 51.5223375,
+          "lon": -0.1573808,
+          "tags": {
+            "barrier": "gate",
+            "foot": "permissive",
+            "opening_hours": "dawn-dusk",
+            "opening_hours:covid19": "closed",
+            "wheelchair": "no"
+          }
+        },
+        {
+          "type": "node",
+          "id": 1137916965,
+          "lat": 51.5222382,
+          "lon": -0.1514986,
+          "tags": {
+            "barrier": "gate"
+          }
+        },
+        {
+          "type": "node",
+          "id": 1137916995,
+          "lat": 51.522469,
+          "lon": -0.1513783,
+          "tags": {
+            "barrier": "gate"
+          }
+        },
+        {
+          "type": "node",
+          "id": 1137917051,
+          "lat": 51.5224234,
+          "lon": -0.1526209,
+          "tags": {
+            "barrier": "gate"
+          }
+        },
+        {
+          "type": "node",
+          "id": 1137961441,
+          "lat": 51.5256022,
+          "lon": -0.1486511,
+          "tags": {
+            "access": "permissive",
+            "barrier": "gate",
+            "bicycle": "no",
+            "locked": "no",
+            "motor_vehicle": "no"
+          }
+        },
+        {
+          "type": "node",
+          "id": 1150823993,
+          "lat": 51.5249386,
+          "lon": -0.1568467,
+          "tags": {
+            "access": "private",
+            "barrier": "turnstile"
+          }
+        },
+        {
+          "type": "node",
+          "id": 1150845663,
+          "lat": 51.5257138,
+          "lon": -0.1519461,
+          "tags": {
+            "barrier": "gate"
+          }
+        },
+        {
+          "type": "node",
+          "id": 1150845667,
+          "lat": 51.5255784,
+          "lon": -0.1527084,
+          "tags": {
+            "barrier": "gate"
+          }
+        },
+        {
+          "type": "node",
+          "id": 1231469538,
+          "lat": 51.5220779,
+          "lon": -0.139914,
+          "tags": {
+            "barrier": "gate"
+          }
+        },
+        {
+          "type": "node",
+          "id": 1231506606,
+          "lat": 51.5223756,
+          "lon": -0.1381827,
+          "tags": {
+            "barrier": "gate"
+          }
+        },
+        {
+          "type": "node",
+          "id": 1261572423,
+          "lat": 51.5168016,
+          "lon": -0.1522174,
+          "tags": {
+            "access": "private",
+            "barrier": "gate"
+          }
+        },
+        {
+          "type": "node",
+          "id": 1262651167,
+          "lat": 51.5170923,
+          "lon": -0.1530441,
+          "tags": {
+            "barrier": "gate"
+          }
+        },
+        {
+          "type": "node",
+          "id": 1262651195,
+          "lat": 51.517169,
+          "lon": -0.1526451,
+          "tags": {
+            "barrier": "gate"
+          }
+        },
+        {
+          "type": "node",
+          "id": 1266063654,
+          "lat": 51.5160124,
+          "lon": -0.1539567,
+          "tags": {
+            "barrier": "gate"
+          }
+        },
+        {
+          "type": "node",
+          "id": 1270104370,
+          "lat": 51.5215992,
+          "lon": -0.1645426,
+          "tags": {
+            "access": "private",
+            "barrier": "gate"
+          }
+        },
+        {
+          "type": "node",
+          "id": 1590216583,
+          "lat": 51.5172262,
+          "lon": -0.157147,
+          "tags": {
+            "barrier": "gate"
+          }
+        },
+        {
+          "type": "node",
+          "id": 1611125345,
+          "lat": 51.5166813,
+          "lon": -0.1456253,
+          "tags": {
+            "barrier": "gate"
+          }
+        },
+        {
+          "type": "node",
+          "id": 1614146379,
+          "lat": 51.5223584,
+          "lon": -0.1572502,
+          "tags": {
+            "access": "permissive",
+            "barrier": "gate",
+            "bicycle": "no",
+            "motor_vehicle": "no",
+            "opening_hours": "dawn-dusk",
+            "opening_hours:covid19": "closed",
+            "wheelchair": "no"
+          }
+        },
+        {
+          "type": "node",
+          "id": 1619354242,
+          "lat": 51.5226547,
+          "lon": -0.1513444,
+          "tags": {
+            "barrier": "gate",
+            "source": "Bing;photographic_survey"
+          }
+        },
+        {
+          "type": "node",
+          "id": 1667118103,
+          "lat": 51.5197284,
+          "lon": -0.1534461,
+          "tags": {
+            "barrier": "gate"
+          }
+        },
+        {
+          "type": "node",
+          "id": 1685938694,
+          "lat": 51.5232293,
+          "lon": -0.1444641,
+          "tags": {
+            "access": "private",
+            "barrier": "gate"
+          }
+        },
+        {
+          "type": "node",
+          "id": 1741589968,
+          "lat": 51.5225647,
+          "lon": -0.1571248,
+          "tags": {
+            "amenity": "ticket_validator",
+            "barrier": "gate",
+            "fee": "yes",
+            "foot": "yes",
+            "wheelchair": "yes"
+          }
+        },
+        {
+          "type": "node",
+          "id": 1741589976,
+          "lat": 51.5226134,
+          "lon": -0.1564351,
+          "tags": {
+            "amenity": "ticket_validator",
+            "barrier": "gate",
+            "fee": "yes",
+            "indoor": "yes"
+          }
+        },
+        {
+          "type": "node",
+          "id": 1781694459,
+          "lat": 51.5227363,
+          "lon": -0.1630943,
+          "tags": {
+            "access": "no",
+            "barrier": "turnstile",
+            "foot": "customers",
+            "name": "Marylebone",
+            "network": "London Underground",
+            "old_name": "Great Central",
+            "railway": "subway_entrance",
+            "wheelchair": "no"
+          }
+        },
+        {
+          "type": "node",
+          "id": 1811961657,
+          "lat": 51.518242,
+          "lon": -0.154447,
+          "tags": {
+            "barrier": "gate"
+          }
+        },
+        {
+          "type": "node",
+          "id": 1917940214,
+          "lat": 51.506835,
+          "lon": -0.1475237,
+          "tags": {
+            "access": "private",
+            "barrier": "gate",
+            "bicycle": "no",
+            "foot": "no"
+          }
+        },
+        {
+          "type": "node",
+          "id": 1958820430,
+          "lat": 51.5122401,
+          "lon": -0.1613898,
+          "tags": {
+            "barrier": "gate",
+            "name": "Cumberland Gate",
+            "source": "Survey of 2015-01-14"
+          }
+        },
+        {
+          "type": "node",
+          "id": 1958820434,
+          "lat": 51.5123064,
+          "lon": -0.1614103,
+          "tags": {
+            "barrier": "gate",
+            "name": "Cumberland Gate",
+            "place": "locality",
+            "source": "Survey of 2015-01-14"
+          }
+        },
+        {
+          "type": "node",
+          "id": 2121825787,
+          "lat": 51.5133706,
+          "lon": -0.1513542,
+          "tags": {
+            "access": "private",
+            "barrier": "gate"
+          }
+        },
+        {
+          "type": "node",
+          "id": 2134692493,
+          "lat": 51.5086997,
+          "lon": -0.149959,
+          "tags": {
+            "access": "permissive",
+            "barrier": "gate"
+          }
+        },
+        {
+          "type": "node",
+          "id": 2146383915,
+          "lat": 51.5232397,
+          "lon": -0.152623,
+          "tags": {
+            "barrier": "gate",
+            "name": "York Gate"
+          }
+        },
+        {
+          "type": "node",
+          "id": 2146383922,
+          "lat": 51.5232582,
+          "lon": -0.1525119,
+          "tags": {
+            "barrier": "gate",
+            "name": "York Gate"
+          }
+        },
+        {
+          "type": "node",
+          "id": 2215209096,
+          "lat": 51.512107,
+          "lon": -0.1481778,
+          "tags": {
+            "access": "private",
+            "barrier": "gate"
+          }
+        },
+        {
+          "type": "node",
+          "id": 2272518811,
+          "lat": 51.5135992,
+          "lon": -0.1500019,
+          "tags": {
+            "access": "private",
+            "barrier": "gate"
+          }
+        },
+        {
+          "type": "node",
+          "id": 2272518833,
+          "lat": 51.513745,
+          "lon": -0.1500721,
+          "tags": {
+            "access": "private",
+            "barrier": "gate"
+          }
+        },
+        {
+          "type": "node",
+          "id": 2272518852,
+          "lat": 51.513881,
+          "lon": -0.1501377,
+          "tags": {
+            "access": "private",
+            "barrier": "gate"
+          }
+        },
+        {
+          "type": "node",
+          "id": 2305795620,
+          "lat": 51.515304,
+          "lon": -0.1555707,
+          "tags": {
+            "access": "private",
+            "barrier": "gate"
+          }
+        },
+        {
+          "type": "node",
+          "id": 2305795664,
+          "lat": 51.5155293,
+          "lon": -0.1566297,
+          "tags": {
+            "access": "private",
+            "barrier": "gate"
+          }
+        },
+        {
+          "type": "node",
+          "id": 2305795730,
+          "lat": 51.5158824,
+          "lon": -0.1548411,
+          "tags": {
+            "access": "private",
+            "barrier": "gate"
+          }
+        },
+        {
+          "type": "node",
+          "id": 2305795787,
+          "lat": 51.5160813,
+          "lon": -0.1559022,
+          "tags": {
+            "access": "private",
+            "barrier": "gate"
+          }
+        },
+        {
+          "type": "node",
+          "id": 2357336215,
+          "lat": 51.5207983,
+          "lon": -0.1619313,
+          "tags": {
+            "barrier": "gate"
+          }
+        },
+        {
+          "type": "node",
+          "id": 2357342641,
+          "lat": 51.5208699,
+          "lon": -0.1615451,
+          "tags": {
+            "barrier": "gate"
+          }
+        },
+        {
+          "type": "node",
+          "id": 2388931989,
+          "lat": 51.5238343,
+          "lon": -0.1545059,
+          "tags": {
+            "access": "permissive",
+            "barrier": "gate",
+            "bicycle": "no",
+            "motor_vehicle": "no",
+            "opening_hours": "dawn-dusk",
+            "wheelchair": "yes"
+          }
+        },
+        {
+          "type": "node",
+          "id": 2412628350,
+          "lat": 51.5241071,
+          "lon": -0.1592363,
+          "tags": {
+            "barrier": "gate"
+          }
+        },
+        {
+          "type": "node",
+          "id": 2463620369,
+          "lat": 51.5228986,
+          "lon": -0.1380369,
+          "tags": {
+            "barrier": "gate"
+          }
+        },
+        {
+          "type": "node",
+          "id": 2463620393,
+          "lat": 51.5224813,
+          "lon": -0.1381242,
+          "tags": {
+            "barrier": "gate"
+          }
+        },
+        {
+          "type": "node",
+          "id": 2558339884,
+          "lat": 51.512337,
+          "lon": -0.1590031,
+          "tags": {
+            "barrier": "gate"
+          }
+        },
+        {
+          "type": "node",
+          "id": 2558339887,
+          "lat": 51.5123492,
+          "lon": -0.159125,
+          "tags": {
+            "barrier": "gate"
+          }
+        },
+        {
+          "type": "node",
+          "id": 2613272857,
+          "lat": 51.5179569,
+          "lon": -0.1562506,
+          "tags": {
+            "barrier": "gate"
+          }
+        },
+        {
+          "type": "node",
+          "id": 2762547557,
+          "lat": 51.523127,
+          "lon": -0.1473639,
+          "tags": {
+            "access": "private",
+            "barrier": "gate"
+          }
+        },
+        {
+          "type": "node",
+          "id": 2784434322,
+          "lat": 51.5127713,
+          "lon": -0.1384766,
+          "tags": {
+            "barrier": "gate",
+            "foot": "permissive"
+          }
+        },
+        {
+          "type": "node",
+          "id": 2784682609,
+          "lat": 51.5128252,
+          "lon": -0.1375946,
+          "tags": {
+            "barrier": "gate"
+          }
+        },
+        {
+          "type": "node",
+          "id": 2784682621,
+          "lat": 51.5129099,
+          "lon": -0.1380696,
+          "tags": {
+            "access": "private",
+            "barrier": "gate"
+          }
+        },
+        {
+          "type": "node",
+          "id": 2883492692,
+          "lat": 51.506783,
+          "lon": -0.1479152,
+          "tags": {
+            "access": "private",
+            "barrier": "gate",
+            "bicycle": "no",
+            "foot": "no",
+            "highway": "traffic_signals"
+          }
+        },
+        {
+          "type": "node",
+          "id": 2915780403,
+          "lat": 51.5253455,
+          "lon": -0.1458976,
+          "tags": {
+            "access": "permissive",
+            "barrier": "gate",
+            "bicycle": "no",
+            "dog": "no",
+            "foot": "permissive",
+            "motor_vehicle": "no",
+            "name": "St. Andrew's Gate",
+            "opening_hours": "dawn-dusk",
+            "place": "locality",
+            "wheelchair": "yes"
+          }
+        },
+        {
+          "type": "node",
+          "id": 2932939320,
+          "lat": 51.5083343,
+          "lon": -0.1395203,
+          "tags": {
+            "barrier": "gate",
+            "foot": "permissive",
+            "note": "Gate is only open when shops in arcade are open"
+          }
+        },
+        {
+          "type": "node",
+          "id": 2941614008,
+          "lat": 51.5115522,
+          "lon": -0.139471,
+          "tags": {
+            "barrier": "gate"
+          }
+        },
+        {
+          "type": "node",
+          "id": 2982507890,
+          "lat": 51.5232319,
+          "lon": -0.1388509,
+          "tags": {
+            "access": "private",
+            "barrier": "gate",
+            "source": "survey; Bing 2012",
+            "survey:date": "2014-07-26"
+          }
+        },
+        {
+          "type": "node",
+          "id": 3049707299,
+          "lat": 51.519987,
+          "lon": -0.1599756,
+          "tags": {
+            "barrier": "gate"
+          }
+        },
+        {
+          "type": "node",
+          "id": 3049707315,
+          "lat": 51.520094,
+          "lon": -0.1596499,
+          "tags": {
+            "barrier": "gate"
+          }
+        },
+        {
+          "type": "node",
+          "id": 3485457323,
+          "lat": 51.5073271,
+          "lon": -0.1507049,
+          "tags": {
+            "barrier": "gate"
+          }
+        },
+        {
+          "type": "node",
+          "id": 3491903552,
+          "lat": 51.5082134,
+          "lon": -0.1520873,
+          "tags": {
+            "access": "private",
+            "barrier": "gate"
+          }
+        },
+        {
+          "type": "node",
+          "id": 3492238427,
+          "lat": 51.5093287,
+          "lon": -0.1515764,
+          "tags": {
+            "barrier": "gate"
+          }
+        },
+        {
+          "type": "node",
+          "id": 3493329495,
+          "lat": 51.5095818,
+          "lon": -0.1502521,
+          "tags": {
+            "barrier": "gate",
+            "foot": "yes"
+          }
+        },
+        {
+          "type": "node",
+          "id": 3494149274,
+          "lat": 51.5107223,
+          "lon": -0.1471668,
+          "tags": {
+            "barrier": "gate"
+          }
+        },
+        {
+          "type": "node",
+          "id": 3516927604,
+          "lat": 51.5192119,
+          "lon": -0.1506676,
+          "tags": {
+            "access": "residents",
+            "barrier": "gate"
+          }
+        },
+        {
+          "type": "node",
+          "id": 3516927605,
+          "lat": 51.5194226,
+          "lon": -0.1499804,
+          "tags": {
+            "access": "residents",
+            "barrier": "gate"
+          }
+        },
+        {
+          "type": "node",
+          "id": 3523384417,
+          "lat": 51.5179888,
+          "lon": -0.1418974,
+          "tags": {
+            "barrier": "gate"
+          }
+        },
+        {
+          "type": "node",
+          "id": 3593509678,
+          "lat": 51.5202977,
+          "lon": -0.1525721,
+          "tags": {
+            "barrier": "gate"
+          }
+        },
+        {
+          "type": "node",
+          "id": 3593509683,
+          "lat": 51.5203432,
+          "lon": -0.1534745,
+          "tags": {
+            "barrier": "gate"
+          }
+        },
+        {
+          "type": "node",
+          "id": 3767116721,
+          "lat": 51.5197641,
+          "lon": -0.1549333,
+          "tags": {
+            "barrier": "gate",
+            "foot": "yes",
+            "motor_vehicle": "no"
+          }
+        },
+        {
+          "type": "node",
+          "id": 4305326860,
+          "lat": 51.515242,
+          "lon": -0.141321,
+          "tags": {
+            "amenity": "ticket_validator",
+            "barrier": "gate",
+            "foot": "yes",
+            "layer": "-1",
+            "level": "-1"
+          }
+        },
+        {
+          "type": "node",
+          "id": 4305343210,
+          "lat": 51.515264,
+          "lon": -0.1419684,
+          "tags": {
+            "amenity": "ticket_validator",
+            "barrier": "gate",
+            "bicycle": "no",
+            "foot": "yes",
+            "layer": "-1",
+            "level": "-1"
+          }
+        },
+        {
+          "type": "node",
+          "id": 4334593193,
+          "lat": 51.5253821,
+          "lon": -0.1609425,
+          "tags": {
+            "barrier": "gate"
+          }
+        },
+        {
+          "type": "node",
+          "id": 4368839119,
+          "lat": 51.5213664,
+          "lon": -0.1385467,
+          "tags": {
+            "access": "private",
+            "barrier": "gate"
+          }
+        },
+        {
+          "type": "node",
+          "id": 4931402376,
+          "lat": 51.5078036,
+          "lon": -0.1488841,
+          "tags": {
+            "barrier": "gate"
+          }
+        },
+        {
+          "type": "node",
+          "id": 5560592817,
+          "lat": 51.5205943,
+          "lon": -0.1538449,
+          "tags": {
+            "barrier": "gate",
+            "maxwidth:physical": "1.2",
+            "source:maxwidth:physical": "ARCore"
+          }
+        },
+        {
+          "type": "node",
+          "id": 5973481947,
+          "lat": 51.512123,
+          "lon": -0.1586827,
+          "tags": {
+            "barrier": "gate"
+          }
+        },
+        {
+          "type": "node",
+          "id": 6172396327,
+          "lat": 51.5200689,
+          "lon": -0.139734,
+          "tags": {
+            "barrier": "gate"
+          }
+        },
+        {
+          "type": "node",
+          "id": 6249967245,
+          "lat": 51.5132113,
+          "lon": -0.1589144,
+          "tags": {
+            "barrier": "gate",
+            "material": "metal"
+          }
+        },
+        {
+          "type": "node",
+          "id": 6302353034,
+          "lat": 51.5253996,
+          "lon": -0.1454493,
+          "tags": {
+            "barrier": "gate"
+          }
+        },
+        {
+          "type": "node",
+          "id": 6325109876,
+          "lat": 51.5198289,
+          "lon": -0.1546322,
+          "tags": {
+            "barrier": "gate"
+          }
+        },
+        {
+          "type": "node",
+          "id": 6340982506,
+          "lat": 51.5215729,
+          "lon": -0.156047,
+          "tags": {
+            "access": "permissive",
+            "barrier": "gate"
+          }
+        },
+        {
+          "type": "node",
+          "id": 6357446975,
+          "lat": 51.5169045,
+          "lon": -0.1580944,
+          "tags": {
+            "barrier": "gate"
+          }
+        },
+        {
+          "type": "node",
+          "id": 6357570005,
+          "lat": 51.5156638,
+          "lon": -0.1623034,
+          "tags": {
+            "barrier": "gate"
+          }
+        },
+        {
+          "type": "node",
+          "id": 6363941235,
+          "lat": 51.5198438,
+          "lon": -0.1614391,
+          "tags": {
+            "access": "private",
+            "barrier": "gate"
+          }
+        },
+        {
+          "type": "node",
+          "id": 6363941237,
+          "lat": 51.5197674,
+          "lon": -0.1614025,
+          "tags": {
+            "barrier": "gate"
+          }
+        },
+        {
+          "type": "node",
+          "id": 6364655537,
+          "lat": 51.5193228,
+          "lon": -0.1624537,
+          "tags": {
+            "access": "private",
+            "amenity": "parking",
+            "barrier": "gate",
+            "capacity": "52",
+            "layer": "-1",
+            "operator": "NCP London Crawford Street",
+            "operator:type": "public",
+            "parking": "underground",
+            "website": "https://www.ncp.co.uk/find-a-car-park/car-parks/london-crawford-street/"
+          }
+        },
+        {
+          "type": "node",
+          "id": 6367784414,
+          "lat": 51.5200563,
+          "lon": -0.1619778,
+          "tags": {
+            "barrier": "gate"
+          }
+        },
+        {
+          "type": "node",
+          "id": 6369501298,
+          "lat": 51.5206677,
+          "lon": -0.1627237,
+          "tags": {
+            "barrier": "gate"
+          }
+        },
+        {
+          "type": "node",
+          "id": 6375719855,
+          "lat": 51.5182233,
+          "lon": -0.1631903,
+          "tags": {
+            "barrier": "gate"
+          }
+        },
+        {
+          "type": "node",
+          "id": 6386014116,
+          "lat": 51.5190972,
+          "lon": -0.1643017,
+          "tags": {
+            "access": "private",
+            "barrier": "gate"
+          }
+        },
+        {
+          "type": "node",
+          "id": 6387108547,
+          "lat": 51.519499,
+          "lon": -0.1633382,
+          "tags": {
+            "barrier": "gate"
+          }
+        },
+        {
+          "type": "node",
+          "id": 6388480971,
+          "lat": 51.5201896,
+          "lon": -0.1640947,
+          "tags": {
+            "barrier": "gate"
+          }
+        },
+        {
+          "type": "node",
+          "id": 6410407481,
+          "lat": 51.5233348,
+          "lon": -0.1501674,
+          "tags": {
+            "barrier": "gate"
+          }
+        },
+        {
+          "type": "node",
+          "id": 6410407482,
+          "lat": 51.5233,
+          "lon": -0.1510525,
+          "tags": {
+            "barrier": "gate"
+          }
+        },
+        {
+          "type": "node",
+          "id": 6410407483,
+          "lat": 51.523479,
+          "lon": -0.1491428,
+          "tags": {
+            "barrier": "gate",
+            "maxwidth:physical": "2.3"
+          }
+        },
+        {
+          "type": "node",
+          "id": 6416414514,
+          "lat": 51.5235374,
+          "lon": -0.15552,
+          "tags": {
+            "access": "private",
+            "barrier": "gate",
+            "height": "1.5",
+            "material": "metal"
+          }
+        },
+        {
+          "type": "node",
+          "id": 6416454211,
+          "lat": 51.5243836,
+          "lon": -0.1578158,
+          "tags": {
+            "barrier": "gate"
+          }
+        },
+        {
+          "type": "node",
+          "id": 6416454212,
+          "lat": 51.5241194,
+          "lon": -0.1580182,
+          "tags": {
+            "barrier": "gate"
+          }
+        },
+        {
+          "type": "node",
+          "id": 6433638963,
+          "lat": 51.5249595,
+          "lon": -0.1601795,
+          "tags": {
+            "access": "permissive",
+            "barrier": "gate",
+            "bicycle": "no",
+            "foot": "permissive",
+            "horse": "no",
+            "motor_vehicle": "no"
+          }
+        },
+        {
+          "type": "node",
+          "id": 6433638964,
+          "lat": 51.5247628,
+          "lon": -0.1598297,
+          "tags": {
+            "access": "no",
+            "barrier": "gate",
+            "foot": "permissive"
+          }
+        },
+        {
+          "type": "node",
+          "id": 6433638965,
+          "lat": 51.5247222,
+          "lon": -0.1598001,
+          "tags": {
+            "barrier": "gate"
+          }
+        },
+        {
+          "type": "node",
+          "id": 6433638966,
+          "lat": 51.5246877,
+          "lon": -0.1598865,
+          "tags": {
+            "barrier": "gate"
+          }
+        },
+        {
+          "type": "node",
+          "id": 6433638967,
+          "lat": 51.5246078,
+          "lon": -0.1603108,
+          "tags": {
+            "barrier": "gate"
+          }
+        },
+        {
+          "type": "node",
+          "id": 6434930397,
+          "lat": 51.5225846,
+          "lon": -0.1622067,
+          "tags": {
+            "access": "private",
+            "barrier": "gate"
+          }
+        },
+        {
+          "type": "node",
+          "id": 6442227145,
+          "lat": 51.5214339,
+          "lon": -0.1644883,
+          "tags": {
+            "access": "private",
+            "barrier": "gate"
+          }
+        },
+        {
+          "type": "node",
+          "id": 6450178033,
+          "lat": 51.5255337,
+          "lon": -0.163008,
+          "tags": {
+            "access": "permissive",
+            "barrier": "gate",
+            "wheelchair": "yes"
+          }
+        },
+        {
+          "type": "node",
+          "id": 6461577222,
+          "lat": 51.5211321,
+          "lon": -0.1645691,
+          "tags": {
+            "barrier": "gate"
+          }
+        },
+        {
+          "type": "node",
+          "id": 6801479205,
+          "lat": 51.5156995,
+          "lon": -0.1483703,
+          "tags": {
+            "access": "private",
+            "barrier": "gate"
+          }
+        },
+        {
+          "type": "node",
+          "id": 6801898617,
+          "lat": 51.5233787,
+          "lon": -0.1566864,
+          "tags": {
+            "barrier": "gate",
+            "maxwidth:physical": "1.6"
+          }
+        },
+        {
+          "type": "node",
+          "id": 6915387005,
+          "lat": 51.5068239,
+          "lon": -0.1423213,
+          "tags": {
+            "barrier": "gate",
+            "maxwidth:physical": "1"
+          }
+        },
+        {
+          "type": "node",
+          "id": 6936338801,
+          "lat": 51.5152766,
+          "lon": -0.1643888,
+          "tags": {
+            "barrier": "gate"
+          }
+        },
+        {
+          "type": "node",
+          "id": 6936338802,
+          "lat": 51.5150992,
+          "lon": -0.1641244,
+          "tags": {
+            "barrier": "gate"
+          }
+        },
+        {
+          "type": "node",
+          "id": 6936338803,
+          "lat": 51.5151708,
+          "lon": -0.1642367,
+          "tags": {
+            "barrier": "gate"
+          }
+        },
+        {
+          "type": "node",
+          "id": 6937651372,
+          "lat": 51.5156576,
+          "lon": -0.1643653,
+          "tags": {
+            "barrier": "gate"
+          }
+        },
+        {
+          "type": "node",
+          "id": 6938844534,
+          "lat": 51.5147467,
+          "lon": -0.164094,
+          "tags": {
+            "access": "private",
+            "barrier": "gate",
+            "locked": "yes"
+          }
+        },
+        {
+          "type": "node",
+          "id": 7567919395,
+          "lat": 51.5078434,
+          "lon": -0.1543933,
+          "tags": {
+            "barrier": "gate"
+          }
+        },
+        {
+          "type": "node",
+          "id": 7702634197,
+          "lat": 51.5251216,
+          "lon": -0.1535165,
+          "tags": {
+            "access": "permissive",
+            "barrier": "gate",
+            "opening_hours": "dawn-dusk",
+            "wheelchair": "yes"
+          }
+        },
+        {
+          "type": "node",
+          "id": 7702634198,
+          "lat": 51.5250429,
+          "lon": -0.1536522,
+          "tags": {
+            "access": "permissive",
+            "barrier": "gate",
+            "bicycle": "no",
+            "opening_hours": "dawn-dusk",
+            "wheelchair": "yes"
+          }
+        },
+        {
+          "type": "node",
+          "id": 7702634199,
+          "lat": 51.5248881,
+          "lon": -0.1484559,
+          "tags": {
+            "access": "permissive",
+            "barrier": "gate",
+            "bicycle": "no",
+            "locked": "no",
+            "motor_vehicle": "no",
+            "opening_hours": "dawn-dusk",
+            "wheelchair": "yes"
+          }
+        },
+        {
+          "type": "node",
+          "id": 7702634200,
+          "lat": 51.5251145,
+          "lon": -0.147157,
+          "tags": {
+            "barrier": "gate",
+            "bicycle": "no",
+            "dog": "no",
+            "foot": "permissive",
+            "inline_skates": "no",
+            "motor_vehicle": "private",
+            "opening_hours": "dawn-dusk",
+            "wheelchair": "yes"
+          }
+        },
+        {
+          "type": "node",
+          "id": 7707253635,
+          "lat": 51.5256008,
+          "lon": -0.1624507,
+          "tags": {
+            "barrier": "gate"
+          }
+        },
+        {
+          "type": "node",
+          "id": 7723514254,
+          "lat": 51.5257572,
+          "lon": -0.1597242,
+          "tags": {
+            "barrier": "gate"
+          }
+        },
+        {
+          "type": "node",
+          "id": 7725418192,
+          "lat": 51.5253792,
+          "lon": -0.1539099,
+          "tags": {
+            "barrier": "gate",
+            "opening_hours": "dawn-dusk"
+          }
+        },
+        {
+          "type": "node",
+          "id": 7728553914,
+          "lat": 51.5236703,
+          "lon": -0.1580857,
+          "tags": {
+            "barrier": "gate"
+          }
+        },
+        {
+          "type": "node",
+          "id": 7746614945,
+          "lat": 51.5226438,
+          "lon": -0.1640509,
+          "tags": {
+            "access": "permissive",
+            "barrier": "gate"
+          }
+        },
+        {
+          "type": "node",
+          "id": 7775331596,
+          "lat": 51.522881,
+          "lon": -0.1628361,
+          "tags": {
+            "barrier": "turnstile"
+          }
+        },
+        {
+          "type": "node",
+          "id": 7775331597,
+          "lat": 51.5229111,
+          "lon": -0.1627198,
+          "tags": {
+            "barrier": "turnstile"
+          }
+        },
+        {
+          "type": "node",
+          "id": 7775331599,
+          "lat": 51.5229121,
+          "lon": -0.1627802,
+          "tags": {
+            "barrier": "turnstile",
+            "wheelchair": "yes"
+          }
+        },
+        {
+          "type": "node",
+          "id": 7783627030,
+          "lat": 51.5255497,
+          "lon": -0.1540125,
+          "tags": {
+            "access": "permissive",
+            "barrier": "gate",
+            "opening_hours": "dawn-dusk"
+          }
+        },
+        {
+          "type": "node",
+          "id": 7787603289,
+          "lat": 51.5201709,
+          "lon": -0.1552163,
+          "tags": {
+            "access": "permissive",
+            "barrier": "gate"
+          }
+        },
+        {
+          "type": "node",
+          "id": 7800629780,
+          "lat": 51.5211463,
+          "lon": -0.1640347,
+          "tags": {
+            "access": "permissive",
+            "barrier": "gate"
+          }
+        },
+        {
+          "type": "node",
+          "id": 7800629781,
+          "lat": 51.5211288,
+          "lon": -0.1642871,
+          "tags": {
+            "access": "permissive",
+            "barrier": "gate"
+          }
+        },
+        {
+          "type": "node",
+          "id": 7837487559,
+          "lat": 51.5252275,
+          "lon": -0.1479205,
+          "tags": {
+            "access": "no",
+            "barrier": "gate",
+            "bicycle": "no",
+            "dog": "no",
+            "foot": "permissive"
+          }
+        },
+        {
+          "type": "node",
+          "id": 7872471348,
+          "lat": 51.5219358,
+          "lon": -0.1576305,
+          "tags": {
+            "access": "no",
+            "barrier": "gate",
+            "foot": "permissive",
+            "wheelchair": "yes"
+          }
+        },
+        {
+          "type": "node",
+          "id": 7887168457,
+          "lat": 51.5175679,
+          "lon": -0.1610986,
+          "tags": {
+            "access": "no",
+            "barrier": "gate",
+            "foot": "private",
+            "wheelchair": "yes"
+          }
+        },
+        {
+          "type": "node",
+          "id": 7887168458,
+          "lat": 51.5176057,
+          "lon": -0.1606867,
+          "tags": {
+            "access": "no",
+            "barrier": "gate",
+            "foot": "private",
+            "wheelchair": "yes"
+          }
+        },
+        {
+          "type": "node",
+          "id": 7891079785,
+          "lat": 51.5094069,
+          "lon": -0.1567057,
+          "tags": {
+            "access": "customers",
+            "authentication": "parking_ticket",
+            "barrier": "gate"
+          }
+        },
+        {
+          "type": "node",
+          "id": 7930967147,
+          "lat": 51.5202064,
+          "lon": -0.1624426,
+          "tags": {
+            "access": "permissive",
+            "barrier": "gate"
+          }
+        },
+        {
+          "type": "node",
+          "id": 7987865370,
+          "lat": 51.5230634,
+          "lon": -0.1556517,
+          "tags": {
+            "access": "private",
+            "barrier": "gate"
+          }
+        },
+        {
+          "type": "node",
+          "id": 7987865375,
+          "lat": 51.5239698,
+          "lon": -0.1493571,
+          "tags": {
+            "access": "private",
+            "barrier": "gate",
+            "height": "3",
+            "material": "metal"
+          }
+        },
+        {
+          "type": "node",
+          "id": 7987865377,
+          "lat": 51.5240139,
+          "lon": -0.1491334,
+          "tags": {
+            "access": "no",
+            "barrier": "gate",
+            "foot": "private"
+          }
+        },
+        {
+          "type": "node",
+          "id": 7987865379,
+          "lat": 51.523958,
+          "lon": -0.149109,
+          "tags": {
+            "access": "no",
+            "barrier": "gate",
+            "foot": "private"
+          }
+        },
+        {
+          "type": "node",
+          "id": 8116370669,
+          "lat": 51.5187966,
+          "lon": -0.1462963,
+          "tags": {
+            "access": "private",
+            "barrier": "gate"
+          }
+        },
+        {
+          "type": "node",
+          "id": 8124381025,
+          "lat": 51.5070183,
+          "lon": -0.1409793,
+          "tags": {
+            "access": "permissive",
+            "barrier": "gate"
+          }
+        },
+        {
+          "type": "node",
+          "id": 8124381027,
+          "lat": 51.5068253,
+          "lon": -0.1407938,
+          "tags": {
+            "access": "private",
+            "barrier": "gate"
+          }
+        },
+        {
+          "type": "node",
+          "id": 8124381030,
+          "lat": 51.5069045,
+          "lon": -0.1408735,
+          "tags": {
+            "access": "private",
+            "barrier": "gate"
+          }
+        },
+        {
+          "type": "node",
+          "id": 8142618871,
+          "lat": 51.5089115,
+          "lon": -0.1508814,
+          "tags": {
+            "access": "private",
+            "barrier": "gate"
+          }
+        },
+        {
+          "type": "node",
+          "id": 8142633527,
+          "lat": 51.5149583,
+          "lon": -0.163695,
+          "tags": {
+            "barrier": "gate"
+          }
+        },
+        {
+          "type": "node",
+          "id": 8142633530,
+          "lat": 51.514944,
+          "lon": -0.1637639,
+          "tags": {
+            "barrier": "gate"
+          }
+        },
+        {
+          "type": "node",
+          "id": 8146829424,
+          "lat": 51.5198856,
+          "lon": -0.1504863,
+          "tags": {
+            "access": "private",
+            "barrier": "gate"
+          }
+        },
+        {
+          "type": "node",
+          "id": 8146829425,
+          "lat": 51.5199208,
+          "lon": -0.1502669,
+          "tags": {
+            "access": "private",
+            "barrier": "gate"
+          }
+        },
+        {
+          "type": "node",
+          "id": 8583138926,
+          "lat": 51.5232086,
+          "lon": -0.1557561,
+          "tags": {
+            "barrier": "gate",
+            "maxwidth:physical": "2"
+          }
+        },
+        {
+          "type": "node",
+          "id": 8922107357,
+          "lat": 51.5241038,
+          "lon": -0.1452531,
+          "tags": {
+            "access": "permissive",
+            "barrier": "gate",
+            "bicycle": "yes",
+            "check_date:opening_hours": "2026-06-02",
+            "description": "No lorries, buses or business couriers vehicles. No trade or business vehicles except permit holders, taxis and for access to premises. https://www.cepc.org.uk/residents/regents-park/regents-park-security/#toggle-id-6",
+            "foot": "yes",
+            "hgv": "destination",
+            "opening_hours": "Mo-Su 07:00-24:00",
+            "psv": "destination",
+            "wheelchair": "yes"
+          }
+        },
+        {
+          "type": "node",
+          "id": 8929457931,
+          "lat": 51.5159964,
+          "lon": -0.149625,
+          "tags": {
+            "barrier": "gate"
+          }
+        },
+        {
+          "type": "node",
+          "id": 9240097214,
+          "lat": 51.5241681,
+          "lon": -0.1451552,
+          "tags": {
+            "barrier": "gate",
+            "maxwidth:physical": "1.5",
+            "source:maxwidth:physical": "ARCore"
+          }
+        },
+        {
+          "type": "node",
+          "id": 9240122717,
+          "lat": 51.52424,
+          "lon": -0.1447529,
+          "tags": {
+            "barrier": "gate",
+            "maxwidth:physical": "0.6",
+            "source:maxwidth:physical": "ARCore"
+          }
+        },
+        {
+          "type": "node",
+          "id": 9240122718,
+          "lat": 51.5241676,
+          "lon": -0.1449461,
+          "tags": {
+            "barrier": "gate"
+          }
+        },
+        {
+          "type": "node",
+          "id": 9348393697,
+          "lat": 51.5206172,
+          "lon": -0.1629387,
+          "tags": {
+            "barrier": "gate"
+          }
+        },
+        {
+          "type": "node",
+          "id": 9381552912,
+          "lat": 51.5205016,
+          "lon": -0.1617767,
+          "tags": {
+            "access": "no",
+            "barrier": "gate",
+            "foot": "private"
+          }
+        },
+        {
+          "type": "node",
+          "id": 9498441974,
+          "lat": 51.5246624,
+          "lon": -0.143062,
+          "tags": {
+            "barrier": "gate"
+          }
+        },
+        {
+          "type": "node",
+          "id": 9498441975,
+          "lat": 51.525364,
+          "lon": -0.1447367,
+          "tags": {
+            "access": "no",
+            "barrier": "gate",
+            "foot": "private"
+          }
+        },
+        {
+          "type": "node",
+          "id": 10019788230,
+          "lat": 51.5100748,
+          "lon": -0.1438578,
+          "tags": {
+            "barrier": "gate"
+          }
+        },
+        {
+          "type": "node",
+          "id": 10944046187,
+          "lat": 51.5236805,
+          "lon": -0.1511162,
+          "tags": {
+            "barrier": "gate"
+          }
+        },
+        {
+          "type": "node",
+          "id": 10944046195,
+          "lat": 51.5236271,
+          "lon": -0.1479931,
+          "tags": {
+            "barrier": "gate",
+            "opening_hours": "Mo-Su 07:00-24:00"
+          }
+        },
+        {
+          "type": "node",
+          "id": 10944046196,
+          "lat": 51.5236402,
+          "lon": -0.1479232,
+          "tags": {
+            "barrier": "gate",
+            "opening_hours": "Mo-Su 07:00-24:00"
+          }
+        },
+        {
+          "type": "node",
+          "id": 10944046200,
+          "lat": 51.5236151,
+          "lon": -0.1480548,
+          "tags": {
+            "barrier": "gate",
+            "foot": "permissive",
+            "maxwidth:physical": "1.5",
+            "source:maxwidth:physical": "ARCore"
+          }
+        },
+        {
+          "type": "node",
+          "id": 10977889820,
+          "lat": 51.5132569,
+          "lon": -0.1518811,
+          "tags": {
+            "access": "private",
+            "barrier": "gate"
+          }
+        },
+        {
+          "type": "node",
+          "id": 11752397500,
+          "lat": 51.5220878,
+          "lon": -0.1518195,
+          "tags": {
+            "barrier": "gate",
+            "locked": "yes"
+          }
+        },
+        {
+          "type": "node",
+          "id": 11752397501,
+          "lat": 51.522044,
+          "lon": -0.1516234,
+          "tags": {
+            "barrier": "gate"
+          }
+        },
+        {
+          "type": "node",
+          "id": 11926964344,
+          "lat": 51.5206994,
+          "lon": -0.1545857,
+          "tags": {
+            "barrier": "gate"
+          }
+        },
+        {
+          "type": "node",
+          "id": 11926964354,
+          "lat": 51.5213651,
+          "lon": -0.154127,
+          "tags": {
+            "access": "private",
+            "barrier": "gate",
+            "horse": "no",
+            "locked": "yes",
+            "motor_vehicle": "no",
+            "wheelchair": "yes"
+          }
+        },
+        {
+          "type": "node",
+          "id": 11926964356,
+          "lat": 51.5210322,
+          "lon": -0.1539083,
+          "tags": {
+            "access": "private",
+            "barrier": "gate"
+          }
+        },
+        {
+          "type": "node",
+          "id": 11980645984,
+          "lat": 51.512351,
+          "lon": -0.1614242,
+          "tags": {
+            "barrier": "gate",
+            "name": "Cumberland Gate"
+          }
+        },
+        {
+          "type": "node",
+          "id": 12057541170,
+          "lat": 51.523653,
+          "lon": -0.1478573,
+          "tags": {
+            "barrier": "gate",
+            "foot": "permissive",
+            "maxwidth:physical": "1.5",
+            "source:maxwidth:physical": "ARCore"
+          }
+        },
+        {
+          "type": "node",
+          "id": 12177182195,
+          "lat": 51.5252678,
+          "lon": -0.1638028,
+          "tags": {
+            "barrier": "gate",
+            "locked": "yes"
+          }
+        },
+        {
+          "type": "node",
+          "id": 12198585357,
+          "lat": 51.5223451,
+          "lon": -0.1476927,
+          "tags": {
+            "barrier": "gate"
+          }
+        },
+        {
+          "type": "node",
+          "id": 12207162347,
+          "lat": 51.5134972,
+          "lon": -0.1492238,
+          "tags": {
+            "amenity": "ticket_validator",
+            "barrier": "gate",
+            "lanes": "9"
+          }
+        },
+        {
+          "type": "node",
+          "id": 12207162358,
+          "lat": 51.5139174,
+          "lon": -0.1446517,
+          "tags": {
+            "amenity": "ticket_validator",
+            "barrier": "gate",
+            "indoor": "yes"
+          }
+        },
+        {
+          "type": "node",
+          "id": 12207903048,
+          "lat": 51.5145885,
+          "lon": -0.1490018,
+          "tags": {
+            "amenity": "ticket_validator",
+            "barrier": "gate"
+          }
+        },
+        {
+          "type": "node",
+          "id": 12207903049,
+          "lat": 51.5141306,
+          "lon": -0.1494892,
+          "tags": {
+            "amenity": "ticket_validator",
+            "barrier": "gate",
+            "indoor": "yes",
+            "lanes": "14"
+          }
+        },
+        {
+          "type": "node",
+          "id": 12211666389,
+          "lat": 51.5097361,
+          "lon": -0.1542132,
+          "tags": {
+            "barrier": "gate"
+          }
+        },
+        {
+          "type": "node",
+          "id": 12279370528,
+          "lat": 51.5068144,
+          "lon": -0.1426683,
+          "tags": {
+            "amenity": "ticket_validator",
+            "barrier": "gate"
+          }
+        },
+        {
+          "type": "node",
+          "id": 12369762394,
+          "lat": 51.5253401,
+          "lon": -0.1636251,
+          "tags": {
+            "barrier": "gate",
+            "locked": "yes"
+          }
+        },
+        {
+          "type": "node",
+          "id": 12378884760,
+          "lat": 51.5257387,
+          "lon": -0.1515347,
+          "tags": {
+            "access": "no",
+            "barrier": "gate",
+            "locked": "yes",
+            "material": "metal",
+            "vehicle": "no"
+          }
+        },
+        {
+          "type": "node",
+          "id": 12430825626,
+          "lat": 51.5203217,
+          "lon": -0.1384099,
+          "tags": {
+            "barrier": "gate"
+          }
+        },
+        {
+          "type": "node",
+          "id": 12531750687,
+          "lat": 51.5238701,
+          "lon": -0.163666,
+          "tags": {
+            "barrier": "gate"
+          }
+        },
+        {
+          "type": "node",
+          "id": 12556779410,
+          "lat": 51.5132931,
+          "lon": -0.1505209,
+          "tags": {
+            "access": "private",
+            "barrier": "gate"
+          }
+        },
+        {
+          "type": "node",
+          "id": 12618016263,
+          "lat": 51.5139287,
+          "lon": -0.1636243,
+          "tags": {
+            "access": "private",
+            "barrier": "gate",
+            "locked": "yes"
+          }
+        },
+        {
+          "type": "node",
+          "id": 12618016273,
+          "lat": 51.514294,
+          "lon": -0.1640898,
+          "tags": {
+            "access": "private",
+            "barrier": "gate",
+            "locked": "yes"
+          }
+        },
+        {
+          "type": "node",
+          "id": 12618016274,
+          "lat": 51.5143902,
+          "lon": -0.1636285,
+          "tags": {
+            "access": "private",
+            "barrier": "gate",
+            "locked": "yes"
+          }
+        },
+        {
+          "type": "node",
+          "id": 12618044044,
+          "lat": 51.5227244,
+          "lon": -0.1616021,
+          "tags": {
+            "access": "private",
+            "barrier": "gate",
+            "locked": "yes"
+          }
+        },
+        {
+          "type": "node",
+          "id": 12618044058,
+          "lat": 51.5230266,
+          "lon": -0.1610293,
+          "tags": {
+            "access": "private",
+            "barrier": "gate",
+            "locked": "yes"
+          }
+        },
+        {
+          "type": "node",
+          "id": 12620894689,
+          "lat": 51.5246178,
+          "lon": -0.1456302,
+          "tags": {
+            "access": "private",
+            "barrier": "gate",
+            "locked": "yes"
+          }
+        },
+        {
+          "type": "node",
+          "id": 12620894694,
+          "lat": 51.5237873,
+          "lon": -0.1478737,
+          "tags": {
+            "access": "private",
+            "barrier": "gate",
+            "locked": "yes"
+          }
+        },
+        {
+          "type": "node",
+          "id": 12620910147,
+          "lat": 51.5242085,
+          "lon": -0.1480743,
+          "tags": {
+            "access": "private",
+            "barrier": "gate",
+            "locked": "yes"
+          }
+        },
+        {
+          "type": "node",
+          "id": 12708038715,
+          "lat": 51.5227343,
+          "lon": -0.1398214,
+          "tags": {
+            "access": "private",
+            "barrier": "gate",
+            "locked": "yes"
+          }
+        },
+        {
+          "type": "node",
+          "id": 12786716435,
+          "lat": 51.5132015,
+          "lon": -0.1589898,
+          "tags": {
+            "barrier": "gate",
+            "locked": "yes",
+            "material": "metal"
+          }
+        },
+        {
+          "type": "node",
+          "id": 12786716436,
+          "lat": 51.5132214,
+          "lon": -0.1588371,
+          "tags": {
+            "barrier": "gate",
+            "locked": "yes",
+            "material": "metal"
+          }
+        },
+        {
+          "type": "node",
+          "id": 12957095243,
+          "lat": 51.5222626,
+          "lon": -0.1561909,
+          "tags": {
+            "amenity": "ticket_validator",
+            "barrier": "gate"
+          }
+        },
+        {
+          "type": "node",
+          "id": 12964976486,
+          "lat": 51.5226075,
+          "lon": -0.1567753,
+          "tags": {
+            "amenity": "ticket_validator",
+            "barrier": "gate",
+            "foot": "designated",
+            "indoor": "yes"
+          }
+        },
+        {
+          "type": "node",
+          "id": 13039025880,
+          "lat": 51.5169686,
+          "lon": -0.1588511,
+          "tags": {
+            "access": "private",
+            "barrier": "gate",
+            "locked": "yes"
+          }
+        },
+        {
+          "type": "node",
+          "id": 13204570526,
+          "lat": 51.5177918,
+          "lon": -0.1388728,
+          "tags": {
+            "artist:wikidata": "Q7051892",
+            "artist:wikipedia": "en:Norman Ackroyd",
+            "artist_name": "Norman Ackroyd",
+            "artwork_type": "sculpture",
+            "barrier": "gate",
+            "material": "metal",
+            "tourism": "artwork"
+          }
+        },
+        {
+          "type": "node",
+          "id": 13289870852,
+          "lat": 51.5153176,
+          "lon": -0.1413618,
+          "tags": {
+            "amenity": "ticket_validator",
+            "barrier": "gate",
+            "foot": "yes",
+            "layer": "-1",
+            "level": "-1"
+          }
+        },
+        {
+          "type": "node",
+          "id": 13456842062,
+          "lat": 51.5173353,
+          "lon": -0.1620951,
+          "tags": {
+            "access": "private",
+            "barrier": "gate",
+            "check_date": "2026-01-13",
+            "locked": "no"
+          }
+        },
+        {
+          "type": "node",
+          "id": 13742800774,
+          "lat": 51.5251634,
+          "lon": -0.1534293,
+          "tags": {
+            "barrier": "gate",
+            "foot": "yes"
+          }
+        },
+        {
+          "type": "node",
+          "id": 14077667434,
+          "lat": 51.5205965,
+          "lon": -0.1387316,
+          "tags": {
+            "barrier": "gate"
+          }
+        }
+      ]
+    }
+  }
+}

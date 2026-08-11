@@ -62,6 +62,97 @@ describe('locateOnRoute', () => {
     expect(locateOnRoute([0, 0], [[0, 0]], undefined)).toBeNull()
   })
 
+  describe('on a round trip, where two legs share a street', () => {
+    // Out along the equator to 0.01 deg (~1.11 km), then back along a line 7.8 m
+    // to the north — a ~2.2 km loop. That is the shape this app produces by
+    // default, and 7.8 m is well inside the error of a city GPS fix, so which
+    // leg is "nearest" at any instant is decided by noise rather than by where
+    // the walker is.
+    const OUT_AND_BACK = [
+      [0, 0],
+      [0.005, 0],
+      [0.01, 0],
+      [0.01, 0.00007],
+      [0.005, 0.00007],
+      [0, 0.00007],
+    ]
+    const loopCum = cumulativeDistances(OUT_AND_BACK)
+    const total = loopCum[loopCum.length - 1]
+
+    // Standing on the outbound leg at ~557 m, but a hair north — so the return
+    // leg is marginally the closer of the two.
+    const AMBIGUOUS = [0.005, 0.00004]
+
+    it('takes the earliest acceptable match on the first fix, not the nearest', () => {
+      // With no anchor there is no history to window against, and a loop's
+      // start and end are the same place — a fix taken before the walker has
+      // moved is a few metres from both 0 m and the full route length, and
+      // noise decides which is nearer. Taking the nearest reported someone who
+      // had not yet set off as having finished.
+      const start = locateOnRoute([0, 0.00004], OUT_AND_BACK, loopCum)
+      expect(start.alongM).toBeLessThan(50)
+
+      // And it is not simply "always the start": a fix that is only acceptably
+      // close further along still matches there.
+      expect(locateOnRoute(AMBIGUOUS, OUT_AND_BACK, loopCum).alongM).toBeCloseTo(556, 0)
+    })
+
+    it('stays on the outbound leg when anchored to where the walker was', () => {
+      // 540 m in, which is where someone at 557 m was a moment ago.
+      const at = locateOnRoute(AMBIGUOUS, OUT_AND_BACK, loopCum, 540)
+      expect(at.alongM).toBeCloseTo(556, 0)
+      expect(at.alongM).toBeLessThan(total * 0.4)
+    })
+
+    it('advances monotonically along a whole loop rather than jumping legs', () => {
+      // Walk the loop at 20 m steps, feeding each match back as the next
+      // anchor, exactly as FollowMode does.
+      //
+      // Each fix is nudged 4.45 m north — a constant bias well inside city GPS
+      // error, and the thing that makes this test bite. Sampling points exactly
+      // on the line proves nothing: the leg you are on is then 0 m away and the
+      // other is 7.8 m away, so even the unanchored projection gets it right.
+      // The bug only appears once a reading is closer to the *other* leg than
+      // to the one the walker is actually on, which is the ordinary condition,
+      // not the exotic one.
+      const NOISE_DEG = 0.00004
+      const walk = (anchored) => {
+        const seen = []
+        let anchor = null
+        for (let d = 0; d <= total; d += 20) {
+          const p = pointAtDistance(OUT_AND_BACK, d, loopCum)
+          const at = locateOnRoute(
+            [p.lon, p.lat + NOISE_DEG], OUT_AND_BACK, loopCum, anchored ? anchor : null,
+          )
+          anchor = at.alongM
+          seen.push(at.alongM)
+        }
+        return seen
+      }
+
+      const seen = walk(true)
+      for (let i = 1; i < seen.length; i += 1) {
+        expect(seen[i], `went backwards at step ${i}`).toBeGreaterThanOrEqual(seen[i - 1] - 1)
+      }
+      // The walk stops at the last whole 20 m step, not exactly at the end.
+      expect(seen[seen.length - 1]).toBeGreaterThan(total - 25)
+
+      // And the same walk unanchored does go backwards — so this test is
+      // measuring the anchor rather than the geometry being easy.
+      const unanchored = walk(false)
+      const jumped = unanchored.some((v, i) => i > 0 && v < unanchored[i - 1] - 1)
+      expect(jumped, 'the unanchored walk should read backwards').toBe(true)
+    })
+
+    it('relocks when the position is genuinely nowhere near the anchor', () => {
+      // Someone who left the route and rejoined it further on must not be held
+      // to a stale anchor — that would be the mirror of the bug being fixed.
+      const far = pointAtDistance(OUT_AND_BACK, total * 0.75, loopCum)
+      const at = locateOnRoute([far.lon, far.lat], OUT_AND_BACK, loopCum, 0)
+      expect(at.alongM).toBeCloseTo(total * 0.75, 0)
+    })
+  })
+
   it('survives a duplicated vertex, which is a zero-length segment', () => {
     const withDupe = [
       [0, 0],

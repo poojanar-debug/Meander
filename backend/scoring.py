@@ -410,7 +410,10 @@ def clip_term_for_route(points: Sequence[LatLon], cache: Cache | None = None) ->
         return ClipTerm(None, 0.0, 0, 0)
 
     keys = [segment_key(s.point.lat, s.point.lon) for s in samples]
-    rows = cache.get_segment_scores(keys)
+    # Pinned to the active variant. The table at the top of this module records
+    # variants disagreeing by up to 0.6 on the same imagery, which is larger
+    # than most of the differences between routes this term exists to express.
+    rows = cache.get_segment_scores(keys, variant=ACTIVE_PROMPT_VARIANT)
 
     total = float(segment_lengths_m(points).sum()) or 1.0
     # Each sample stands for the stretch of route around it.

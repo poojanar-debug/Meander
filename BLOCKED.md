@@ -931,3 +931,79 @@ keeps every promise §9 made: no coordinate in the bar, nothing booted on reload
 Not done here because it changes `decodeState`'s contract, which the permalink
 round-trip suite pins, and this session was scoped to the two defects above.
 
+
+---
+
+## 12 · ~~Four findings from the review round were left unfixed~~ — RESOLVED
+
+All four are now done, in the four commits named below. Kept rather than
+deleted because what each one was, and what it measured, is the reason the
+fixes look the way they do.
+
+### The route cache grew without bound — RESOLVED (`b64924f`)
+
+**Deleting rows does not shrink a SQLite file, and in WAL mode it grows it.**
+Measured here: 200 expired route payloads occupied 6,086,136 bytes, and after
+`DELETE`-ing all 200 the file plus its WAL was **8,012,632** — 1.9 MB larger
+for holding nothing. `VACUUM` alone did not help either, because the pages it
+rewrites go to the WAL too. Checkpoint, VACUUM, checkpoint took the same file
+to **73,728 bytes**.
+
+`purge_expired_routes` had exactly one caller, at startup, so between restarts
+an expired row went only when its exact key was asked for again — and a key
+nobody asks for again is precisely the kind that expires. `data/cache.db` is
+baked into the image with no volume mount, so this filled the container's
+writable layer on a 12 GB VM.
+
+Now a sweep every 50 writes, a 500-row ceiling with oldest-first eviction, and
+a reclaim once 100 rows have gone. That last threshold is counted **across**
+sweeps: comparing one sweep's yield against it meant it was never reached and
+nothing was ever reclaimed, which is this fix quietly not working. It took
+watching the file size rather than the row count to notice.
+
+Verified: 200 expired writes settle at 73,728 bytes, and 1,400 live writes hold
+at exactly 500 rows and 7.27 MB rather than growing.
+
+### The JSON transport's error shapes — RESOLVED (`abe9410`)
+
+A deadline with nothing ready returned 502 `upstream` because the loop read
+only `done` and dropped the `error` event; SSE said `timeout` for the identical
+request. Non-`RoutingError` exceptions escaped as `text/plain` 500 rather than
+the envelope `frontend/src/api/client.js` parses — there is now an
+`@app.exception_handler(Exception)`. And the JSON path is counted in
+`_open_streams` and checks `_shutting_down`, so a JSON request in flight is no
+longer invisible to the drain at SIGTERM.
+
+### `access_segments` was a dead table — RESOLVED by deletion (`b64924f`)
+
+The barrier work was the obvious candidate to give it a purpose and did not.
+Barriers are fetched per request over a bbox and memoised by the whole-route
+cache in front of them; a segment-level barrier cache would have to record
+"this cell was surveyed and had nothing" for every cell in the area, because a
+missing row is otherwise indistinguishable from an unsurveyed one — the exact
+ambiguity this project refuses everywhere else. That is a design, not a wiring
+job, and the table sitting there was an invitation to wire it up wrongly.
+
+Dropping it needed `SCHEMA_VERSION` 4, and a mismatch is fatal rather than
+silently overstamped — so this also added the migration path that was missing.
+3 → 4 drops the table; a version with no step is refused with an instruction to
+delete the file, which for a cache costs a recomputation rather than data. The
+committed `data/cache.db` was migrated in the same commit, with all 146 segment
+scores intact.
+
+### Presentational duplication in the stylesheet — RESOLVED (`6919917`)
+
+The pill three times, the meter three times, the dash swatch four times, and
+`.score` / `.scores` differing by one character while setting different meter
+geometry. 44 fewer declarations; `.metric` and `.scorelist` cannot be confused.
+
+Pixel-identical was **measured**: diffing the live app compares the fixtures as
+much as the CSS, so the stylesheet was probed directly — one synthetic element
+per class in a fixed container, 26 probes across both themes, 35 computed
+properties each. 52 probes, zero differences.
+
+Worth recording that the measurement went wrong once first: the service worker
+is cache-first, so a persisted Chrome profile served the *previous* build's
+shell and the probe compared a build against itself. A fresh profile and
+`Network.setBypassServiceWorker` fixed it — and it is a fair demonstration of
+why the worker's version had to start tracking contents rather than filenames.

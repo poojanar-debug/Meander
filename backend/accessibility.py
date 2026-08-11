@@ -78,6 +78,22 @@ REJECTED_SMOOTHNESS = frozenset(
 
 REJECTED_BARRIERS = frozenset({"GATE", "STILE", "TURNSTILE", "KISSING_GATE"})
 
+# Barrier values that mean "there is nothing in the way here". Named rather than
+# inline in assess_barrier() so enrich.py can ask Overpass for exactly the values
+# this module has an opinion about — see BARRIER_VALUES_WITH_A_VERDICT.
+ACCEPTED_BARRIERS = frozenset({"NO", "NONE", "ENTRANCE"})
+
+# Every barrier value that changes an answer. Anything outside this set assesses
+# to UNKNOWN, and an UNKNOWN barrier span produces no finding and does not enter
+# coverage — coverage is surface and smoothness only — so it has no effect on
+# the response at all.
+#
+# That is what makes it safe for the Overpass query to ask only for these, and
+# the reason the set is derived here rather than written out in a query string:
+# adding a value to REJECTED_BARRIERS has to widen the question automatically,
+# or the engine would start rejecting something nobody is fetching any more.
+BARRIER_VALUES_WITH_A_VERDICT = REJECTED_BARRIERS | ACCEPTED_BARRIERS
+
 # highway=steps, plus GraphHopper's road_class spelling of it.
 REJECTED_ROAD_CLASSES = frozenset({"STEPS"})
 
@@ -126,25 +142,48 @@ class RouteAccessibility:
     pass_fraction: float = 0.0
     fail_fraction: float = 0.0
     unknown_fraction: float = 1.0
+    # Whether anything was actually asked about barriers. False means no source
+    # was consulted — not that none were found. The two are different claims and
+    # the sentence below has to make only the one that is true.
+    barriers_checked: bool = False
 
     @property
     def is_blocked(self) -> bool:
         return self.verdict is Verdict.FAIL
 
     def sentence(self) -> str:
-        """The confidence sentence, rendered verbatim by the frontend."""
+        """The confidence sentence, rendered verbatim by the frontend.
+
+        The subject of the sentence is the honest part. "Accessibility data"
+        names every dimension this engine has constraints for — surface,
+        smoothness, steps, gradient and barriers — and claims a percentage of
+        the route was checked against all of them. When no barrier data reached
+        the assessment, that claim covers a dimension nothing looked at, and the
+        one it hides is the one the project exists for: a gate or a stile stops
+        a wheelchair dead where a rough surface only slows it.
+
+        So the sentence narrows to what was measured, and says plainly what was
+        not. Coverage itself is unaffected either way — it is computed from
+        surface and smoothness alone, which is why "Surface data" is the honest
+        subject for that number.
+        """
         pct = round(self.coverage * 100)
         if self.coverage < VERY_LOW_CONFIDENCE_THRESHOLD:
-            return (
-                f"Accessibility data covers only {pct}% of this route. "
+            body = (
+                f"{self._subject()} covers only {pct}% of this route. "
                 "Most of it is unverified — do not rely on it."
             )
-        if self.coverage < LOW_CONFIDENCE_THRESHOLD:
-            return (
-                f"Accessibility data covers {pct}% of this route; "
+        elif self.coverage < LOW_CONFIDENCE_THRESHOLD:
+            body = (
+                f"{self._subject()} covers {pct}% of this route; "
                 "treat the remainder as unverified."
             )
-        return f"Accessibility data covers {pct}% of this route."
+        else:
+            body = f"{self._subject()} covers {pct}% of this route."
+        return body if self.barriers_checked else f"{body} Gates and stiles were not checked."
+
+    def _subject(self) -> str:
+        return "Accessibility data" if self.barriers_checked else "Surface data"
 
 
 # --- per-value constraint checks ------------------------------------------
@@ -182,7 +221,7 @@ def assess_barrier(value: Any) -> Verdict:
     key = normalise(value)
     if key in REJECTED_BARRIERS:
         return Verdict.FAIL
-    if key in {"NO", "NONE", "ENTRANCE"}:
+    if key in ACCEPTED_BARRIERS:
         return Verdict.PASS
     log.info("unrecognised_barrier", extra={"value": key})
     return Verdict.UNKNOWN
@@ -341,10 +380,16 @@ def assess_route(
     grants a PASS.
     """
     details = details or {}
+    # None means nobody looked; a list — including an empty one — means a source
+    # was consulted and this is what it said. Only the second licenses the
+    # sentence to stop disclaiming barriers.
+    barrier_spans = (osm_tags or {}).get("barrier")
+    barriers_checked = barrier_spans is not None
+
     lengths = segment_lengths_m(points)
     total = float(lengths.sum())
     if total <= 0 or len(points) < 2:
-        return RouteAccessibility(Verdict.UNKNOWN, [], 0.0, 0.0, 0.0, 1.0)
+        return RouteAccessibility(Verdict.UNKNOWN, [], 0.0, 0.0, 0.0, 1.0, barriers_checked)
 
     findings: list[Finding] = []
 
@@ -358,7 +403,7 @@ def assess_route(
         points, details.get("smoothness"), assess_smoothness, "smoothness"
     )
     barrier_weighted, barrier_findings = _span_verdicts(
-        points, (osm_tags or {}).get("barrier"), assess_barrier, "barrier"
+        points, barrier_spans, assess_barrier, "barrier"
     )
     findings.extend(steps_findings)
     findings.extend(surface_findings)
@@ -403,4 +448,5 @@ def assess_route(
         pass_fraction=round(pass_fraction, 4),
         fail_fraction=round(fail_fraction, 4),
         unknown_fraction=round(max(0.0, 1.0 - coverage), 4),
+        barriers_checked=barriers_checked,
     )

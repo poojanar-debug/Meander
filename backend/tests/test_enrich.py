@@ -9,21 +9,27 @@ golden hour are derived from it and a sign error would be invisible. Second,
 from __future__ import annotations
 
 import math
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import pytest
 
+from backend.accessibility import BARRIER_VALUES_WITH_A_VERDICT
 from backend.config import TEST_LOCATIONS_BY_SLUG
 from backend.enrich import (
     DEPARTURE_HORIZON_H,
     DEPARTURE_STEP_MIN,
+    OVERPASS_MAX_RESULTS,
     REST_STOP_CORRIDOR_M,
     AirQuality,
+    OverpassNodes,
+    _bbox,
+    barrier_spans_on_route,
     best_departure,
     fetch_air_quality,
     fetch_cloud_cover,
     fetch_rest_stop_nodes,
     golden_hour,
+    overpass_barrier_query,
     overpass_query,
     rest_stop_gap_score,
     rest_stops_on_route,
@@ -165,9 +171,46 @@ def test_route_heading_of_a_degenerate_route_is_zero() -> None:
 # ---------------------------------------------------------------------------
 
 
+
+def _recorded_air_series_start(point: LatLon) -> datetime:
+    """The first hour the recorded air-quality forecast for ``point`` covers.
+
+    These tests used to hard-code a date, which made them expire. A fixture
+    holds the forecast for the day it was recorded, and `_hour_index` now
+    matches against the series' own timestamps rather than assuming the series
+    starts today — so an hour outside it correctly answers ``None``, and any
+    re-recording moved the corpus out from under a literal date.
+
+    Reading the start from the fixture keeps the assertion about the wiring
+    instead of about the calendar, and it is the same file the code under test
+    will read a moment later.
+    """
+    import json
+
+    from backend import fixtures as fx
+    from backend.config import OPEN_METEO_AQ_URL
+
+    sig = fx.signature(
+        "GET",
+        OPEN_METEO_AQ_URL,
+        params={
+            "latitude": round(point.lat, 3),
+            "longitude": round(point.lon, 3),
+            "hourly": "pm2_5,european_aqi",
+            "forecast_days": 2,
+        },
+        headers={"Accept": "application/json"},
+    )
+    path = fx.fixture_path("open_meteo", sig)
+    if not path.exists():
+        pytest.skip(f"no recorded air-quality fixture for {point}")
+    stamps = json.loads(path.read_text())["response"]["json"]["hourly"]["time"]
+    return datetime.fromisoformat(stamps[0]).replace(tzinfo=UTC)
+
+
 @pytest.mark.asyncio
 async def test_air_quality_comes_back_as_a_score() -> None:
-    air = await fetch_air_quality(COLOMBO)
+    air = await fetch_air_quality(COLOMBO, _recorded_air_series_start(COLOMBO))
 
     assert air is not None
     assert 0.0 <= air.score <= 1.0
@@ -189,17 +232,27 @@ async def test_a_cleaner_place_scores_higher_than_a_dirtier_one() -> None:
     recorded day, the ordering holds at 18 of the 24 hours and fails at
     00-02 and 05-07.
 
-    Midday is both the clearest case and the one the original comment was
-    describing: Colombo 32, Amsterdam 60.
+    **And it no longer names a winner.** It asserted Colombo 32 against
+    Amsterdam 60, which is a fact about the air on the day the fixture was
+    recorded, not about this code — re-recording moved it to Colombo 27 against
+    Amsterdam 22 and the ordering simply reversed. Which of two cities is
+    cleaner on a given afternoon is not something a unit test can own.
+
+    What this module does own is the mapping: a lower European AQI must produce
+    a higher score, monotonically, on whichever readings it is handed. That is
+    asserted against two real recorded readings, in whatever order they fall.
     """
-    noon = datetime(2026, 8, 4, 12, tzinfo=UTC)
-    colombo = await fetch_air_quality(COLOMBO, noon)
-    amsterdam = await fetch_air_quality(VONDEL, noon)
+    colombo_noon = _recorded_air_series_start(COLOMBO) + timedelta(hours=12)
+    vondel_noon = _recorded_air_series_start(VONDEL) + timedelta(hours=12)
+    colombo = await fetch_air_quality(COLOMBO, colombo_noon)
+    amsterdam = await fetch_air_quality(VONDEL, vondel_noon)
 
     assert colombo is not None and amsterdam is not None
-    assert colombo.aqi == 32
-    assert amsterdam.aqi == 60
-    assert colombo.score > amsterdam.score
+    assert colombo.aqi is not None and amsterdam.aqi is not None
+    assert colombo.aqi != amsterdam.aqi, "two identical readings cannot order anything"
+
+    cleaner, dirtier = sorted((colombo, amsterdam), key=lambda a: a.aqi)
+    assert cleaner.score > dirtier.score
 
 
 @pytest.mark.asyncio
@@ -209,12 +262,31 @@ async def test_the_air_quality_score_tracks_the_hour_it_is_asked_about() -> None
     depart_at genuinely changes this number — which is also why Phase 1.7 had to
     put it in the route cache key.
     """
-    early = await fetch_air_quality(VONDEL, datetime(2026, 8, 4, 0, tzinfo=UTC))
-    midday = await fetch_air_quality(VONDEL, datetime(2026, 8, 4, 12, tzinfo=UTC))
+    start = _recorded_air_series_start(VONDEL)
+    early = await fetch_air_quality(VONDEL, start)
+    midday = await fetch_air_quality(VONDEL, start + timedelta(hours=12))
 
     assert early is not None and midday is not None
     assert early.aqi != midday.aqi
-    assert early.score > midday.score
+
+
+@pytest.mark.asyncio
+async def test_an_hour_outside_the_forecast_is_none_not_the_nearest_one() -> None:
+    """Replay used to serve last year's forecast as a current measurement.
+
+    A recorded fixture holds the forecast for the day it was recorded, and
+    indexing it by today's hour returned a real number with provenance
+    `recorded` and no degradation attached. Replay is a documented deployment
+    mode, so this was a live path, not a hypothetical one.
+
+    The same guard covers a departure past UTC midnight, which used to read
+    today's value for that hour — a reading up to 23 hours old presented as the
+    air quality for the walk.
+    """
+    start = _recorded_air_series_start(VONDEL)
+
+    assert await fetch_air_quality(VONDEL, start - timedelta(hours=1)) is None
+    assert await fetch_air_quality(VONDEL, start + timedelta(days=400)) is None
 
 
 @pytest.mark.asyncio
@@ -291,20 +363,26 @@ def test_the_corridor_is_narrow_enough_to_mean_something() -> None:
 
 @pytest.mark.asyncio
 async def test_recorded_overpass_data_finds_real_benches() -> None:
-    """Recorded live from Overpass on 2026-08-04 around Vondelpark.
+    """Recorded live from Overpass around Hyde Park.
 
     Goes through `enrich_context` rather than a single route, because that is
     what the request path does: one query over the union of every route's
     geometry. Querying per route here would need a fixture production never
     asks for.
+
+    **Moved off the Vondelpark scenario**, which is a 60-minute *bike* loop:
+    the box covering its three routes is about 8 x 7 km and holds 4,762 amenity
+    nodes, and Overpass answers that query with a 504 often enough that the
+    fixture could not be re-recorded at all. A 35-minute walk is the shape this
+    app is actually for, and it is the shape a hermetic suite should depend on.
     """
     from backend.enrich import enrich_context
     from backend.routing import route_accessible, route_fastest, route_nature
 
     routes = [
-        (await route_fastest(VONDEL, None, 60, "bike")).points,
-        (await route_nature(VONDEL, None, 60, "bike")).points,
-        (await route_accessible(VONDEL, None, 60, "bike")).points,
+        (await route_fastest(LONDON, None, 35, "foot")).points,
+        (await route_nature(LONDON, None, 35, "foot")).points,
+        (await route_accessible(LONDON, None, 35, "foot")).points,
     ]
     context = await enrich_context(routes)
 
@@ -414,3 +492,93 @@ async def test_best_departure_returns_none_when_nothing_can_be_measured() -> Non
 @pytest.mark.asyncio
 async def test_best_departure_of_a_degenerate_route_is_none() -> None:
     assert await best_departure([LONDON]) is None
+
+
+# ---------------------------------------------------------------------------
+# barriers
+# ---------------------------------------------------------------------------
+
+
+def _barrier(lat: float, lon: float, value: str = "gate") -> dict:
+    return {"lat": lat, "lon": lon, "tags": {"barrier": value}}
+
+
+def test_a_barrier_becomes_the_single_segment_it_sits_on() -> None:
+    """A gate is at a place, not along a stretch, and the span it produces has
+    to be the segment a walker is on when they reach it — not widened to the
+    step, the neighbourhood, or a radius. A FAIL anywhere blocks the whole
+    route, so one over-wide span is a route refused on evidence about somewhere
+    else."""
+    points = _line(LONDON, 400)
+    node = points[3]
+
+    spans = barrier_spans_on_route(points, [_barrier(node.lat, node.lon)])
+
+    assert spans == [(3, 4, "gate")]
+
+
+def test_a_barrier_off_the_route_is_dropped_rather_than_clamped() -> None:
+    """~55 m east of the line: evidence about a different path.
+
+    Offset in longitude, not latitude. `_line` runs due north, so nudging the
+    latitude walks *along* the route and lands on a later vertex — which is the
+    mistake this test caught in its own first draft.
+    """
+    points = _line(LONDON, 400)
+    away = points[3]
+
+    spans = barrier_spans_on_route(points, [_barrier(away.lat, away.lon + 0.0008)])
+
+    assert spans == []
+
+
+def test_the_barrier_value_reaches_the_engine_unfiltered() -> None:
+    """assess_barrier owns which values reject, pass and are unrecognised.
+    Filtering here would turn an unrecognised barrier into absence rather than
+    UNKNOWN — the one substitution this project must never make."""
+    points = _line(LONDON, 400)
+    node = points[2]
+
+    spans = barrier_spans_on_route(points, [_barrier(node.lat, node.lon, "cattle_grid")])
+
+    assert spans == [(2, 3, "cattle_grid")]
+
+
+def test_a_barrier_at_the_very_end_lands_on_the_last_segment() -> None:
+    """The final vertex has no segment after it; clamping keeps the span real."""
+    points = _line(LONDON, 400)
+    last = points[-1]
+
+    spans = barrier_spans_on_route(points, [_barrier(last.lat, last.lon)])
+
+    assert spans and spans[0][1] <= len(points) - 1
+
+
+def test_a_truncated_overpass_answer_cannot_support_a_claim() -> None:
+    """Overpass truncates by element id, which is uncorrelated with position
+    along a route — so a full page is a perforated sample of the bbox, not a
+    prefix of it. It degrades to the same None an unreachable Overpass gives."""
+    full = OverpassNodes([{"lat": 0, "lon": 0}] * OVERPASS_MAX_RESULTS, truncated=True)
+    partial = OverpassNodes([{"lat": 0, "lon": 0}], truncated=False)
+
+    assert full.usable is None
+    assert partial.usable == [{"lat": 0, "lon": 0}]
+
+
+def test_the_barrier_query_covers_the_same_bbox_as_the_amenity_one() -> None:
+    points = _line(LONDON, 800)
+    amenity = overpass_query(points)
+    barrier = overpass_barrier_query(points)
+
+    south, west, north, east = _bbox(points)
+    box = f"({south:.5f},{west:.5f},{north:.5f},{east:.5f})"
+    assert box in amenity and box in barrier
+    # Narrowed to the values the engine has a verdict for, and derived from its
+    # own constants so the two cannot drift. Asking for every barrier value
+    # returned over 2,000 nodes for one bbox — 603 bollards, 310 blocks, 181
+    # lift gates — which truncated, and a truncated answer supports no claim at
+    # all. Everything excluded assesses to UNKNOWN, which yields no finding and
+    # does not enter coverage, so it could not have changed a response.
+    for value in BARRIER_VALUES_WITH_A_VERDICT:
+        assert value.lower() in barrier
+    assert "bollard" not in barrier

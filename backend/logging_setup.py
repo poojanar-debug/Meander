@@ -1,14 +1,21 @@
 """Structured JSON logging to stdout.
 
 Coordinates, IP addresses and user agents must never reach a log line. The
-filter below is a backstop, not a licence to pass them in: it drops any record
-whose extra fields use a banned key.
+filter below is a backstop, not a licence to pass them in.
+
+It works two ways, because one is not enough. ``BANNED_FIELDS`` catches a
+structured field by its *key*, which is the deliberate case — somebody chose to
+log something. ``COORDINATE_SHAPED`` catches it by its *shape* in the message,
+the interpolated arguments and the traceback, which is the accidental case, and
+the accidental case is the one that reaches production: a library raising with a
+coordinate in its text does not consult a list of banned keys.
 """
 
 from __future__ import annotations
 
 import json
 import logging
+import re
 import sys
 from contextvars import ContextVar
 from datetime import UTC, datetime
@@ -59,6 +66,48 @@ def _could_carry_a_coordinate(value: Any) -> bool:
     return True
 
 
+# A decimal carrying four or more fractional digits. At London's latitude the
+# fourth decimal place is about 11 m, so anything at or beyond it is precise
+# enough to place a person on a street rather than in a city.
+#
+# This is the second half of the guarantee, and it is needed because the banned
+# list above can only see *keys*. Three ways a coordinate reaches a log line
+# without ever being a key, all measured against the real filter and formatter:
+#
+#   log.info("cannot find point %s", 51.507489)       -> the message
+#   log.exception(...) on GraphHopper's
+#     ValueError("Cannot find point 0: 51.507489,...") -> the traceback
+#   a pydantic ValidationError, which embeds `input_value=` -> the traceback
+#
+# All 60 call sites are clean today, so nothing leaks now. But two catch-all
+# handlers sit above everything in main.py, which makes the promise rest on
+# every exception raised anywhere in the process — including from libraries —
+# having a coordinate-free message. That is not a property this project can
+# hold, and row two above is exactly the string routing.py already refuses to
+# log as a structured field.
+#
+# Deliberately blunt, in the same direction as _could_carry_a_coordinate: a
+# genuine four-decimal number in a log line is redacted too. Nothing in this
+# codebase logs one — the structured fields are counts, statuses and enum
+# values — and a lost debugging digit is the cheaper mistake.
+COORDINATE_SHAPED = re.compile(r"-?\d+\.\d{4,}")
+
+
+def scrub(value: Any) -> Any:
+    """Replace anything coordinate-shaped inside ``value``, at any depth."""
+    if isinstance(value, str):
+        return COORDINATE_SHAPED.sub("<redacted>", value)
+    if isinstance(value, float):
+        return "<redacted>" if COORDINATE_SHAPED.fullmatch(repr(value)) else value
+    if isinstance(value, tuple):
+        return tuple(scrub(v) for v in value)
+    if isinstance(value, list):
+        return [scrub(v) for v in value]
+    if isinstance(value, dict):
+        return {k: scrub(v) for k, v in value.items()}
+    return value
+
+
 class PrivacyFilter(logging.Filter):
     """Strip banned keys rather than dropping the record — a log is still useful."""
 
@@ -66,6 +115,12 @@ class PrivacyFilter(logging.Filter):
         for key in list(record.__dict__):
             if key.lower() in BANNED_FIELDS and _could_carry_a_coordinate(record.__dict__[key]):
                 record.__dict__[key] = "<redacted>"
+        # The message is assembled from msg % args by getMessage(), which the
+        # loop above never touches — it only ever saw the extra fields.
+        if isinstance(record.msg, str):
+            record.msg = scrub(record.msg)
+        if record.args:
+            record.args = scrub(record.args)
         return True
 
 
@@ -94,9 +149,18 @@ class JsonFormatter(logging.Formatter):
                 json.dumps(value)
             except (TypeError, ValueError):
                 value = repr(value)
-            payload[key] = value
+            # Scrubbed here as well as in the filter, because a banned key is
+            # not the only way a coordinate arrives: `extra={"start": 51.5074}`
+            # uses a key nobody thought to ban, and reached the output intact.
+            payload[key] = scrub(value)
         if record.exc_info:
-            payload["exc"] = self.formatException(record.exc_info)
+            # A traceback is free text from anywhere in the process, including
+            # libraries. It is the single most likely place for a coordinate to
+            # appear without anyone here having chosen to log one.
+            payload["exc"] = scrub(self.formatException(record.exc_info))
+        # `ts` is excluded on purpose: an ISO timestamp ends in fractional
+        # seconds, which are coordinate-shaped and would be redacted, and a log
+        # line with no time on it is not worth the trade.
         return json.dumps(payload, separators=(",", ":"))
 
 

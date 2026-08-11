@@ -18,6 +18,7 @@ import ShareButton from './components/ShareButton.jsx'
 import TakeItWithYou from './components/TakeItWithYou.jsx'
 import TripBar from './components/TripBar.jsx'
 import { announceRoutes, announceSelection, effectiveMode } from './lib/format.js'
+import { haversineM } from './lib/follow.js'
 import { applyTheme, initialTheme, readStoredTheme, storeTheme, systemTheme } from './lib/theme.js'
 import { cacheAgeMs, formatCacheAge } from './lib/offline.js'
 import { useCacheAge, useOnline } from './lib/offlineStore.js'
@@ -252,9 +253,20 @@ export default function App() {
   const aboutRef = useRef(null)
   const online = useOnline()
 
+  // The straight line to the destination, which is what resolves `auto` once
+  // there is one — the dial does not describe a trip whose ends are both fixed.
+  // Null for a loop, which is what puts effectiveMode back on the time ladder.
+  const straightLineM = useMemo(
+    () =>
+      state.dest && state.origin
+        ? haversineM([state.origin.lon, state.origin.lat], [state.dest.lon, state.dest.lat])
+        : null,
+    [state.origin, state.dest],
+  )
+
   const mode = useMemo(
-    () => effectiveMode(state.mode, state.minutes),
-    [state.mode, state.minutes],
+    () => effectiveMode(state.mode, state.minutes, straightLineM),
+    [state.mode, state.minutes, straightLineM],
   )
 
   const cached = useMemo(() => cacheStamp(state.routes), [state.routes])

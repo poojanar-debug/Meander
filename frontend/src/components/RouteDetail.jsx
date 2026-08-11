@@ -158,27 +158,27 @@ export default function RouteDetail({
 
       <section className="detail__section">
         <h4 className="detail__h">What this route scores</h4>
-        <dl className="scores">
+        <dl className="scorelist">
           {SCORE_ROWS.map((row) => {
             const value = route.scores?.[row.key]
             const measured = typeof value === 'number'
             return (
-              <div className="scores__row" key={row.key}>
+              <div className="scorelist__row" key={row.key}>
                 <dt>{row.label}</dt>
                 {measured ? (
                   <>
-                    <dd className="scores__track" aria-hidden="true">
+                    <dd className="scorelist__track" aria-hidden="true">
                       <span
-                        className="scores__fill"
+                        className="scorelist__fill"
                         style={{ width: `${Math.round(value * 100)}%` }}
                       />
                     </dd>
-                    <dd className="scores__value tabular">{fmtPct(value)}</dd>
+                    <dd className="scorelist__value tabular">{fmtPct(value)}</dd>
                   </>
                 ) : (
                   // Spans the bar and the number: "not measured" is a sentence,
                   // not a value, and must never look like an empty bar.
-                  <dd className="scores__unmeasured">not measured</dd>
+                  <dd className="scorelist__unmeasured">not measured</dd>
                 )}
               </div>
             )

@@ -26,14 +26,23 @@ export function usingMockApi() {
   return isMock
 }
 
-/** Build the request body. `destination` is omitted entirely for a loop, not sent as null. */
+/**
+ * Build the request body. `destination` is omitted entirely for a loop, not sent as null.
+ *
+ * `minutes` is omitted the other way round — for a trip *with* a destination,
+ * where the time dial describes nothing. Sending it made the dial's position
+ * part of a request whose answer it cannot change, and the backend keys its
+ * route cache on the body: the same two places at 30 and at 35 minutes were two
+ * cache rows holding identical payloads, so every nudge of the dial re-spent a
+ * full set of routing credits on an answer already in the database.
+ */
 export function buildRouteRequest({ origin, dest, minutes, mode, objectives, departAt }) {
   const body = {
     origin: { lat: origin.lat, lon: origin.lon },
-    minutes,
     mode,
     objectives,
   }
+  if (!dest) body.minutes = minutes
   if (dest) body.destination = { lat: dest.lat, lon: dest.lon }
   if (departAt) body.depart_at = departAt
   return body
