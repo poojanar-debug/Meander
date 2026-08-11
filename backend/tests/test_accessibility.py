@@ -346,7 +346,13 @@ def test_a_fully_tagged_passable_route_passes_with_full_coverage() -> None:
     assert result.verdict is Verdict.PASS
     assert result.coverage == pytest.approx(1.0, abs=0.02)
     assert result.unknown_fraction == pytest.approx(0.0, abs=0.02)
-    assert result.sentence() == "Accessibility data covers 100% of this route."
+    # **Changed sentence.** No osm_tags were passed, so nothing was asked about
+    # barriers, and the sentence now says so rather than claiming a percentage
+    # of "accessibility data" that covers a dimension nobody looked at. The
+    # number is unchanged: coverage has always been surface and smoothness.
+    assert result.sentence() == (
+        "Surface data covers 100% of this route. Gates and stiles were not checked."
+    )
 
 
 def test_partial_tagging_produces_partial_coverage() -> None:
@@ -367,7 +373,9 @@ def test_the_confidence_sentence_escalates_as_coverage_falls() -> None:
     low = assess_route(points, _flat(len(points)),
                        details={"surface": [(0, 12, "ASPHALT")]})
 
-    assert high.sentence().endswith("of this route.")
+    # Ends with the barrier disclaimer now; the escalation is what is under test.
+    assert "of this route" in high.sentence()
+    assert "do not rely on it" not in high.sentence()
     assert "do not rely on it" in low.sentence()
     assert "only" in low.sentence()
 
@@ -483,3 +491,38 @@ def test_the_other_objectives_do_not_get_the_accessible_warning(tmp_cache_db) ->
                    elevations=_flat(len(points)), details={}, synthetic_upstream=False)
 
     assert _scored_route("fastest", "Fastest", raw).status_note is None
+
+
+def test_the_sentence_says_which_dimensions_were_actually_examined() -> None:
+    """"Accessibility data" claims every constraint this engine has was checked.
+
+    Barriers are one of them, and the one the project exists for: a gate stops a
+    wheelchair dead where a rough surface only slows it. So the subject of the
+    sentence narrows to what was measured whenever no barrier source was
+    consulted, and widens back the moment one is — including when that source
+    looked and found nothing, which is a real finding rather than an absence.
+    """
+    points = _line(1000)
+    details = {"surface": [(0, 60, "ASPHALT")], "smoothness": [(0, 60, "good")]}
+
+    unchecked = assess_route(points, _flat(len(points)), details=details)
+    assert unchecked.barriers_checked is False
+    assert unchecked.sentence() == (
+        "Surface data covers 100% of this route. Gates and stiles were not checked."
+    )
+
+    # An empty list is "we looked and found none" — not the same as None.
+    checked = assess_route(points, _flat(len(points)), details=details, osm_tags={"barrier": []})
+    assert checked.barriers_checked is True
+    assert checked.sentence() == "Accessibility data covers 100% of this route."
+
+
+def test_a_barrier_source_that_could_not_be_reached_is_not_a_clean_route() -> None:
+    """The failure mode this guards: an Overpass timeout becoming "no barriers"."""
+    points = _line(1000)
+    details = {"surface": [(0, 60, "ASPHALT")], "smoothness": [(0, 60, "good")]}
+
+    failed = assess_route(points, _flat(len(points)), details=details, osm_tags={"barrier": None})
+
+    assert failed.barriers_checked is False
+    assert "Gates and stiles were not checked." in failed.sentence()

@@ -353,8 +353,10 @@ def test_scoring_method_becomes_clip_once_segments_are_cached(tmp_cache_db) -> N
 
     assert route.scoring_method == "clip"
     # confidence_note is the accessibility coverage sentence, not a scoring one:
-    # the scoring path is stated separately by scoring_method.
-    assert "Accessibility data covers" in route.confidence_note
+    # the scoring path is stated separately by scoring_method. The subject is
+    # "Surface data" wherever no barrier source was consulted — asserted loosely
+    # here because which subject is correct is test_accessibility.py's business.
+    assert "covers" in route.confidence_note and "of this route" in route.confidence_note
 
 
 def test_scoring_method_is_geometry_only_without_cached_segments(tmp_cache_db) -> None:
