@@ -218,12 +218,80 @@ def test_cached_points_produce_a_clip_score(cache: Cache) -> None:
     from backend.scoring import MAX_SAMPLE_POINTS, SAMPLE_SPACING_M
 
     for sample in sample_every(points, SAMPLE_SPACING_M, MAX_SAMPLE_POINTS):
-        cache.put_segment_score(sample.point.lat, sample.point.lon, 0.8, 4, "clip", "v3_nature")
+        cache.put_segment_score(sample.point.lat, sample.point.lon, 0.8, 4, "clip",
+                                ACTIVE_PROMPT_VARIANT)
 
     term = clip_term_for_route(points, cache)
     assert term.score == pytest.approx(0.8)
     assert term.coverage > 0.9
     assert term.points_scored == term.points_sampled
+
+
+def test_a_score_from_another_variant_is_unscored_not_borrowed(cache: Cache) -> None:
+    """**Changed behaviour.** This route used to be seeded with `v3_nature`,
+    read back while the active variant was `v2_plain`, and asserted to score
+    0.8 — pinning the defect.
+
+    The variant is on the row because, in this module's own words, changing
+    ACTIVE_PROMPT_VARIANT changes every score; the table above records variants
+    disagreeing by up to 0.6 on the same imagery. Nothing on the read path used
+    it. `put_segment_score` upserts on `segment_key` alone and `batch_score.py`
+    stops cleanly when the Mapillary budget runs out mid-run, so one interrupted
+    re-warm leaves a route's samples split across two variants — length-weighted
+    into a single number and labelled `scoring_method: "clip"`.
+
+    An off-variant row is *unscored*: it lowers coverage, which is a true
+    statement about how much of this route has been measured by the question
+    being asked, rather than biasing the answer with a different question's.
+    """
+    points = _line(HYDE, 900)
+    from backend.geometry import sample_every
+    from backend.scoring import MAX_SAMPLE_POINTS, SAMPLE_SPACING_M
+
+    for sample in sample_every(points, SAMPLE_SPACING_M, MAX_SAMPLE_POINTS):
+        cache.put_segment_score(sample.point.lat, sample.point.lon, 0.8, 4, "clip", "v3_nature")
+
+    term = clip_term_for_route(points, cache)
+
+    assert term.score is None
+    assert term.coverage == 0.0
+    assert term.points_scored == 0
+    # And it still knows it looked, which is what makes the coverage honest.
+    assert term.points_sampled > 0
+
+
+def test_an_interrupted_rewarm_does_not_blend_two_variants(cache: Cache) -> None:
+    """The half-and-half state batch_score.py leaves when its budget runs out."""
+    from backend.geometry import sample_every
+    from backend.scoring import MAX_SAMPLE_POINTS, SAMPLE_SPACING_M
+
+    points = _line(HYDE, 1200)
+    samples = sample_every(points, SAMPLE_SPACING_M, MAX_SAMPLE_POINTS)
+    half = len(samples) // 2
+    for sample in samples[:half]:
+        cache.put_segment_score(sample.point.lat, sample.point.lon, 0.9, 4, "clip",
+                                ACTIVE_PROMPT_VARIANT)
+    for sample in samples[half:]:
+        cache.put_segment_score(sample.point.lat, sample.point.lon, 0.3, 4, "clip", "v3_nature")
+
+    term = clip_term_for_route(points, cache)
+
+    # 0.9 from the half that answers this question, not a blend with 0.3.
+    assert term.score == pytest.approx(0.9)
+    assert 0.2 < term.coverage < 0.8
+
+
+def test_a_row_with_no_variant_at_all_is_unscored(cache: Cache) -> None:
+    """A row that does not say which question it answered cannot be counted as
+    answering this one."""
+    from backend.geometry import sample_every
+    from backend.scoring import MAX_SAMPLE_POINTS, SAMPLE_SPACING_M
+
+    points = _line(HYDE, 900)
+    for sample in sample_every(points, SAMPLE_SPACING_M, MAX_SAMPLE_POINTS):
+        cache.put_segment_score(sample.point.lat, sample.point.lon, 0.8, 4, "clip")
+
+    assert clip_term_for_route(points, cache).score is None
 
 
 def test_partial_coverage_is_reported_as_partial(cache: Cache) -> None:
@@ -233,7 +301,12 @@ def test_partial_coverage_is_reported_as_partial(cache: Cache) -> None:
     points = _line(HYDE, 1200)
     samples = sample_every(points, SAMPLE_SPACING_M, MAX_SAMPLE_POINTS)
     for sample in samples[: len(samples) // 2]:
-        cache.put_segment_score(sample.point.lat, sample.point.lon, 0.6, 3, "clip")
+        # **Now seeded with the active variant.** These rows used to be written
+        # with prompt_variant NULL and read back regardless, which is the
+        # behaviour being fixed: the request path counts only rows scored by the
+        # question it is asking.
+        cache.put_segment_score(sample.point.lat, sample.point.lon, 0.6, 3, "clip",
+                                ACTIVE_PROMPT_VARIANT)
 
     term = clip_term_for_route(points, cache)
     assert term.score == pytest.approx(0.6)
@@ -248,7 +321,8 @@ def test_a_point_with_no_usable_imagery_does_not_become_a_score(cache: Cache) ->
 
     points = _line(HYDE, 900)
     for sample in sample_every(points, SAMPLE_SPACING_M, MAX_SAMPLE_POINTS):
-        cache.put_segment_score(sample.point.lat, sample.point.lon, None, 1, "clip")
+        cache.put_segment_score(sample.point.lat, sample.point.lon, None, 1, "clip",
+                                ACTIVE_PROMPT_VARIANT)
 
     term = clip_term_for_route(points, cache)
     assert term.score is None

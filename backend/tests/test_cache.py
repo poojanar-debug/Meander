@@ -103,3 +103,73 @@ def test_updated_at_is_written(cache: Cache) -> None:
     before = cache.get_segment_scores([key])[key].updated_at
     time.sleep(0.001)
     assert before
+
+
+# ---------------------------------------------------------------------------
+# expiry that cannot be read
+# ---------------------------------------------------------------------------
+
+
+def test_a_naive_expiry_is_a_miss_not_a_five_hundred(cache: Cache) -> None:
+    """`datetime.fromisoformat` parses an offset-free timestamp happily and
+    returns a naive datetime; comparing that to an aware now() raises
+    TypeError, not ValueError. Only ValueError was caught, so it escaped
+    run_in_threadpool, was not a RoutingError, and became an un-enveloped 500 —
+    for that cache key, on every request, until someone deleted the row by hand.
+    """
+    cache.put_route("k", {"routes": []}, ttl_s=3600)
+    with cache.conn as conn:
+        conn.execute(
+            "UPDATE route_cache SET expires_at = ? WHERE cache_key = ?",
+            ("2099-01-01T01:00:00", "k"),
+        )
+
+    assert cache.get_route("k") is None
+    # And the row is gone, so the next request is a clean miss rather than the
+    # same failure again.
+    assert cache.get_route("k") is None
+    with cache.conn as conn:
+        remaining = conn.execute(
+            "SELECT COUNT(*) AS n FROM route_cache WHERE cache_key = 'k'"
+        ).fetchone()["n"]
+    assert remaining == 0
+
+
+def test_a_garbage_expiry_is_also_a_miss(cache: Cache) -> None:
+    cache.put_route("k", {"routes": []}, ttl_s=3600)
+    with cache.conn as conn:
+        conn.execute("UPDATE route_cache SET expires_at = 'tomorrow' WHERE cache_key = 'k'")
+
+    assert cache.get_route("k") is None
+
+
+def test_purge_removes_rows_whose_expiry_is_the_wrong_shape(cache: Cache) -> None:
+    """The sweep compares strings, which is only correct while every value has
+    the same shape. An offset-free row sorts against a string two characters
+    longer and can outlive its own expiry."""
+    cache.put_route("good", {"routes": []}, ttl_s=3600)
+    cache.put_route("naive", {"routes": []}, ttl_s=3600)
+    with cache.conn as conn:
+        conn.execute(
+            "UPDATE route_cache SET expires_at = '2099-01-01T01:00:00' WHERE cache_key = 'naive'"
+        )
+
+    removed = cache.purge_expired_routes()
+
+    assert removed == 1
+    assert cache.get_route("good") is not None
+
+
+def test_expired_rows_are_not_counted_as_cached(cache: Cache) -> None:
+    """/api/health reported a cache bigger than anything it could serve from,
+    and since the only sweep ran at startup the overstatement grew for as long
+    as the process stayed up."""
+    cache.put_route("live", {"routes": []}, ttl_s=3600)
+    cache.put_route("dead", {"routes": []}, ttl_s=3600)
+    with cache.conn as conn:
+        conn.execute(
+            "UPDATE route_cache SET expires_at = '2000-01-01T00:00:00+00:00' "
+            "WHERE cache_key = 'dead'"
+        )
+
+    assert cache.route_cache_size() == 1
