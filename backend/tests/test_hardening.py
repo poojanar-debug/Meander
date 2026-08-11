@@ -120,13 +120,41 @@ def test_there_is_only_one_served_today_counter() -> None:
 
 def test_geocode_is_rate_limited(api_client, monkeypatch: pytest.MonkeyPatch) -> None:
     """Nominatim's policy is 1 req/s, enforced by banning this service's egress
-    address — so one script gets place search banned for every user."""
-    from backend.main import limiter
+    address — so one script gets place search banned for every user.
+    **Limited by the per-IP bucket, not the daily routing ceiling.** This used
+    to force a 429 by setting `daily_ceiling = 0`, which passed for the wrong
+    reason: geocode was spending the *routing* quota while making no
+    GraphHopper call, so 167 addresses x 12 burst tokens of
+    `GET /api/geocode?q=xx` could deny every user a route for the rest of the
+    day. It no longer touches that counter, and the bucket is what actually
+    bounds the load one caller can put on Nominatim.
+    """
+    from backend import main
+    from backend.ratelimit import RateLimiter
 
-    monkeypatch.setattr(limiter, "daily_ceiling", 0)
+    monkeypatch.setattr(main, "limiter",
+                        RateLimiter(capacity=0, refill_per_min=0.0, daily_ceiling=100))
     resp = api_client.get("/api/geocode?q=hyde+park")
     assert resp.status_code == 429
     assert resp.headers.get("Retry-After")
+
+
+def test_geocode_does_not_spend_the_daily_routing_allowance(
+    api_client, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The ceiling exists to keep the GraphHopper quota inside the free tier.
+    A place search spends no routing credits, and unlike a route it was never
+    refunded — so every search burned one of the 2,000 daily slots for good."""
+    from backend import main
+    from backend.ratelimit import RateLimiter
+
+    limiter = RateLimiter(capacity=50, refill_per_min=0.0, daily_ceiling=100)
+    monkeypatch.setattr(main, "limiter", limiter)
+
+    before = limiter.served_today()
+    api_client.get("/api/geocode?q=hyde+park")
+
+    assert limiter.served_today() == before
 
 
 # ---------------------------------------------------------------------------
