@@ -105,14 +105,27 @@ def build_profile(
 
     # Thinning moves the indices, so the spans are re-expressed against the
     # thinned arrays rather than left pointing into the full-resolution ones.
+    #
+    # No `+ 1` on the end index. `steep` already holds half-open *grid* spans:
+    # gradient j lies between grid[j] and grid[j+1], so a run ending at gradient
+    # i-1 reaches grid point i, and the loop above appends i + 1 as the exclusive
+    # end. Adding another one here shaded one extra sample beyond the ramp.
+    #
+    # Measured on an 800 m route with a 12% ramp from 300 m to 500 m: the span
+    # came back [15, 27] while distances_m[26] is 520.0, so the drawn band ran
+    # 300→520 m and the gradient over that last 20 m is 0.0%. Below ~2.4 km the
+    # scale is exactly 1.0, so it was a whole extra sample every time — and this
+    # module's stated invariant is that the drawing and the verdict never
+    # disagree.
     scale = (len(thin_grid) - 1) / max(1, len(grid) - 1)
-    scaled = [
-        [
-            max(0, min(len(thin_grid) - 1, int(round(a * scale)))),
-            max(1, min(len(thin_grid), int(round(b * scale)) + 1)),
-        ]
-        for a, b in steep
-    ]
+    scaled: list[list[int]] = []
+    for a, b in steep:
+        lo = max(0, min(len(thin_grid) - 1, int(round(a * scale))))
+        hi = max(0, min(len(thin_grid), int(round(b * scale))))
+        # Thinning can round both ends onto the same sample. A zero-width span
+        # draws nothing, which would silently drop a steep stretch from a long
+        # route rather than mark it, so it keeps the one sample it has.
+        scaled.append([lo, max(hi, lo + 1)])
 
     return ElevationProfile(
         distances_m=[round(float(d), 1) for d in thin_grid],

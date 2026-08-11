@@ -161,3 +161,47 @@ def test_steep_spans_stay_inside_the_thinned_arrays() -> None:
     n = len(profile.distances_m)
     for start, end in profile.steep_spans:
         assert 0 <= start < end <= n, f"span [{start}, {end}) escapes an array of {n}"
+
+
+def test_the_shaded_band_stops_where_the_ramp_stops() -> None:
+    """One sample too many was shaded, every time, on any route under ~2.4 km.
+
+    `steep` already holds half-open *grid* spans — gradient j lies between
+    grid[j] and grid[j+1], so a run ending at gradient i-1 reaches grid point i
+    and the exclusive end is i+1. The rescaling step then added a second +1.
+
+    Measured before the fix on exactly this route: `steep_spans == [[15, 27]]`
+    with `distances_m[26] == 520.0`, so the band ran 300→520 m while the
+    gradient over that last 20 m is 0.0%. This module's whole premise is that
+    the drawing and the verdict cannot disagree, and shading flat ground steep
+    is that disagreement.
+    """
+    points = _line(81, spacing_m=10.0)
+    # 12% from 300 m to 500 m; dead flat either side.
+    elevations = [0.0] * 30 + [i * 1.2 for i in range(21)] + [24.0] * 30
+
+    profile = build_profile(points, elevations)
+
+    assert profile is not None
+    assert profile.steep_spans == [[15, 26]]
+    start, end = profile.steep_spans[0]
+    assert profile.distances_m[start] == 300.0
+    assert profile.distances_m[end - 1] == 500.0
+
+
+def test_a_thinned_span_never_collapses_to_nothing() -> None:
+    """Rounding both ends onto one sample would draw nothing at all, dropping a
+    steep stretch from a long route rather than marking it."""
+    # Long enough that thinning is active, with a short ramp.
+    n = MAX_PROFILE_POINTS * 6
+    elevations = [0.0] * n
+    for i in range(100, 104):
+        elevations[i] = (i - 99) * 2.0
+    for i in range(104, n):
+        elevations[i] = 8.0
+
+    profile = build_profile(_line(n), elevations)
+
+    assert profile is not None
+    for start, end in profile.steep_spans:
+        assert end > start, "a span with no width draws nothing"
