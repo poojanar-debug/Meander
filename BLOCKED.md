@@ -2,8 +2,7 @@
 
 Things this run could not finish, what was tried, and what needs a human.
 
-**Five entries are open — §12, four findings from the review round that were
-not fixed; §5, a deliberate deferral with a list; §6, which
+**Four entries are open — §5, a deliberate deferral with a list; §6, which
 needs one credential only a human can supply; and §10 and §11, both found by
 agents attacking the fix for §9 rather than reviewing it, and both needing a
 decision about the privacy surface rather than a patch.**
@@ -935,88 +934,76 @@ round-trip suite pins, and this session was scoped to the two defects above.
 
 ---
 
-## 12 · Four findings from the review round were left unfixed — OPEN
+## 12 · ~~Four findings from the review round were left unfixed~~ — RESOLVED
 
-The review that produced this round listed 21 items. Seventeen are fixed on
-`review-fixes`; these four are not, and none of them is blocked on a decision —
-they are simply not done. Written here rather than left implicit, because a
-branch that fixes most of a list reads as though it fixed all of it.
+All four are now done, in the four commits named below. Kept rather than
+deleted because what each one was, and what it measured, is the reason the
+fixes look the way they do.
 
-### The route cache grows without bound and never reclaims space — OPEN
+### The route cache grew without bound — RESOLVED (`b64924f`)
 
-`purge_expired_routes` has exactly one caller, at startup. Between restarts,
-expired rows go only when their exact key is asked for again: there is no row
-cap, no periodic sweep, no `VACUUM` and no `wal_checkpoint(TRUNCATE)`.
-**Measured by the review: 200 expired route payloads occupy 5,586,944 bytes,
-and after `purge_expired_routes()` deleted all 200 rows the file grew to
-7,012,352 bytes.** `data/cache.db` is baked into the image with no volume
-mount, so this fills the container's writable layer on a 12 GB VM.
+**Deleting rows does not shrink a SQLite file, and in WAL mode it grows it.**
+Measured here: 200 expired route payloads occupied 6,086,136 bytes, and after
+`DELETE`-ing all 200 the file plus its WAL was **8,012,632** — 1.9 MB larger
+for holding nothing. `VACUUM` alone did not help either, because the pages it
+rewrites go to the WAL too. Checkpoint, VACUUM, checkpoint took the same file
+to **73,728 bytes**.
 
-Two of the three parts are done. `route_cache_size()` no longer counts expired
-rows, so `/api/health` has stopped overstating, and `close()` now closes every
-connection it handed out — leaked readers pin the WAL and prevent
-checkpointing, which was compounding the growth.
+`purge_expired_routes` had exactly one caller, at startup, so between restarts
+an expired row went only when its exact key was asked for again — and a key
+nobody asks for again is precisely the kind that expires. `data/cache.db` is
+baked into the image with no volume mount, so this filled the container's
+writable layer on a 12 GB VM.
 
-What is left is the reclamation itself: a sweep on a timer or every N writes, a
-row or byte ceiling with LRU eviction by `created_at`, and a `VACUUM` after a
-large purge. The growth curve is measurable on this VM and the number belongs
-in the comment.
+Now a sweep every 50 writes, a 500-row ceiling with oldest-first eviction, and
+a reclaim once 100 rows have gone. That last threshold is counted **across**
+sweeps: comparing one sweep's yield against it meant it was never reached and
+nothing was ever reclaimed, which is this fix quietly not working. It took
+watching the file size rather than the row count to notice.
 
-### The JSON transport's error shapes differ from SSE's — OPEN
+Verified: 200 expired writes settle at 73,728 bytes, and 1,400 live writes hold
+at exactly 500 rows and 7.27 MB rather than growing.
 
-Both measured by the review, side by side against the same requests:
+### The JSON transport's error shapes — RESOLVED (`abe9410`)
 
-- **A deadline with nothing ready returns 502 `kind: "upstream"`**, "No route
-  could be produced for that request." — `post_routes` ignores the `error`
-  event, so `payload` stays `None` and the generic 502 fires. SSE returns
-  `kind: "timeout"` with the right copy for the same request.
-- **Any non-`RoutingError` exception escapes as `text/plain` 500 "Internal
-  Server Error"**, not the `{"error": {"kind", "message"}}` envelope the
-  endpoint's own error handling exists to guarantee and that
-  `frontend/src/api/client.js` parses. There is no
-  `@app.exception_handler(Exception)`. SSE handles the same case correctly.
+A deadline with nothing ready returned 502 `upstream` because the loop read
+only `done` and dropped the `error` event; SSE said `timeout` for the identical
+request. Non-`RoutingError` exceptions escaped as `text/plain` 500 rather than
+the envelope `frontend/src/api/client.js` parses — there is now an
+`@app.exception_handler(Exception)`. And the JSON path is counted in
+`_open_streams` and checks `_shutting_down`, so a JSON request in flight is no
+longer invisible to the drain at SIGTERM.
 
-Also: the JSON path never checks `_shutting_down` and is not counted in
-`_open_streams`, so a JSON request in flight is not drained at SIGTERM.
+### `access_segments` was a dead table — RESOLVED by deletion (`b64924f`)
 
-### `access_segments` is a dead table and corrupt rows are immortal — OPEN
+The barrier work was the obvious candidate to give it a purpose and did not.
+Barriers are fetched per request over a bbox and memoised by the whole-route
+cache in front of them; a segment-level barrier cache would have to record
+"this cell was surveyed and had nothing" for every cell in the area, because a
+missing row is otherwise indistinguishable from an unsurveyed one — the exact
+ambiguity this project refuses everywhere else. That is a design, not a wiring
+job, and the table sitting there was an invitation to wire it up wrongly.
 
-`put_access_tags` / `get_access_tags` still have no callers outside the module
-and its own tests, and `get_access_tags` counts JSON-corrupt rows and logs a
-count without ever deleting them, so the same warning repeats forever.
+Dropping it needed `SCHEMA_VERSION` 4, and a mismatch is fatal rather than
+silently overstamped — so this also added the migration path that was missing.
+3 → 4 drops the table; a version with no step is refused with an instruction to
+delete the file, which for a cache costs a recomputation rather than data. The
+committed `data/cache.db` was migrated in the same commit, with all 146 segment
+scores intact.
 
-The review suggested the barrier work might give this table its purpose, and it
-did not. Barriers are fetched per request from Overpass and cached by the
-whole-route cache in front of them; a segment-level barrier cache would need to
-record "this cell was surveyed and had nothing" for every cell in the bbox,
-because a missing row is otherwise indistinguishable from an unsurveyed one —
-which is the exact ambiguity this project refuses everywhere else. That is a
-design, not a wiring job.
+### Presentational duplication in the stylesheet — RESOLVED (`6919917`)
 
-So the honest options remain the two the review named: build that design, or
-delete the table and its methods. Deleting means a `SCHEMA_VERSION` bump, and
-mismatches are now fatal rather than silently overstamped, so it also means
-migrating the committed `data/cache.db` in the same commit.
+The pill three times, the meter three times, the dash swatch four times, and
+`.score` / `.scores` differing by one character while setting different meter
+geometry. 44 fewer declarations; `.metric` and `.scorelist` cannot be confused.
 
-### Presentational duplication in the stylesheet — OPEN
+Pixel-identical was **measured**: diffing the live app compares the fixtures as
+much as the CSS, so the stylesheet was probed directly — one synthetic element
+per class in a fixed container, 26 probes across both themes, 35 computed
+properties each. 52 probes, zero differences.
 
-Three verified cases, none touched:
-
-- **The pill button exists three times** — `.preset`, `.chip`, `.hour` — same
-  intent, different `gap`, `font-size` and `padding`, with a byte-identical
-  pressed rule in all three.
-- **The score meter exists three times** — `.score__track`/`__fill` at 5 px,
-  `.scores__track`/`__fill` at 6 px, `.banner__progress`/`__bar` at 6 px. The
-  first two render the same three scores from an identical row shape at two
-  different bar heights.
-- **The dash swatch exists four times at three sizes** — `.chip__swatch`,
-  `.legend__line`, `.route__pattern`, `.detail__pattern`, all fed by the same
-  `swatchBackground()`.
-
-And `.score` / `.scores` are two blocks whose names differ by one character and
-whose element classes differ by the same character, so a typo applies the wrong
-meter geometry and is invisible in review.
-
-The work is to collapse each to one block with modifiers, rename the pair that
-cannot be told apart, and keep the rendered result pixel-identical with the
-25-check gate green.
+Worth recording that the measurement went wrong once first: the service worker
+is cache-first, so a persisted Chrome profile served the *previous* build's
+shell and the probe compared a build against itself. A fresh profile and
+`Network.setBypassServiceWorker` fixed it — and it is a fair demonstration of
+why the worker's version had to start tracking contents rather than filenames.
