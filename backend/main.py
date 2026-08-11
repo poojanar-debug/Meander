@@ -8,6 +8,7 @@ the response always states which scoring path produced its numbers.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import hashlib
 import importlib.util
 import json
@@ -1067,6 +1068,9 @@ async def _stream(req: RouteRequest, cache_key: str) -> AsyncIterator[str]:
     agen = route_events_with_deadline(req).__aiter__()
     finished: dict[str, Any] | None = None
     cached = False
+    # The in-flight pull, held across keepalive frames. See the loop below for
+    # why it is a task and not a bare await.
+    pending: asyncio.Task[dict[str, Any]] | None = None
 
     try:
         while True:
@@ -1080,14 +1084,38 @@ async def _stream(req: RouteRequest, cache_key: str) -> AsyncIterator[str]:
                     ),
                 })
                 return
-            try:
-                event = await asyncio.wait_for(agen.__anext__(), timeout=KEEPALIVE_S)
-            except TimeoutError:
+
+            # asyncio.wait, not asyncio.wait_for. wait_for *cancels* what it is
+            # waiting on when the timeout fires, and what it was waiting on here
+            # is the generator producing the answer — so the keepalive killed
+            # the request it exists to keep alive. The generator took the
+            # CancelledError at whatever await it was suspended on, and the next
+            # __anext__() then raised StopAsyncIteration, which this loop reads
+            # as a clean end of stream: the client got a truncated response with
+            # a `progress` event and no `done`, no error, and nothing cached.
+            #
+            # Measured on a three-event generator with a 300 ms middle stage
+            # against a 50 ms keepalive: the old loop delivered 1 of 3 events
+            # and reported success; the new one delivers 3 of 3 with 5
+            # keepalives in between. Any stage slower than KEEPALIVE_S triggers
+            # it, which is exactly the slow-Overpass case the keepalive was
+            # added for.
+            #
+            # asyncio.wait leaves a timed-out task running, so the same pull is
+            # still in flight on the next turn of the loop and is awaited again.
+            if pending is None:
+                pending = asyncio.ensure_future(agen.__anext__())
+            done, _ = await asyncio.wait({pending}, timeout=KEEPALIVE_S)
+            if not done:
                 # A comment frame. SSE clients ignore it; proxies see traffic.
                 yield ": keepalive\n\n"
                 continue
+            try:
+                event = pending.result()
             except StopAsyncIteration:
                 return
+            finally:
+                pending = None
 
             if event["type"] == "done":
                 finished = event["payload"]
@@ -1125,6 +1153,21 @@ async def _stream(req: RouteRequest, cache_key: str) -> AsyncIterator[str]:
         })
     finally:
         _open_streams -= 1
+        # Cancelling here is correct where cancelling on timeout was not: this
+        # runs only once nothing further will be read, so there is no work left
+        # to protect. Without it a pull still in flight outlives the stream and
+        # asyncio reports "Task was destroyed but it is pending".
+        #
+        # It has to be *awaited*, not just cancelled. cancel() only schedules
+        # the CancelledError; until the task has actually taken it the generator
+        # is still running, and aclose() on a running async generator raises
+        # "RuntimeError: aclose(): asynchronous generator is already running" —
+        # which the disconnect test caught, because a client hanging up mid-pull
+        # is precisely when this path runs.
+        if pending is not None:
+            pending.cancel()
+            with contextlib.suppress(BaseException):
+                await pending
         await agen.aclose()
 
 

@@ -138,6 +138,47 @@ async def test_a_long_silence_produces_a_comment_frame(
     assert any(f.startswith(": ") for f in frames), "expected a keepalive comment"
     # A comment frame must not look like an event to the client.
     assert not any(f.startswith(": ") and "data:" in f for f in frames)
+    # **Added.** This test passed against a loop that cancelled the generator on
+    # every keepalive: the comment frame it asserts was emitted, and the event
+    # behind it was destroyed. Asserting the silence is broken says nothing
+    # about whether the answer survived it, which is the only reason to break it.
+    assert [json.loads(f[6:]) for f in frames if f.startswith("data: ")] == [
+        {"type": "progress", "pct": 5, "text": "x", "segments_scored": 0}
+    ]
+
+
+@pytest.mark.asyncio
+async def test_a_keepalive_does_not_cancel_the_work_it_is_protecting(
+    tmp_cache_db, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The keepalive used to kill the request it exists to keep alive.
+
+    `asyncio.wait_for` cancels what it waits on when the timeout fires, and what
+    it waited on was the generator producing the answer. The generator took the
+    CancelledError at its current await, the next pull raised
+    StopAsyncIteration, and `_stream` read that as a clean end: the client got
+    the events before the slow stage, no `done`, no error, and nothing cached.
+
+    Three events with a slow middle stage, so more than one keepalive elapses
+    inside a single pull.
+    """
+    monkeypatch.setattr(main_mod, "KEEPALIVE_S", 0.05)
+
+    async def slow_middle(req, deadline_s=None):
+        yield {"type": "progress", "pct": 5, "text": "a", "segments_scored": 0}
+        await asyncio.sleep(0.3)
+        yield {"type": "progress", "pct": 60, "text": "b", "segments_scored": 0}
+        yield {"type": "done", "payload": {"routes": []}}
+
+    monkeypatch.setattr(main_mod, "route_events_with_deadline", slow_middle)
+
+    req = RouteRequest(origin=Point(lat=51.5, lon=-0.16), minutes=30)
+    frames = [f async for f in main_mod._stream(req, "k")]
+
+    events = [json.loads(f[6:]) for f in frames if f.startswith("data: ")]
+    assert [e["type"] for e in events] == ["progress", "progress", "done"]
+    # And the silence was still covered while that middle stage ran.
+    assert sum(1 for f in frames if f.startswith(": ")) >= 2
 
 
 # ---------------------------------------------------------------------------
