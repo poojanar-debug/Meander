@@ -583,31 +583,56 @@ h3 {
   flex-wrap: wrap;
   gap: var(--s2);
 }
-.preset {
+/* One pressable pill, three uses. `.preset` (first run), `.chip` (objectives
+   and units) and `.hour` (the departure strip) were three copies of the same
+   nine declarations with a byte-identical pressed rule at the end of each — so
+   a change to the pressed treatment had to be made three times and was one
+   oversight away from a control that looks unselected while being selected.
+
+   Grouped selectors rather than a `.pill` base class in the markup: the classes
+   are load-bearing elsewhere (gate.mjs's selector manifest matches `.chip`,
+   and the components name them directly), and this removes the duplication
+   without touching 27 call sites to gain the same rendering.
+
+   What differs stays below, per class, and it is only gap, padding and size.
+   Nothing here is normalised away — `.chip` really is 0.875rem where the other
+   two are --t-small (0.8125rem), and unifying it would silently reflow the
+   objective chips. */
+.preset,
+.chip,
+.hour {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
   /* Was 36px, and on the first-run path at that: the presets are the first
      controls a new user touches. */
   min-height: var(--target);
-  padding: var(--s2) var(--s4);
   border: 1px solid var(--rule-strong);
   border-radius: var(--r-pill);
   background: var(--raised);
   color: var(--ink);
   font: inherit;
-  font-size: var(--t-small);
   cursor: pointer;
 }
-.preset:hover {
-  border-color: var(--accent);
-  background: var(--sunken);
-}
-.preset[aria-pressed='true'] {
+.preset[aria-pressed='true'],
+.chip[aria-pressed='true'],
+.hour[aria-pressed='true'] {
   background: var(--brand-tint);
   border-color: var(--accent);
   box-shadow: inset 0 0 0 1px var(--accent);
   font-weight: 600;
+}
+/* `.chip` has never had a hover treatment and does not gain one here — that
+   would be a rendering change, and this refactor is required to make none. */
+.preset:hover,
+.hour:hover {
+  border-color: var(--accent);
+  background: var(--sunken);
+}
+
+.preset {
+  gap: 6px;
+  padding: var(--s2) var(--s4);
+  font-size: var(--t-small);
 }
 
 /* -------------------------------------------------------------- first run */
@@ -845,24 +870,9 @@ fieldset.chips legend {
   gap: var(--s2);
 }
 .chip {
-  display: inline-flex;
-  align-items: center;
   gap: var(--s2);
-  min-height: var(--target);
   padding: var(--s2) var(--s4);
-  border: 1px solid var(--rule-strong);
-  border-radius: var(--r-pill);
-  background: var(--raised);
-  font: inherit;
   font-size: 0.875rem;
-  cursor: pointer;
-  color: var(--ink);
-}
-.chip[aria-pressed='true'] {
-  background: var(--brand-tint);
-  border-color: var(--accent);
-  box-shadow: inset 0 0 0 1px var(--accent);
-  font-weight: 600;
 }
 /* Selection is fill + border + weight + this glyph. The glyph exists only when
    pressed; a permanent check that merely changed colour would make selection a
@@ -871,11 +881,20 @@ fieldset.chips legend {
   color: var(--ok-ink);
   font-weight: 700;
 }
+/* One dash swatch at three sizes, in four places, all fed by the same
+   swatchBackground(). The sizes differ and stay differing; what was duplicated
+   is the rounding and the refusal to flex. */
+.chip__swatch,
+.legend__line,
+.route__pattern,
+.detail__pattern {
+  border-radius: 2px;
+  flex: none;
+}
+
 .chip__swatch {
   width: 20px;
   height: 4px;
-  border-radius: 2px;
-  flex: none;
 }
 
 /* ---------------------------------------------------------------- banner */
@@ -901,16 +920,34 @@ fieldset.chips legend {
   flex: 1;
   min-width: 12rem;
 }
+/* One meter, three uses: the rail's per-score bar, the detail panel's, and the
+   banner's progress. All three were separate copies of "a rounded sunken track
+   with an accent fill clipped inside it", and the first two render *the same
+   three scores* from an identical row shape at two different bar heights.
+
+   The heights stay different — 5px in the rail, 6px in the detail panel and the
+   banner — because that is a real design decision about density, and this
+   refactor changes no rendering. What it removes is the three copies of how a
+   track and a fill are built. */
+.metric__track,
+.scorelist__track,
 .banner__progress {
-  width: 100%;
-  height: 6px;
   border-radius: 3px;
   background: var(--sunken);
   overflow: hidden;
 }
+.metric__fill,
+.scorelist__fill,
 .banner__bar {
   height: 100%;
   background: var(--accent);
+}
+
+.banner__progress {
+  width: 100%;
+  height: 6px;
+}
+.banner__bar {
   transition: width 250ms ease;
 }
 
@@ -1015,8 +1052,6 @@ fieldset.chips legend {
   display: inline-block;
   width: 28px;
   height: 3px;
-  border-radius: 2px;
-  flex: none;
 }
 .legend__pattern {
   color: var(--ink-2);
@@ -1142,8 +1177,6 @@ fieldset.chips legend {
   display: inline-block;
   width: 26px;
   height: 3px;
-  border-radius: 2px;
-  flex: none;
 }
 
 .badge {
@@ -1173,20 +1206,20 @@ fieldset.chips legend {
   gap: var(--s2);
   margin-top: 2px;
 }
-.score {
+.metric {
   display: flex;
   flex-direction: column;
   gap: 3px;
   min-width: 0;
 }
-.score__head {
+.metric__head {
   display: flex;
   justify-content: space-between;
   gap: var(--s1);
   font-size: var(--t-micro);
   color: var(--ink-2);
 }
-.score__none {
+.metric__none {
   font-style: italic;
   text-align: end;
 }
@@ -1199,29 +1232,24 @@ fieldset.chips legend {
    row that needs it, so every row grows together and the three tracks stay on
    one horizontal line. When no route has an unmeasured score, nothing matches
    and the head stays the single tight row §4.6 specifies. */
-.rail:has(.score__none) .score__head {
+.rail:has(.metric__none) .metric__head {
   /* Two lines at the inherited 1.5 line-height. Setting this in `em` keeps it
      tied to --t-micro rather than to a pixel guess. */
   min-height: 3em;
   align-items: flex-start;
 }
-.score__track {
+.metric__track {
   display: block;
   height: 5px;
-  border-radius: 3px;
-  background: var(--sunken);
-  overflow: hidden;
 }
-.score__fill {
+.metric__fill {
   display: block;
-  height: 100%;
-  background: var(--accent);
   border-radius: 3px;
 }
 /* A null score and a 0 score are different statements and must never render
    alike. `0` gets a real, empty track; `null` gets this hatch and the words
    "not measured" where the percentage would be. */
-.score__track--hatched {
+.metric__track--hatched {
   background-image: repeating-linear-gradient(
     45deg,
     var(--rule-strong) 0 2px,
@@ -1325,8 +1353,6 @@ fieldset.chips legend {
 .detail__pattern {
   width: 26px;
   height: 3px;
-  border-radius: 2px;
-  flex: none;
   align-self: center;
 }
 .detail__title {
@@ -1439,40 +1465,35 @@ fieldset.chips legend {
 
 /* full-width score meters in the detail panel */
 
-.scores {
+.scorelist {
   display: flex;
   flex-direction: column;
   gap: 6px;
   margin: 0;
 }
-.scores__row {
+.scorelist__row {
   display: grid;
   grid-template-columns: 5.5rem minmax(0, 1fr) 2.5rem;
   align-items: center;
   gap: var(--s2);
   font-size: var(--t-small);
 }
-.scores dt,
-.scores dd {
+.scorelist dt,
+.scorelist dd {
   margin: 0;
 }
-.scores__track {
+.scorelist__track {
   height: 6px;
-  border-radius: 3px;
-  background: var(--sunken);
-  overflow: hidden;
 }
-.scores__fill {
+.scorelist__fill {
   display: block;
-  height: 100%;
   border-radius: 3px;
-  background: var(--accent);
 }
-.scores__value {
+.scorelist__value {
   text-align: end;
 }
 /* Spans the bar and the number: "not measured" is a sentence, not a value. */
-.scores__unmeasured {
+.scorelist__unmeasured {
   grid-column: 2 / -1;
   color: var(--ink-2);
   font-style: italic;
@@ -1748,30 +1769,11 @@ fieldset.chips legend {
   gap: 6px;
 }
 .hour {
-  display: inline-flex;
-  align-items: center;
   gap: var(--s1);
-  min-height: var(--target);
   min-width: var(--target);
   padding: var(--s2) var(--s3);
-  border: 1px solid var(--rule-strong);
-  border-radius: var(--r-pill);
-  background: var(--raised);
-  color: var(--ink);
-  font: inherit;
   font-size: var(--t-small);
   font-variant-numeric: tabular-nums;
-  cursor: pointer;
-}
-.hour:hover {
-  border-color: var(--accent);
-  background: var(--sunken);
-}
-.hour[aria-pressed='true'] {
-  background: var(--brand-tint);
-  border-color: var(--accent);
-  box-shadow: inset 0 0 0 1px var(--accent);
-  font-weight: 600;
 }
 /* Out-of-daylight hours carry the moon as well as the darker fill. Tint alone
    would make daylight a colour-only signal, which the project forbids. */

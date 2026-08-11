@@ -111,20 +111,20 @@ export default function RouteRow({ route, selected, theme, units, cacheAgeMs, on
               const value = route.scores?.[row.key]
               const measured = typeof value === 'number'
               return (
-                <span className="score" key={row.key}>
-                  <span className="score__head">
+                <span className="metric" key={row.key}>
+                  <span className="metric__head">
                     <span>{row.label}</span>
-                    <span className={measured ? 'tabular' : 'score__none'}>
+                    <span className={measured ? 'tabular' : 'metric__none'}>
                       {measured ? fmtPct(value) : 'not measured'}
                     </span>
                   </span>
                   <span
-                    className={measured ? 'score__track' : 'score__track score__track--hatched'}
+                    className={measured ? 'metric__track' : 'metric__track metric__track--hatched'}
                     aria-hidden="true"
                   >
                     {measured && (
                       <span
-                        className="score__fill"
+                        className="metric__fill"
                         style={{ width: `${Math.round(value * 100)}%` }}
                       />
                     )}
