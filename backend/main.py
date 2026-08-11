@@ -442,7 +442,12 @@ def route_cache_key(req: RouteRequest) -> str:
         {
             "origin": origin,
             "destination": dest,
-            "minutes": req.minutes,
+            # None for a point-to-point trip, where the time budget is not an
+            # input to the answer. Keying on it there split one answer across as
+            # many rows as the dial has positions: the same two places at 30 and
+            # at 35 minutes produce byte-identical payloads and used to miss the
+            # cache and spend a fresh set of routing credits every time.
+            "minutes": req.budget_minutes(),
             "mode": req.mode,
             "objectives": list(req.resolved_objectives()),
             # depart_at drives best_departure, the air-quality hour index and
@@ -707,7 +712,7 @@ async def route_events(req: RouteRequest) -> AsyncIterator[dict[str, Any]]:
 
     yield {"type": "progress", "pct": 5, "text": "Looking for routable roads", "segments_scored": 0}
 
-    mode = effective_mode(req.mode, req.minutes)
+    mode = effective_mode(req.mode, req.minutes, req.straight_line_m())
     origin = req.origin.to_latlon()
     destination = req.destination.to_latlon() if req.destination else None
     objectives = req.resolved_objectives()
@@ -915,10 +920,15 @@ async def route_events(req: RouteRequest) -> AsyncIterator[dict[str, Any]]:
     routes.sort(key=lambda r: order.get(r.id, 99))
 
     reason = None
+    budget = req.budget_minutes()
     ok_routes = [r for r in routes if r.status == "ok"]
-    if ok_routes and all(r.duration_min > req.minutes for r in ok_routes):
+    # Only a loop has a budget to overrun. Asked of a point-to-point trip this
+    # said "longer than your 35-minute budget" about a journey whose length the
+    # destination fixes — the user chose the other end, not the duration, and
+    # there is no shorter option to show them first.
+    if budget is not None and ok_routes and all(r.duration_min > budget for r in ok_routes):
         reason = (
-            f"Every route found is longer than your {req.minutes}-minute budget. "
+            f"Every route found is longer than your {budget}-minute budget. "
             "The shortest option is shown first."
         )
     yield {

@@ -77,7 +77,12 @@ export function encodeState({ origin, dest, minutes, mode, objectives, departAt 
     params.set('to', encodePlace(dest))
     if (dest.name) params.set('toName', dest.name)
   }
-  if (minutes) params.set('min', String(minutes))
+  // Loops only. The headline contract of this module is that a link reproduces
+  // the same request body, and client.js stopped putting `minutes` in the body
+  // of a trip that has a destination — so carrying `min` here would break that
+  // sentence rather than uphold it, and would put a number in a shared URL that
+  // reads as though it constrained the journey.
+  if (minutes && !dest) params.set('min', String(minutes))
   if (mode && mode !== 'auto') params.set('mode', mode)
   if (objectives?.length) params.set('obj', objectives.join(','))
   // Absent on the branch this came from, because the departure strip postdates

@@ -76,6 +76,31 @@ def test_the_other_inputs_still_key_the_cache() -> None:
     )
 
 
+def test_the_time_budget_keys_a_loop_because_it_sets_the_loop_length() -> None:
+    """`_req()` has no destination, so 45 and 46 minutes really are two answers —
+    `minutes` is what `round_trip.distance` is computed from.
+    """
+    assert route_cache_key(_req()) != route_cache_key(_req(minutes=46))
+
+
+def test_the_time_budget_does_not_key_a_trip_with_a_destination() -> None:
+    """**Changed behaviour.** The key used to carry `minutes` for every request
+    shape, so two identical point-to-point trips at different dial positions
+    were two rows holding the same payload. Nothing about the answer depends on
+    the dial once both ends are fixed, so nothing about the key should either —
+    otherwise a drag across the dial's 68 positions is 68 misses and 68 sets of
+    routing credits for one answer.
+    """
+    def trip(minutes: int) -> RouteRequest:
+        return RouteRequest(
+            origin=Point(lat=51.5074, lon=-0.1622),
+            destination=Point(lat=51.52, lon=-0.13),
+            minutes=minutes,
+        )
+
+    assert route_cache_key(trip(20)) == route_cache_key(trip(360))
+
+
 def test_coordinates_are_still_rounded_to_a_shared_bucket() -> None:
     """Two people on the same street corner should share an answer."""
     a = RouteRequest(origin=Point(lat=51.50741, lon=-0.16221), minutes=45)

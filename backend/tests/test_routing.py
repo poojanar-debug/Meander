@@ -8,7 +8,14 @@ import pytest
 
 from backend.config import TEST_LOCATIONS_BY_SLUG
 from backend.geometry import LatLon, haversine_m
-from backend.models import derive_mode, effective_mode
+from backend.models import (
+    BIKE_MAX_STRAIGHT_M,
+    FOOT_MAX_STRAIGHT_M,
+    STRAIGHT_LINE_CIRCUITY,
+    derive_mode,
+    derive_mode_for_distance,
+    effective_mode,
+)
 from backend.routing import (
     NATURE_DURATION_CAP,
     NoRouteFound,
@@ -207,6 +214,44 @@ def test_derive_mode_boundaries(minutes: int, expected: str) -> None:
 def test_explicit_mode_overrides_the_ladder() -> None:
     assert effective_mode("foot", 300) == "foot"
     assert effective_mode("auto", 300) == "car"
+
+
+@pytest.mark.parametrize(
+    "straight_line_m,expected",
+    [
+        (0, "foot"),
+        (FOOT_MAX_STRAIGHT_M, "foot"),
+        (FOOT_MAX_STRAIGHT_M + 1, "bike"),
+        (BIKE_MAX_STRAIGHT_M, "bike"),
+        (BIKE_MAX_STRAIGHT_M + 1, "car"),
+        (500_000, "car"),
+    ],
+)
+def test_derive_mode_for_distance_boundaries(straight_line_m: float, expected: str) -> None:
+    assert derive_mode_for_distance(straight_line_m) == expected
+
+
+def test_a_destination_puts_the_ladder_on_distance_and_ignores_the_dial() -> None:
+    """The defect this ladder exists for: the dial used to decide the mode of a
+    journey whose length it cannot change. 2 km apart is a walk whether the user
+    left the dial at its 35-minute default or dragged it to six hours.
+    """
+    near = 2_000.0
+    assert effective_mode("auto", 20, near) == "foot"
+    assert effective_mode("auto", 360, near) == "foot"
+
+    far = 100_000.0
+    assert effective_mode("auto", 20, far) == "car"
+    assert effective_mode("auto", 360, far) == "car"
+
+
+def test_the_two_ladders_agree_at_the_rung_they_share() -> None:
+    """The distance thresholds are *derived* from the minute ones, and this is
+    what stops them drifting: 45 minutes of walking at the loop speed, once the
+    circuity factor is undone, is exactly the foot/bike boundary.
+    """
+    assert pytest.approx(75.0 * 45) == FOOT_MAX_STRAIGHT_M * STRAIGHT_LINE_CIRCUITY
+    assert pytest.approx(220.0 * 120) == BIKE_MAX_STRAIGHT_M * STRAIGHT_LINE_CIRCUITY
 
 
 # ---------------------------------------------------------------------------

@@ -6,11 +6,33 @@ import { METRIC_24, formatDistance } from './units.js'
 /** Must match `derive_mode` in backend/models.py exactly. */
 export const deriveMode = (m) => (m <= 45 ? 'foot' : m <= 120 ? 'bike' : 'car')
 
+/**
+ * The same ladder for a trip that has a destination, which has no time budget
+ * to read. Must match `derive_mode_for_distance` in backend/models.py exactly,
+ * including the constants — the two are derived the same way there, from the
+ * loop speeds over the rungs above, divided by a 1.3 urban circuity factor
+ * because the input is a straight line and the rungs are route lengths.
+ */
+export const FOOT_MAX_STRAIGHT_M = (75 * 45) / 1.3
+export const BIKE_MAX_STRAIGHT_M = (220 * 120) / 1.3
+export const deriveModeForDistance = (m) =>
+  m <= FOOT_MAX_STRAIGHT_M ? 'foot' : m <= BIKE_MAX_STRAIGHT_M ? 'bike' : 'car'
+
 export const MODE_VERB = { foot: 'walking', bike: 'cycling', car: 'driving' }
 export const MODE_NOUN = { foot: 'on foot', bike: 'by bike', car: 'by car' }
 
-export function effectiveMode(mode, minutes) {
-  return mode === 'auto' ? deriveMode(minutes) : mode
+/**
+ * Resolve `auto` against whichever input describes the trip: the straight-line
+ * distance when there is a destination, the time budget when there is not.
+ *
+ * `straightLineM` is null for a loop. Passing it is what keeps this agreeing
+ * with the backend, which now reads distance for a point-to-point request — if
+ * the two disagree the UI names one mode in the narration and the router uses
+ * another.
+ */
+export function effectiveMode(mode, minutes, straightLineM = null) {
+  if (mode !== 'auto') return mode
+  return straightLineM == null ? deriveMode(minutes) : deriveModeForDistance(straightLineM)
 }
 
 /** "1 hr 25 min" — spoken form, not "1:25". */

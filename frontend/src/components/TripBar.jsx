@@ -110,10 +110,14 @@ export default function TripBar({
       value: dest?.name ?? 'Round trip',
       placeholder: !dest,
     },
+    // A destination fixes the length of the trip, so there is no budget to
+    // show and the dial below is not rendered. Naming the segment "Time &
+    // travel" and printing a minute count there would advertise a control that
+    // cannot change the answer.
     {
       key: 'time',
-      label: 'Time & travel',
-      value: `${minutes} min · ${verb}`,
+      label: dest ? 'Travel' : 'Time & travel',
+      value: dest ? verb : `${minutes} min · ${verb}`,
       placeholder: false,
     },
     {
@@ -185,12 +189,19 @@ export default function TripBar({
       </TripDrawer>
 
       <TripDrawer id="drawer-time" labelledBy="seg-key-time" open={open === 'time'}>
-        <TimeDial
-          minutes={minutes}
-          mode={mode}
-          effectiveMode={effectiveMode}
-          onChange={onMinutes}
-        />
+        {/* Loops only. For a trip with both ends fixed the dial changed nothing
+            that reaches the router — not the wire, the cache key, the mode —
+            so leaving it on screen offered a control whose every position
+            produced the same answer. The mode select stays: that one is still
+            the user's to make. */}
+        {!dest && (
+          <TimeDial
+            minutes={minutes}
+            mode={mode}
+            effectiveMode={effectiveMode}
+            onChange={onMinutes}
+          />
+        )}
         <div className="field">
           <label className="field__label" htmlFor="mode-select">
             How are you travelling?

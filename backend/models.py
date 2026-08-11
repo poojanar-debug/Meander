@@ -11,7 +11,7 @@ from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from .geometry import LatLon
+from .geometry import LatLon, haversine_m
 
 Mode = Literal["auto", "foot", "bike", "car"]
 EffectiveMode = Literal["foot", "bike", "car"]
@@ -74,6 +74,26 @@ class RouteRequest(BaseModel):
 
     def resolved_objectives(self) -> tuple[str, ...]:
         return tuple(self.objectives) if self.objectives else DEFAULT_OBJECTIVES
+
+    def is_loop(self) -> bool:
+        return self.destination is None
+
+    def budget_minutes(self) -> int | None:
+        """The time budget, or ``None`` when the trip has a destination.
+
+        ``minutes`` is always populated — it has a default, and the dial always
+        sends one — so every consumer that reads ``req.minutes`` directly is
+        reading a number that is meaningless for a point-to-point trip. Going
+        through here makes "there is no budget" the shape of the value rather
+        than a rule each caller has to remember.
+        """
+        return None if self.destination is not None else self.minutes
+
+    def straight_line_m(self) -> float | None:
+        """Crow-flight origin→destination, or ``None`` for a loop."""
+        if self.destination is None:
+            return None
+        return haversine_m(self.origin.to_latlon(), self.destination.to_latlon())
 
 
 class Scores(BaseModel):
@@ -216,7 +236,7 @@ class BarrierReport(BaseModel):
 
 
 def derive_mode(minutes: int) -> EffectiveMode:
-    """The auto-mode ladder. Must match ``deriveMode`` in the frontend exactly."""
+    """The auto-mode ladder for a loop. Must match ``deriveMode`` in the frontend exactly."""
     if minutes <= 45:
         return "foot"
     if minutes <= 120:
@@ -224,5 +244,48 @@ def derive_mode(minutes: int) -> EffectiveMode:
     return "car"
 
 
-def effective_mode(mode: Mode, minutes: int) -> EffectiveMode:
-    return derive_mode(minutes) if mode == "auto" else mode
+# The straight-line distances the ladder above implies, so the two rungs cannot
+# drift apart: each is the distance that mode covers in the minutes its rung
+# allows, at the loop speeds in routing.py (foot 75 m/min, bike 220 m/min).
+#
+# Divided by a circuity factor because the input is a *straight line* and the
+# ladder's thresholds are route lengths. A real street network makes the route
+# longer than the crow flight; 1.3 is the usual urban figure. Without it the
+# ladder reads a 3.3 km straight line as a 45-minute walk when the walk is
+# closer to an hour, and picks foot for a trip nobody would walk.
+STRAIGHT_LINE_CIRCUITY = 1.3
+FOOT_MAX_STRAIGHT_M = 75.0 * 45 / STRAIGHT_LINE_CIRCUITY    # ~2,596 m
+BIKE_MAX_STRAIGHT_M = 220.0 * 120 / STRAIGHT_LINE_CIRCUITY  # ~20,308 m
+
+
+def derive_mode_for_distance(straight_line_m: float) -> EffectiveMode:
+    """The auto-mode ladder for a trip that has a destination.
+
+    A point-to-point trip has no time budget to read — its length is set by
+    where the user is going, not by how long they said they had. Reading
+    ``minutes`` here made the mode depend on a number that means nothing for
+    this shape of request: the dial's default of 35 put every trip on foot,
+    including a 40 km one, and nudging the dial to 46 turned that same trip into
+    a bike ride without the destination moving.
+
+    Must match ``deriveModeForDistance`` in the frontend exactly.
+    """
+    if straight_line_m <= FOOT_MAX_STRAIGHT_M:
+        return "foot"
+    if straight_line_m <= BIKE_MAX_STRAIGHT_M:
+        return "bike"
+    return "car"
+
+
+def effective_mode(mode: Mode, minutes: int, straight_line_m: float | None = None) -> EffectiveMode:
+    """Resolve ``auto`` against whichever input actually describes the trip.
+
+    ``straight_line_m`` is passed when the request has a destination, and is the
+    only thing consulted then. ``minutes`` is for loops, where the time budget
+    *is* the request.
+    """
+    if mode != "auto":
+        return mode
+    if straight_line_m is not None:
+        return derive_mode_for_distance(straight_line_m)
+    return derive_mode(minutes)
