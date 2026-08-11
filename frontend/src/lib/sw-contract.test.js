@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto'
 import { existsSync, readFileSync, readdirSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 
@@ -172,5 +173,55 @@ describe('the promise the header makes', () => {
     // Load-bearing prose. If the line goes, the reasoning behind the origin
     // check goes with it and someone "optimises" tiles into the cache.
     expect(sw).toContain('a record of where you have been')
+  })
+})
+
+describe('the worker version tracks what is in the build, not what it is called', () => {
+  // The one property that decides whether a deploy ever reaches an installed
+  // client. The browser's update check byte-compares sw.js: if the version does
+  // not move, nothing installs, and handleShell is cache-first and never
+  // revalidates — so the old shell is served forever.
+  //
+  // This is the test that was missing. The suite asserted the placeholders were
+  // substituted and that the precache named the right files, both of which held
+  // perfectly while the version was a hash of *filenames*: any change that did
+  // not rename a file produced byte-identical worker output. Changing only the
+  // <title> in index.html reproduced it — same VERSION, same sw.js, different
+  // dist/index.html.
+  /** The same digest the plugin computes, over a fake bundle. */
+  const versionFor = (entries) => {
+    const digest = createHash('sha256')
+    for (const [url, content] of [...entries].sort((a, b) => a[0].localeCompare(b[0]))) {
+      digest.update(url)
+      digest.update('\0')
+      digest.update(content)
+      digest.update('\0')
+    }
+    return digest.digest('hex').slice(0, 12)
+  }
+
+  it('moves when a file’s contents change but its name does not', () => {
+    const before = versionFor([['/index.html', '<title>Meander</title>']])
+    const after = versionFor([['/index.html', '<title>Meander X</title>']])
+    expect(after).not.toBe(before)
+  })
+
+  it('moves when a file is renamed but its contents do not change', () => {
+    const before = versionFor([['/assets/a.js', 'console.log(1)']])
+    const after = versionFor([['/assets/b.js', 'console.log(1)']])
+    expect(after).not.toBe(before)
+  })
+
+  it('does not move when nothing changes — no clock in it', () => {
+    // The property the original comment was defending, and which is kept: a
+    // timestamp would evict every user's shell on every build.
+    const entries = [['/index.html', '<title>Meander</title>'], ['/assets/a.js', 'x']]
+    expect(versionFor(entries)).toBe(versionFor(entries))
+  })
+
+  it('does not depend on the order the file list arrives in', () => {
+    const a = [['/index.html', 'h'], ['/assets/a.js', 'x']]
+    const b = [['/assets/a.js', 'x'], ['/index.html', 'h']]
+    expect(versionFor(a)).toBe(versionFor(b))
   })
 })
