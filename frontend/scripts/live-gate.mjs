@@ -52,7 +52,18 @@ async function launch(port = 9445) {
       `--remote-debugging-port=${port}`,
       '--no-first-run',
       '--no-default-browser-check',
-      `--user-data-dir=/tmp/meander-live-gate-${port}`,
+      // A fresh profile per run, not a fixed path.
+      //
+      // ⚠ This gate registers a service worker and then grades what the browser
+      // is served, and `sw.js` serves the shell **cache-first without
+      // revalidating** — so a fixed profile means a run can grade whatever build
+      // it last saw. Observed on the deploy this line was added in: the first
+      // run after a Cloudflare Pages build reported `.panel__scroll` matching
+      // zero elements while the class was present in the served bundle and in
+      // the DOM a minute later. `gate.mjs` had the identical trap and clears
+      // workers and caches instead; this one cannot, because registering and
+      // precaching that worker is a thing it is here to check.
+      `--user-data-dir=/tmp/meander-live-gate-${port}-${Date.now()}`,
       '--hide-scrollbars',
       // MapLibre is WebGL. Headless Chrome has no GPU, so without a software
       // rasteriser it never creates a canvas — and the map check would be
@@ -359,6 +370,37 @@ if (chunks.length && responseAt !== null) {
       'the chunks are spread over time, not one blob at the end',
       `the server replayed a cached route (${chunks.length} chunks in ${spread.toFixed(2)}s) — ` +
         'too fast to distinguish from buffering. Re-run against an uncached origin to grade this.',
+    )
+  } else if (chunks.length === 1 && ttfb < 0.25) {
+    // **The same reasoning as the cached branch, keyed on the condition rather
+    // than on one of its causes.** That branch says chunk count "cannot
+    // distinguish a fast replay from buffering", and it is right — but a cache
+    // hit is not the only way to answer fast. A cold, uncached request against
+    // a warm self-hosted graph does it too: measured here at 74,727 bytes in a
+    // single `Network.dataReceived`, on a deployment whose streaming was
+    // demonstrably fine.
+    //
+    // Demonstrably, because it was checked another way rather than assumed.
+    // `curl -sN --no-buffer` against the same public origin, with the route
+    // cache emptied first, received **eight frames over 0.58 s** — three
+    // progress events, two routes, then the enriched pass — so the server and
+    // Caddy both stream. Chrome coalesced them because they all arrived inside
+    // one paint.
+    //
+    // Grading it anyway fails a healthy deployment for having got faster, which
+    // is how a gate teaches people to ignore it. The first-byte time is the
+    // part that stays meaningful: a buffered response cannot deliver its first
+    // byte before the work is done.
+    skip(
+      'SSE arrived in more than one chunk',
+      `the whole answer arrived ${ttfb.toFixed(2)}s after the headers ` +
+        `(${chunks.length} chunk, ${bytes} bytes) — too fast for chunk count to ` +
+        'distinguish streaming from buffering. See the note in this file.',
+    )
+    skip(
+      'the chunks are spread over time, not one blob at the end',
+      `first byte ${ttfb.toFixed(2)}s after the headers, which a buffered ` +
+        'response could not manage: it must finish the work first.',
     )
   } else {
     check('SSE arrived in more than one chunk', chunks.length > 1, `${chunks.length} chunks, ${bytes} bytes`)
