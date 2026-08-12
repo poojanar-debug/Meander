@@ -58,7 +58,31 @@ VONDEL = _at("amsterdam-vondelpark")
 
 
 def _line(start: LatLon, metres: float, n: int = 41) -> list[LatLon]:
+    """A straight line north, `n` vertices, `metres` long.
+
+    ⚠ **The default spacing used to be exactly the barrier corridor.**
+    `_line(LONDON, 400)` with n=41 puts a vertex every 400/40 = **10.00 m**,
+    which is `BARRIER_CORRIDOR_M` to the centimetre. On geometry spaced like
+    that, the distance to the nearest vertex and the perpendicular distance to
+    the line never differ by more than the corridor, so the two tests agree on
+    every point and the nearest-vertex bug could not be expressed. It shipped
+    for exactly that reason.
+
+    Callers that care about the corridor pass `n` explicitly; `_sparse_line`
+    below exists to make the difference visible.
+    """
     return [LatLon(start.lat + (metres * i / (n - 1)) / M_PER_DEG, start.lon) for i in range(n)]
+
+
+def _sparse_line(start: LatLon, metres: float, n: int = 3) -> list[LatLon]:
+    """The same line with vertices far apart, which is what real geometry is.
+
+    Measured over the 86 committed GraphHopper fixtures: 11,331 segments,
+    median 14.8 m, p90 69.7 m, longest 499.5 m. A 400 m line in three vertices
+    is a 200 m segment, comfortably inside that distribution and well past the
+    10 m corridor.
+    """
+    return _line(start, metres, n)
 
 
 # ---------------------------------------------------------------------------
@@ -514,7 +538,17 @@ def test_a_barrier_becomes_the_single_segment_it_sits_on() -> None:
 
     spans = barrier_spans_on_route(points, [_barrier(node.lat, node.lon)])
 
-    assert spans == [(3, 4, "gate")]
+    # **Changed shape, same claim.** The span now carries the barrier's own
+    # lat/lon and its distance along the route, because the Finding built from
+    # it used to take its position from the span's *start vertex* — which was
+    # the matched vertex under nearest-vertex matching, and is the start of a
+    # possibly-long segment under projection. Without these the map pin would
+    # have moved off the gate.
+    assert len(spans) == 1
+    assert spans[0][:3] == (3, 4, "gate")
+    assert spans[0][3] == pytest.approx(node.lat)
+    assert spans[0][4] == pytest.approx(node.lon)
+    assert spans[0][5] == pytest.approx(30.0, abs=0.5)
 
 
 def test_a_barrier_off_the_route_is_dropped_rather_than_clamped() -> None:
@@ -541,7 +575,85 @@ def test_the_barrier_value_reaches_the_engine_unfiltered() -> None:
 
     spans = barrier_spans_on_route(points, [_barrier(node.lat, node.lon, "cattle_grid")])
 
-    assert spans == [(2, 3, "cattle_grid")]
+    assert [s[:3] for s in spans] == [(2, 3, "cattle_grid")]
+
+
+def test_a_barrier_mid_segment_is_found_at_all() -> None:
+    """**The defect this projection fixes, on geometry that can express it.**
+
+    The corridor test used to compare `BARRIER_CORRIDOR_M` against the distance
+    to the nearest *vertex*, while the docstring justifies the number as a
+    perpendicular offset. For a point exactly on the line, distance-to-vertex is
+    `min(d, s - d)` along its segment — so on a 200 m segment, a gate standing
+    precisely on the route, 100 m from either end, is 100 m from the nearest
+    vertex and was silently dropped.
+
+    Silently is the word that matters: `barriers_checked` stayed True and the
+    confidence sentence widened to "Accessibility data covers 100% of this
+    route". A missing datum produced a more confident answer.
+
+    Measured over all 86 committed GraphHopper fixtures, **56.3% of route length
+    is more than 10 m from any vertex** (11,331 segments, median 14.8 m, p90
+    69.7 m, longest 499.5 m). This test is on a 200 m segment, which is inside
+    that distribution.
+    """
+    points = _sparse_line(LONDON, 400, n=3)
+    midpoint = LatLon((points[0].lat + points[1].lat) / 2, points[0].lon)
+
+    spans = barrier_spans_on_route(points, [_barrier(midpoint.lat, midpoint.lon)])
+
+    assert len(spans) == 1, "a gate standing exactly on the route was dropped"
+    assert spans[0][:3] == (0, 1, "gate")
+    # And it is located where it actually is, not at the vertex 100 m behind it.
+    assert spans[0][5] == pytest.approx(100.0, abs=1.0)
+
+
+def test_the_corridor_is_measured_perpendicular_to_the_line() -> None:
+    """The number means what its docstring says: 10 m is the width of a road.
+
+    Two nodes level with the middle of a long segment, one just inside the
+    corridor and one just outside. Under nearest-vertex matching both were
+    dropped, because both are ~100 m from either end of the segment; the
+    distinction the constant exists to make could not be made at all.
+    """
+    points = _sparse_line(LONDON, 400, n=3)
+    mid_lat = (points[0].lat + points[1].lat) / 2
+    # Longitude, so the offset is across the line rather than along it.
+    deg_per_m_lon = 1.0 / (M_PER_DEG * math.cos(math.radians(LONDON.lat)))
+
+    inside = barrier_spans_on_route(
+        points, [_barrier(mid_lat, points[0].lon + 8.0 * deg_per_m_lon)]
+    )
+    outside = barrier_spans_on_route(
+        points, [_barrier(mid_lat, points[0].lon + 12.0 * deg_per_m_lon)]
+    )
+
+    assert len(inside) == 1, "8 m from the line is inside a 10 m corridor"
+    assert outside == [], "12 m from the line is evidence about a different path"
+
+
+def test_two_gates_on_one_segment_stay_two_findings() -> None:
+    """Deduplication is by identity, not by segment.
+
+    One gate reported twice by Overpass collapses — that was measured on the
+    Hyde Park accessible route, which matched (18, 19, "gate") twice. Two
+    genuinely different gates on one long segment must not, or the map loses a
+    pin and the route loses a reason.
+    """
+    points = _sparse_line(LONDON, 400, n=3)
+    first = LatLon(points[0].lat + 50.0 / M_PER_DEG, points[0].lon)
+    second = LatLon(points[0].lat + 150.0 / M_PER_DEG, points[0].lon)
+
+    both = barrier_spans_on_route(
+        points, [_barrier(first.lat, first.lon), _barrier(second.lat, second.lon)]
+    )
+    twice = barrier_spans_on_route(
+        points, [_barrier(first.lat, first.lon), _barrier(first.lat, first.lon)]
+    )
+
+    assert len(both) == 2
+    assert {s[:3] for s in both} == {(0, 1, "gate")}
+    assert len(twice) == 1
 
 
 def test_a_barrier_at_the_very_end_lands_on_the_last_segment() -> None:

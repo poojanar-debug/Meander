@@ -344,7 +344,21 @@ def _span_verdicts(
     findings: list[Finding] = []
     cum = cumulative_distance_m(points)
 
-    for start, end, value in spans:
+    for span in spans:
+        start, end, value = span[0], span[1], span[2]
+        # A barrier span carries the node's own coordinates as two extra
+        # members; a span from path details does not, because a surface or a
+        # smoothness value belongs to a stretch and has no point of its own.
+        #
+        # ⚠ Without this, the pin moves off the gate. The Finding used to take
+        # its position from `points[lo]`, the span's *start vertex*, and under
+        # the old nearest-vertex matching `lo` was the matched vertex — so the
+        # marker landed within 10 m of the barrier by accident. Projecting onto
+        # segments made `lo` the start of a segment that can be hundreds of
+        # metres back, which would have traded a missed barrier for a misplaced
+        # one. See `enrich.barrier_spans_on_route`.
+        node_at = span[3:5] if len(span) >= 5 else None
+        node_at_m = float(span[5]) if len(span) >= 6 else None
         lo = max(0, min(int(start), len(lengths)))
         hi = max(lo, min(int(end), len(lengths)))
         span_length = float(lengths[lo:hi].sum())
@@ -353,14 +367,20 @@ def _span_verdicts(
         verdict = check(value)
         weighted.append((span_length, verdict))
         if verdict is Verdict.FAIL:
-            at = points[min(lo, len(points) - 1)]
+            at = (
+                LatLon(float(node_at[0]), float(node_at[1]))
+                if node_at is not None
+                else points[min(lo, len(points) - 1)]
+            )
             template = _HUMAN_BLOCKER_TEXT.get(finding_type, "{value}")
             findings.append(
                 Finding(
                     type="steps" if finding_type == "steps" else finding_type,
                     lat=at.lat,
                     lon=at.lon,
-                    at_m=round(float(cum[min(lo, len(cum) - 1)])),
+                    at_m=round(
+                        node_at_m if node_at_m is not None else float(cum[min(lo, len(cum) - 1)])
+                    ),
                     description=template.format(value=str(value).lower().replace("_", " ")),
                 )
             )
