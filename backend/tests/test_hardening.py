@@ -121,6 +121,7 @@ def test_there_is_only_one_served_today_counter() -> None:
 def test_geocode_is_rate_limited(api_client, monkeypatch: pytest.MonkeyPatch) -> None:
     """Nominatim's policy is 1 req/s, enforced by banning this service's egress
     address — so one script gets place search banned for every user.
+
     **Limited by the per-IP bucket, not the daily routing ceiling.** This used
     to force a 429 by setting `daily_ceiling = 0`, which passed for the wrong
     reason: geocode was spending the *routing* quota while making no
@@ -128,6 +129,37 @@ def test_geocode_is_rate_limited(api_client, monkeypatch: pytest.MonkeyPatch) ->
     `GET /api/geocode?q=xx` could deny every user a route for the rest of the
     day. It no longer touches that counter, and the bucket is what actually
     bounds the load one caller can put on Nominatim.
+
+    **What changed here, and why.** This patched ``main.limiter``. Place search
+    now runs on ``main.geocode_limiter``, a second bucket, because one shared
+    bucket had the mirror-image defect of the one above: a 20-character name
+    costs a mean of 8.6 geocode requests, two names come to 17.1 against a
+    capacity of 12, and the route request that followed was refused by a bucket
+    the user's *typing* had emptied. Patching the old name left this test
+    pointing at a limiter the endpoint no longer consults, so the request was
+    allowed and the assertion failed loudly rather than passing vacuously —
+    which is the behaviour a test should have when the thing it guards moves.
+    """
+    from backend import main
+    from backend.ratelimit import RateLimiter
+
+    monkeypatch.setattr(main, "geocode_limiter",
+                        RateLimiter(capacity=0, refill_per_min=0.0, daily_ceiling=100))
+    resp = api_client.get("/api/geocode?q=hyde+park")
+    assert resp.status_code == 429
+    assert resp.headers.get("Retry-After")
+
+
+def test_the_route_bucket_no_longer_bounds_place_search(
+    api_client, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A drained route bucket must not stop someone typing a place name.
+
+    This is the defect the second limiter exists for, asserted from the other
+    side: with the routing bucket empty, place search still answers. Before, the
+    two shared a bucket, so a user who had just searched for two places found
+    their route refused — and a user whose route had been refused could not type
+    a different destination to get out of it.
     """
     from backend import main
     from backend.ratelimit import RateLimiter
@@ -135,8 +167,7 @@ def test_geocode_is_rate_limited(api_client, monkeypatch: pytest.MonkeyPatch) ->
     monkeypatch.setattr(main, "limiter",
                         RateLimiter(capacity=0, refill_per_min=0.0, daily_ceiling=100))
     resp = api_client.get("/api/geocode?q=hyde+park")
-    assert resp.status_code == 429
-    assert resp.headers.get("Retry-After")
+    assert resp.status_code != 429
 
 
 def test_geocode_does_not_spend_the_daily_routing_allowance(

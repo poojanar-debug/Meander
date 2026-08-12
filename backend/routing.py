@@ -921,9 +921,16 @@ def geometry_for_wire(route: RawRoute) -> list[list[float]]:
 
 
 class GeocodeError(RuntimeError):
-    def __init__(self, human_message: str, status_code: int = 502) -> None:
+    # `retry_after_s` is None for every failure except an upstream 429, which is
+    # the only one where waiting is the correct response and the only one where
+    # there is a number to wait for. A client cannot tell "try in a minute" from
+    # "this is broken" without it.
+    def __init__(
+        self, human_message: str, status_code: int = 502, retry_after_s: int | None = None
+    ) -> None:
         self.human_message = human_message
         self.status_code = status_code
+        self.retry_after_s = retry_after_s
         super().__init__(human_message)
 
 
@@ -968,6 +975,21 @@ async def geocode_search(query: str) -> list[GeocodeResult]:
         log.warning("nominatim_transport_error", extra={"error": type(exc).__name__})
         raise GeocodeError("Could not reach the place-search service.", status_code=502) from exc
 
+    # 429 first, and separately, because it is the one upstream status that
+    # means something a caller can act on. Everything >= 400 used to collapse
+    # into one generic 502 with no Retry-After, so the single response that says
+    # "you are going too fast for Nominatim" — whose usage policy is one request
+    # per second, enforced by banning the calling IP, which here is this
+    # service's egress address for every user at once — was reported as an
+    # unexplained failure. The GraphHopper path has had this branch since it was
+    # written (see `_routing_error`); this one did not.
+    if response.status_code == 429:
+        retry_after = response.headers.get("retry-after", "").strip()
+        raise GeocodeError(
+            "Place search is busy. Please wait a moment and try again.",
+            status_code=503,
+            retry_after_s=int(retry_after) if retry_after.isdigit() else 60,
+        )
     if response.status_code >= 400:
         raise GeocodeError("Place search failed. Please try again.", status_code=502)
 

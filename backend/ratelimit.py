@@ -163,12 +163,28 @@ class RateLimiter:
 
         A cache hit costs no upstream credits, so charging for it would limit
         users for free.
+
+        **Both halves are inside the guard, and that is the fix.** The daily
+        counter used to be decremented outside `if bucket is not None`, while
+        `check()` only ever increments it inside `if counts_against_ceiling`.
+        The two therefore came apart whenever the bucket was gone by the time
+        the refund arrived: an eviction under `_MAX_BUCKETS`, or a day roll
+        between the check and the refund. In both cases the increment belonged
+        to a counter that no longer exists and the decrement landed on the
+        current one, so `served_today` — which is what `/api/health` publishes
+        and what the ceiling is tested against — drifted below the truth by one
+        per occurrence, in the direction that serves more than the ceiling
+        allows.
+
+        A missing bucket now means a refund with nothing to refund, which is
+        exactly what it is.
         """
         key = client_digest(ip)
         with self._lock:
             bucket = self._buckets.get(key)
-            if bucket is not None:
-                bucket.tokens = min(float(self.capacity), bucket.tokens + 1.0)
+            if bucket is None:
+                return
+            bucket.tokens = min(float(self.capacity), bucket.tokens + 1.0)
             self._served_today = max(0, self._served_today - 1)
 
     def served_today(self) -> int:

@@ -62,6 +62,7 @@ from .models import (
     CacheInfo,
     ElevationProfile,
     GeocodeResponse,
+    GeocodeResult,
     RestStop,
     Route,
     RouteRequest,
@@ -87,6 +88,26 @@ log = get_logger(__name__)
 limiter = RateLimiter(
     capacity=settings.per_ip_bucket_capacity,
     refill_per_min=settings.per_ip_refill_per_min,
+    daily_ceiling=settings.global_daily_route_ceiling,
+)
+
+# Place search gets its own bucket, and this is the whole of the fix for a
+# type-ahead that ran out mid-word.
+#
+# One limiter served /api/routes, /api/geocode and /api/report-barrier on the
+# same per-IP key. Measured: a 20-character name at 40 wpm costs a mean of 8.6
+# geocode requests at the old 300 ms debounce, so **two place names come to 17.1
+# against a capacity of 12** — the bucket is empty before the first route
+# request is made, and that request is refused too, with routing copy
+# ("That is a lot of routes in a short time") shown under the place box.
+#
+# The daily ceiling is deliberately passed through unchanged so that
+# `served_today` stays one global number counting routes. /api/geocode already
+# called `check(counts_against_ceiling=False)`, and this limiter never gets a
+# call that does, so nothing here can add to it.
+geocode_limiter = RateLimiter(
+    capacity=settings.geocode_bucket_capacity,
+    refill_per_min=settings.geocode_refill_per_min,
     daily_ceiling=settings.global_daily_route_ceiling,
 )
 
@@ -567,6 +588,26 @@ def route_cache_key(req: RouteRequest) -> str:
         },
         sort_keys=True,
     )
+    return hashlib.sha256(material.encode()).hexdigest()[:24]
+
+
+def geocode_cache_key(q: str) -> str:
+    """The normalised query, hashed.
+
+    Case-folded and whitespace-collapsed so that "Kandy", "kandy " and
+    "  Kandy" are one row rather than three. That normalisation is worth less
+    than it looks — measured against the 12-query burst recorded in
+    `fixtures/nominatim/`, case-folding still gives 12 distinct keys — and the
+    case the cache actually serves is a user deleting characters and typing them
+    back, which produces the *same* key by construction.
+
+    Hashed rather than stored verbatim, for the reason the route key is: a place
+    name a user typed is theirs, and a cache file that is baked into the
+    published image should not be a list of what people searched for. The
+    hashing is not a security control — the key space is guessable — it just
+    means the file does not read as a log.
+    """
+    material = " ".join(q.strip().split()).casefold()
     return hashlib.sha256(material.encode()).hexdigest()[:24]
 
 
@@ -1442,13 +1483,24 @@ def _hit_rate() -> float:
 async def geocode(request: Request, q: str = Query(min_length=2, max_length=120)) -> Any:
     """Place search, proxied to Nominatim.
 
-    Rate-limited like everything else. It was previously unauthenticated **and
-    unlimited**, and Nominatim's usage policy is one request per second enforced
-    by banning the offending IP — which here is this service's egress address,
-    so one script pointed at /api/geocode gets place search banned for every
-    user of the deployment, not for the script.
+    Rate-limited, but on `geocode_limiter` rather than the shared one. It was
+    previously unauthenticated **and unlimited**, and Nominatim's usage policy is
+    one request per second enforced by banning the offending IP — which here is
+    this service's egress address, so one script pointed at /api/geocode gets
+    place search banned for every user of the deployment, not for the script.
+    Putting it on the route bucket fixed that and created a different failure:
+    two place names spent more tokens than the bucket held, so the route request
+    that followed was refused. See `geocode_limiter` for the measurement.
+
+    Answers are cached for a week. A name-to-coordinate mapping embeds none of
+    the weather, daylight or air quality that makes a route payload go stale in
+    six hours, and the case this actually serves is backspacing and re-typing:
+    of the 12 distinct queries in the recorded burst in `fixtures/nominatim/`,
+    case-folding gives 12 distinct keys, so normalisation alone saves almost
+    nothing. What saves is that a user who deletes three characters and puts
+    them back asks the same question twice.
     """
-    decision = limiter.check(_client_ip(request), counts_against_ceiling=False)
+    decision = geocode_limiter.check(_client_ip(request), counts_against_ceiling=False)
     if not decision.allowed:
         metrics.incr("rate_limited_total")
         return JSONResponse(
@@ -1460,10 +1512,37 @@ async def geocode(request: Request, q: str = Query(min_length=2, max_length=120)
     from .routing import GeocodeError
     from .routing import geocode_search as search
 
+    cache = get_cache()
+    key = geocode_cache_key(q)
+    cached = await run_in_threadpool(cache.get_geocode, key)
+    if cached is not None:
+        # Refunded exactly as a route cache hit is: an answer that cost no
+        # upstream call must not cost a token, or the limiter charges for its
+        # own cache.
+        geocode_limiter.refund(_client_ip(request))
+        metrics.incr("cache_hits_total")
+        return GeocodeResponse(results=[GeocodeResult(**item) for item in cached])
+
+    metrics.incr("cache_misses_total")
     try:
         results = await search(q)
     except GeocodeError as exc:
-        return _error("geocode", exc.human_message, exc.status_code)
+        response = _error("geocode", exc.human_message, exc.status_code)
+        # Carried through only when the upstream said 429. Everything else has
+        # no number to give and must not invent one.
+        if exc.retry_after_s is not None:
+            response.headers["Retry-After"] = str(max(1, exc.retry_after_s))
+        return response
+
+    # An empty result is cached too. "Nowhere is called that" is an answer, and
+    # re-asking Nominatim for it on every keystroke of a misspelling is exactly
+    # the traffic this is here to stop.
+    await run_in_threadpool(
+        cache.put_geocode,
+        key,
+        [item.model_dump() for item in results],
+        settings.geocode_cache_ttl_s,
+    )
     return GeocodeResponse(results=results)
 
 
@@ -1663,7 +1742,20 @@ def health(verbose: int = Query(0, ge=0, le=1)) -> dict[str, Any]:
             # served_today, but never `remaining`: publishing how much headroom
             # is left tells anyone who asks exactly how much more to send to
             # take the service down for the day.
+            #
+            # This stays a single global number and it counts ROUTES. Place
+            # search runs on its own limiter now, and that limiter is never
+            # called with counts_against_ceiling=True, so nothing it does can
+            # move this. Two limiters and one ceiling number is the arrangement;
+            # a second daily counter would be the mistake `served_today`'s own
+            # docstring was written about.
             "served_today": limiter.served_today(),
+            # Reported separately rather than folded in, because the two buckets
+            # exist precisely because they are not interchangeable: this one is
+            # sized for a type-ahead and the one above is sized to protect the
+            # routing quota and the machine.
+            "geocode_capacity": settings.geocode_bucket_capacity,
+            "geocode_refill_per_min": settings.geocode_refill_per_min,
         },
         # fixture_inventory() walks the whole fixture tree and JSON-parses every
         # file — 150-odd files, on every call, on an endpoint anyone can hit.
