@@ -56,7 +56,7 @@ function crossing(date, lat, lon, altitude) {
   // same amount, so day *length* stays right and only the absolute clock times
   // are wrong. The equator test compared lengths and passed; London passed
   // because its longitude is 0.13°, where the error is fifteen seconds. It took
-  // a Colombo route reporting "Daylight today: 16:44 – 05:08" to show it.
+  // a Colombo route reporting "Daylight today: 16:44 to 05:08" to show it.
   // There is now a test that pins absolute times at a longitude far from
   // Greenwich.
   const west = -lon
@@ -141,7 +141,7 @@ export function sunTimes(date, lat, lon) {
  * an instant into "18:24" is not: `Intl` formats in the *viewer's* timezone, and
  * a viewer looking at a route in Colombo from California is shown Californian
  * clock times for a Sri Lankan sunset. The demo made this obvious — the daylight
- * line read "16:44 – 05:08", which is not a day.
+ * line read "16:44 to 05:08", which is not a day.
  *
  * A place's civil timezone cannot be derived from coordinates without a tz
  * database, which would be a large dependency for one line of copy. What *can*
@@ -175,7 +175,7 @@ export function fmtClock(date, units = METRIC_24) {
   return fmtClockIn(date, units)
 }
 
-/** "Daylight today: 05:58 – 18:24", or the polar sentence, or null. */
+/** "Daylight today: 05:58 to 18:24", or the polar sentence, or null. */
 export function daylightSentence(times, units = METRIC_24) {
   if (!times) return null
   if (times.polar === 'day') return 'The sun does not set here today.'
@@ -183,7 +183,7 @@ export function daylightSentence(times, units = METRIC_24) {
   const from = fmtClock(times.sunrise, units)
   const to = fmtClock(times.sunset, units)
   if (!from || !to) return null
-  return `Daylight today: ${from} – ${to}.`
+  return `Daylight today: ${from} to ${to}.`
 }
 
 const MINUTE = 60000
@@ -239,7 +239,7 @@ export function daylightGuard({ start, end, lat, lon, units = METRIC_24 }) {
   if (from.polarNight || to.polarNight) {
     return {
       severity: 5,
-      text: 'The sun does not rise here today — the whole route will be in the dark.',
+      text: 'The sun does not rise here today. The whole route will be in the dark.',
       action: null,
     }
   }
@@ -265,7 +265,7 @@ export function daylightGuard({ start, end, lat, lon, units = METRIC_24 }) {
     const mins = roundMinutes(from.times.sunrise - start)
     return {
       severity: 1,
-      text: `This route starts about ${mins} minute${mins === 1 ? '' : 's'} before sunrise (${fmtClock(from.times.sunrise, units)} today) — the first stretch will be in the dark.`,
+      text: `This route starts about ${mins} minute${mins === 1 ? '' : 's'} before sunrise (${fmtClock(from.times.sunrise, units)} today). The first stretch will be in the dark.`,
       action: 'sunrise',
     }
   }

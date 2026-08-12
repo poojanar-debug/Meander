@@ -99,7 +99,7 @@ def test_an_entirely_untagged_route_is_never_reported_as_accessible() -> None:
     assert result.verdict is not Verdict.PASS
     assert result.coverage == 0.0
     assert result.unknown_fraction == 1.0
-    assert "do not rely on it" in result.sentence()
+    assert "do not rely on it" in result.sentence().lower()
 
 
 def test_a_route_tagged_only_with_road_class_is_not_accessible() -> None:
@@ -375,8 +375,8 @@ def test_the_confidence_sentence_escalates_as_coverage_falls() -> None:
 
     # Ends with the barrier disclaimer now; the escalation is what is under test.
     assert "of this route" in high.sentence()
-    assert "do not rely on it" not in high.sentence()
-    assert "do not rely on it" in low.sentence()
+    assert "do not rely on it" not in high.sentence().lower()
+    assert "do not rely on it" in low.sentence().lower()
     assert "only" in low.sentence()
 
 
@@ -457,7 +457,7 @@ def test_an_unverified_accessible_route_says_it_is_unverified(tmp_cache_db) -> N
     assert route.confidence == 0.0
     assert route.status_note is not None
     assert "absence of data" in route.status_note
-    assert "do not rely on it" in route.confidence_note
+    assert "do not rely on it" in route.confidence_note.lower()
 
 
 def test_a_well_tagged_accessible_route_carries_no_such_warning(tmp_cache_db) -> None:

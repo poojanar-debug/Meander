@@ -52,7 +52,7 @@ export default function ShareButton({ origin, dest, minutes, mode, objectives, d
       report('Link copied. It reproduces these exact routes.')
     } catch {
       setFallbackUrl(url)
-      report('Could not copy automatically — the link is below.')
+      report('Could not copy automatically. The link is below.')
     }
   }
 

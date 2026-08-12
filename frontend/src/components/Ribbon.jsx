@@ -27,7 +27,7 @@ export default function Ribbon({ routes }) {
         ⚠
       </span>
       <span>
-        Demonstration data — routes come from fixtures, not live routing. Do not follow them.
+        Demonstration data: routes come from fixtures, not live routing. Do not follow them.
       </span>
     </section>
   )

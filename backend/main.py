@@ -1290,8 +1290,8 @@ async def _stream(req: RouteRequest, cache_key: str) -> AsyncIterator[str]:
                     "type": "error",
                     "kind": "shutting_down",
                     "message": (
-                        "This server is restarting. Your request was not finished — "
-                        "please try again in a moment."
+                        "This server is restarting. Your request was not finished. "
+                        "Please try again in a moment."
                     ),
                 })
                 return
@@ -1440,8 +1440,8 @@ async def post_routes(req: RouteRequest, request: Request, response: Response) -
             if _shutting_down.is_set():
                 return _error(
                     "shutting_down",
-                    "This server is restarting. Your request was not finished — "
-                    "please try again in a moment.",
+                    "This server is restarting. Your request was not finished. "
+                    "Please try again in a moment.",
                     503,
                 )
             if event["type"] == "done":

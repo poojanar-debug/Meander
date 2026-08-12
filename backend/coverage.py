@@ -132,7 +132,7 @@ async def outside_coverage(lat: float, lon: float) -> Coverage | None:
 def message(extent: Coverage) -> str:
     return (
         "Meander does not cover that area yet. This server has only part of the "
-        f"world's map loaded — {extent.describe()} — and your starting point is "
+        f"world's map loaded ({extent.describe()}), and your starting point is "
         "outside it. Nothing you did caused this, and moving a little will not help."
     )
 
@@ -240,8 +240,8 @@ def unroutable_point_message(extent: Coverage, lat: float | None = None,
     if inside is False:
         return (
             "Meander does not cover that area yet. This server has only part of the "
-            f"world's map loaded — {extent.describe()}, and not all of it even inside "
-            "that — and this area is not one of the parts. Nothing you did caused "
+            f"world's map loaded ({extent.describe()}), and not all of it even inside "
+            "that, and this area is not one of the parts. Nothing you did caused "
             "this, and moving a little will not help."
         )
     if inside is True:
@@ -251,7 +251,7 @@ def unroutable_point_message(extent: Coverage, lat: float | None = None,
         )
     return (
         "No routable path was found near that point. This server has only part of "
-        f"the world's map loaded — {extent.describe()}, and not all of it even "
-        "inside that — so either this area is not included yet, or there is no "
+        f"the world's map loaded ({extent.describe()}), and not all of it even "
+        "inside that, so either this area is not included yet, or there is no "
         "path close enough to that exact spot. Nothing you did caused this."
     )

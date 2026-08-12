@@ -85,7 +85,7 @@ export default function TakeItWithYou({ route, origin, dest, onAnnounce }) {
         </div>
 
         <p className="takeaway__note">
-          The file carries the coverage figure, how it was measured, and any recorded barriers — so
+          The file carries the coverage figure, how it was measured, and any recorded barriers;
           it still says what it does and does not know once it has left this page.
         </p>
 

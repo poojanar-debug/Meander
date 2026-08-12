@@ -171,7 +171,7 @@ class RouteAccessibility:
         if self.coverage < VERY_LOW_CONFIDENCE_THRESHOLD:
             body = (
                 f"{self._subject()} covers only {pct}% of this route. "
-                "Most of it is unverified — do not rely on it."
+                "Most of it is unverified. Do not rely on it."
             )
         elif self.coverage < LOW_CONFIDENCE_THRESHOLD:
             body = (

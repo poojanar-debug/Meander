@@ -4235,3 +4235,89 @@ height row predated the safe-area work and still said `56 px`; it is
 written there. The wordmark row now describes the button. The profile button
 row says it is deliberately not built, which `Topbar.jsx` had explained and the
 spec had not.
+
+## §13.8 — No em dash in text a user reads
+
+The ask was to remove em dashes from the website. **"The website" is text a user
+reads in the UI**, not the 3,605 dashes in the repository: the top six files are
+all prose documentation and hold 59.7% of them between them, and comments here
+explain *why* at the point of the trade-off, in full sentences, which is the
+house voice and is staying.
+
+Measured on this tree before and after: **em 3821 -> 3765 and en 60 -> 55**, so
+**56 em dashes and 5 en dashes went**, against the 55 em + 1 en the census
+predicted for the user-visible subset. The extras are `frontend/a11y.html`'s
+`<title>`, which the census had not listed, and the glyphs inside the tests and
+comments that quoted the copy being changed.
+
+`styles.css` needed nothing: all 42 of its em dashes are inside `/* */`
+comments and none is in a declaration.
+
+### The one decision
+
+Five formatters returned a bare `—` for "value unknown", and the rule that
+enforces is load-bearing and stated at `units.js`: **an unknown distance must
+never render as `0 m`.** A route whose elevation profile is missing has not been
+measured as flat.
+
+Four of the five render into `.tabular` numeric slots — `RouteRow`'s distance
+line, three `ElevationProfile` axis labels in one row, `RouteDetail`,
+`FollowMode`, `StepList`, `ReportBarrier` — where seven glyphs where there was
+one is a horizontal-overflow risk the gate checks at 320px. Those four share one
+exported `UNKNOWN = '-'`. The fifth, `fmtPct`, is prose rather than a number in
+a column and says **"Unknown"**, which is better to hear.
+
+The accepted cost is written down beside the constant: a hyphen is thinner than
+an em dash and can read as a minus sign in a column of numbers. It is tolerable
+here because every one of those slots carries a unit beside it, so `- m` cannot
+be mistaken for a negative distance the way a bare `-` could. The gate is green
+at 320px and 390px either way.
+
+### What the census got wrong, and it matters
+
+The inventory classified four `test_accessibility.py` assertions as **soft
+couplings** that would survive the change, because they assert `"do not rely on
+it"` — a substring starting immediately after the dash. They did not survive.
+The proposed replacement was a full stop, which capitalises the next word:
+`"Most of it is unverified. Do not rely on it."` The lowercase substring stopped
+matching and three tests went red. They now compare case-insensitively, so the
+assertion pins the claim rather than the punctuation in front of it.
+
+Everything else the census predicted held: `icons.test.js` forces
+`index.html`'s `<title>` and the manifest's `name` to be byte-identical and
+would have failed on one without the other; `units.test.js`'s frozen
+`reference()` oracle carries the glyph in a branch **the loop never executes**,
+so leaving it stale would not have turned the suite red; and `sun.test.js:310`
+pins the en dash inside a regex.
+
+Three comments that quoted the old copy moved with it — `sun.js` twice on
+`"Daylight today: 16:44 – 05:08"`, and `ThemeToggle.jsx` on its own accessible
+name. This repo treats a stale comment as a defect.
+
+### The CSP hash does not move, and the worker's does
+
+`index.html` has exactly one inline `<script>`, 588 bytes, with no dash in it.
+Recomputed after the change: `sha256-rXb3GrH6fQu5rzdJqUPl87syYzPxM2UTz++hiaG3xVo=`,
+byte-identical to `public/_headers`. The service worker's `VERSION` **does**
+move, `d93c6e1650d9` -> `e4eb2f2130fe`, which is correct — it hashes contents,
+`index.html` changed, and every installed client re-fetches the shell once.
+
+### It cannot come back
+
+Two guards, one per language, and both were checked against a deliberately
+reintroduced dash before being believed.
+
+`frontend/src/lib/no-em-dash.test.js` scans 51 shipped surfaces with comments
+blanked. ⚠ Its tokeniser has to recognise **regex literals**, and that is not
+decoration: without it, `export.js`'s `.replace(/"/g, '&quot;')` opens a
+double-quoted string on the `"` inside the pattern, the scanner never closes it,
+and every block comment after that point is reported as live code. That happened,
+on four lines, before the heuristic was added.
+
+`backend/tests/test_no_em_dash.py` walks the `ast` of the nine modules that can
+put a sentence in front of a user, skipping module, class and function
+docstrings. It also asserts that the two **bracketing pairs** stayed brackets:
+`coverage.py` and `routing.py` each opened a clause with one dash and closed it
+with another, and `Coverage.describe()` returns "roughly 6°N to 55°N, 1°W to
+80°E" — a string with a comma in it — straight into the middle of one. Commas
+there would have produced a sentence with four of them and no structure.

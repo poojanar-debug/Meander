@@ -60,9 +60,9 @@ export function provenanceNote(route) {
   // Three answers, not two. "Not checked" and "none found" are different facts,
   // and a file that conflates them is worse than one that says nothing.
   if (route.enrichment_pending) {
-    parts.push('Rest stops were still being checked when this was exported — the list may be incomplete.')
+    parts.push('Rest stops were still being checked when this was exported. The list may be incomplete.')
   } else if (route.rest_stops == null) {
-    parts.push('Rest stops were not checked for this route — that is not the same as there being none.')
+    parts.push('Rest stops were not checked for this route. That is not the same as there being none.')
   } else if (route.rest_stops.length === 0) {
     parts.push('No rest stops found along this route.')
   } else {

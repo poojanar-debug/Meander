@@ -38,6 +38,30 @@ const VALID_CLOCK = new Set(['12', '24'])
  */
 const IMPERIAL_REGIONS = new Set(['US', 'GB', 'MM', 'LR'])
 
+/**
+ * What a number that is not known renders as.
+ *
+ * **The rule this enforces is load-bearing and unchanged: an unknown distance
+ * must never render as `0 m`.** A route whose elevation profile is missing has
+ * not been measured as flat, and a rest-stop count that could not be checked is
+ * not zero rest stops. Everything about this constant is in service of that one
+ * sentence; only the glyph moved.
+ *
+ * It was an em dash. This is the ASCII hyphen instead, because the em dash is
+ * the one the app is removing and this is the one place it was typography
+ * rather than prose. The word "Unknown" would be better to hear and is what
+ * `fmtPct` uses — but these four render into `.tabular` numeric slots
+ * (`RouteRow`'s distance line, three `ElevationProfile` axis labels in one row,
+ * `RouteDetail`, `FollowMode`, `StepList`, `ReportBarrier`), where seven glyphs
+ * where there was one is a horizontal-overflow risk the gate checks at 320px.
+ *
+ * ⚠ The known cost: a hyphen is thinner than an em dash and can read as a minus
+ * sign in a column of numbers. It is accepted here because every one of these
+ * slots carries a unit beside it, so "- m" cannot be mistaken for a negative
+ * distance the way a bare "-" could.
+ */
+export const UNKNOWN = '-'
+
 const M_PER_FOOT = 0.3048
 const M_PER_MILE = 1609.344
 
@@ -129,7 +153,7 @@ export function initialUnits() {
 }
 
 /**
- * "480 m", "2.4 km", "520 ft", "1.6 mi" — or "—" when the distance is unknown.
+ * "480 m", "2.4 km", "520 ft", "1.6 mi" — or `UNKNOWN` when it is not known.
  *
  * The metric branch is the pre-existing `fmtDist` expression, kept verbatim
  * rather than rewritten. It agrees with the old one on every integer metre from
@@ -141,7 +165,7 @@ export function initialUnits() {
  * byte-identity property above. It belongs in its own change.)
  */
 export function formatDistance(metres, units = METRIC_24) {
-  if (metres == null || Number.isNaN(metres)) return '—'
+  if (metres == null || Number.isNaN(metres)) return UNKNOWN
   if (units.distance !== 'imperial') {
     if (metres < 1000) return `${Math.round(metres / 10) * 10} m`
     return `${(metres / 1000).toFixed(metres < 10000 ? 1 : 0)} km`
@@ -176,11 +200,11 @@ export function fmtClockIn(date, units = METRIC_24) {
 }
 
 /**
- * Metres of climb, in the chosen system. "—" when unknown, never "0 m": a route
- * whose elevation profile is missing has not been measured as flat.
+ * Metres of climb, in the chosen system. `UNKNOWN` when unknown, never "0 m": a
+ * route whose elevation profile is missing has not been measured as flat.
  */
 export function formatElevation(metres, units = METRIC_24) {
-  if (metres == null || Number.isNaN(metres)) return '—'
+  if (metres == null || Number.isNaN(metres)) return UNKNOWN
   if (units.distance !== 'imperial') return `${Math.round(metres)} m`
   return `${Math.round(metres / M_PER_FOOT)} ft`
 }

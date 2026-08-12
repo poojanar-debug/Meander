@@ -534,7 +534,7 @@ def _shape_upstream_error(response: httpx.Response) -> RoutingError:
         return PresetUnavailable(
             "This objective needs GraphHopper's flexible routing mode, which free "
             "API packages do not include. The fastest route still works, and "
-            "everything else — accessibility checks, rest stops, air quality — is "
+            "everything else (accessibility checks, rest stops, air quality) is "
             "unaffected. A paid GraphHopper plan enables it."
         )
     if "profile parameter can only be one of" in lowered:
@@ -553,14 +553,14 @@ def _shape_upstream_error(response: httpx.Response) -> RoutingError:
             return RoutingError(
                 "auth",
                 "The routing service refused this request. That server is one this "
-                "deployment runs itself, so this is something in front of it — a "
-                "proxy or an access rule — rather than an API key. Nothing you did "
+                "deployment runs itself, so this is something in front of it (a "
+                "proxy or an access rule) rather than an API key. Nothing you did "
                 "caused this.",
                 status_code=503,
             )
         return RoutingError(
             "auth",
-            "Routing is not configured on this server — its GraphHopper key is missing or "
+            "Routing is not configured on this server: its GraphHopper key is missing or "
             "rejected. Nothing you did caused this.",
             status_code=503,
         )

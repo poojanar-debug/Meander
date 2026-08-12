@@ -129,7 +129,7 @@ export default function RouteDetail({
         <h4 className="detail__h">Along the way</h4>
         {route.rest_stops == null ? (
           <p className="field__hint">
-            Rest stops could not be checked for this route — that is not the same as there being
+            Rest stops could not be checked for this route. That is not the same as there being
             none.
           </p>
         ) : route.rest_stops.length === 0 ? (
@@ -239,7 +239,7 @@ export default function RouteDetail({
       {takeaway}
 
       <p className="detail__pattern-note">
-        Drawn as a {style.pattern} line{route.geometry?.length > 1 ? '' : ' — no geometry available'}.
+        Drawn as a {style.pattern} line{route.geometry?.length > 1 ? '' : ' (no geometry available)'}.
       </p>
     </article>
   )

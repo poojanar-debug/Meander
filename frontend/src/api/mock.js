@@ -333,7 +333,7 @@ const NARRATION = {
   scenic:
     'Cuts east into the park after four minutes and stays under trees almost to the end. Two benches on the way, and a water fountain roughly half way.',
   accessible:
-    'Follows quiet residential streets with dropped kerbs — until the canal crossing, where three steps stop it. Nothing in the road data offers a way around.',
+    'Follows quiet residential streets with dropped kerbs until the canal crossing, where three steps stop it. Nothing in the road data offers a way around.',
 }
 
 export async function mockFetchRoutes(req, { signal, onProgress, onRoute } = {}) {

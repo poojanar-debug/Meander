@@ -800,7 +800,7 @@ export default function MapView({
           markerElement(
             'marker--blocker',
             '✕',
-            `Barrier on the ${route.label} route — ${blocker.type}: ${blocker.description}`,
+            `Barrier on the ${route.label} route. ${blocker.type}: ${blocker.description}`,
           ),
         )
       }
@@ -843,7 +843,7 @@ export default function MapView({
       {failed && (
         <div className="map__fallback">
           <p>
-            The map could not load. Every route is described in full in the list beside it —
+            The map could not load. Every route is described in full in the list beside it;
             nothing is missing from it.
           </p>
         </div>

@@ -42,11 +42,11 @@ export default function TimeDial({ minutes, mode, effectiveMode, onChange }) {
       <p className="dial__mode" id="time-dial-hint">
         {mode === 'auto' ? (
           <>
-            {verb.charAt(0).toUpperCase() + verb.slice(1)} — chosen automatically from your time
+            {verb.charAt(0).toUpperCase() + verb.slice(1)}, chosen automatically from your time
             budget.
           </>
         ) : (
-          <>{verb.charAt(0).toUpperCase() + verb.slice(1)} — chosen by you.</>
+          <>{verb.charAt(0).toUpperCase() + verb.slice(1)}, chosen by you.</>
         )}
       </p>
 

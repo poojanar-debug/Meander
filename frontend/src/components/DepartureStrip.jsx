@@ -78,7 +78,7 @@ export default function DepartureStrip({
           </strong>
           {/* §6.2: with no reason from the backend, the time and the word "best"
               and nothing more. The reason clause is not ours to invent. */}
-          {reason ? ` — ${reason}` : ' — the best time in the next few hours.'}
+          {reason ? `. ${reason}` : ', the best time in the next few hours.'}
         </p>
       )}
 
@@ -105,7 +105,7 @@ export default function DepartureStrip({
                 </span>
               )}
               {fmtClock(hour, units)}
-              {dark && <span className="visually-hidden"> — after dark</span>}
+              {dark && <span className="visually-hidden">, after dark</span>}
             </button>
           )
         })}
