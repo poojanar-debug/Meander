@@ -221,31 +221,14 @@ for (const width of [320, 390]) {
 const openDetails = `(() => { for (const d of document.querySelectorAll('details')) d.open = true; return true })()`
 const disclosures = `(() => [...document.querySelectorAll('[aria-expanded]')].length)()`
 
-await load(390, 844, true)
-for (const theme of ['light', 'dark']) {
-  await setTheme(theme)
-  await cdp.evaluate(openDetails)
-  await new Promise((r) => setTimeout(r, 250))
-  const passes = await cdp.evaluate(disclosures)
-  check(`[${theme}] there are disclosures to sweep`, passes > 0, `${passes}`)
-  // One sweep per disclosure, opening each in turn, unioning the offenders.
-  const small = []
-  for (let pass = 0; pass <= passes; pass += 1) {
-    if (pass > 0) {
-      await cdp.evaluate(`(() => {
-        const all = [...document.querySelectorAll('[aria-expanded]')]
-        const target = all[${pass - 1}]
-        if (target && target.getAttribute('aria-expanded') === 'false') target.click()
-        for (const d of document.querySelectorAll('details')) d.open = true
-        return true })()`)
-      await new Promise((r) => setTimeout(r, 250))
-    }
-    const found = await sweep()
-    for (const offender of found) if (!small.includes(offender)) small.push(offender)
-  }
-
-  async function sweep() {
-    return cdp.evaluate(`(() => {
+// Hoisted to module scope rather than declared inside the theme loop below,
+// which is where it used to live. A function declared in that loop body is
+// reachable from nowhere else in the file, and the one screen this gate had
+// never swept — follow mode, section 7 — needs exactly this measurement. The
+// alternative was a second copy of the WCAG 2.5.8 exemption logic, and two
+// copies of an accessibility rule drift apart silently.
+async function sweep() {
+  return cdp.evaluate(`(() => {
     const sel = 'button:not([disabled]), a[href], input, select, [role="option"]'
     // WCAG 2.2 SC 2.5.8 exempts a target that is "in a sentence or its size is
     // otherwise constrained by the line-height of non-target text". Implemented
@@ -269,8 +252,36 @@ for (const theme of ['light', 'dark']) {
       })
       .map(el => \`\${el.tagName.toLowerCase()}.\${(el.className||'').split(' ')[0]} \${Math.round(el.getBoundingClientRect().width)}x\${Math.round(el.getBoundingClientRect().height)}\`)
       .slice(0, 8) })()`)
-  }
+}
 
+// Open every disclosure in turn and union the offenders, so a control only
+// reachable behind an open drawer is still measured.
+async function sweepEveryDisclosure(theme) {
+  await cdp.evaluate(openDetails)
+  await new Promise((r) => setTimeout(r, 250))
+  const passes = await cdp.evaluate(disclosures)
+  check(`[${theme}] there are disclosures to sweep`, passes > 0, `${passes}`)
+  const small = []
+  for (let pass = 0; pass <= passes; pass += 1) {
+    if (pass > 0) {
+      await cdp.evaluate(`(() => {
+        const all = [...document.querySelectorAll('[aria-expanded]')]
+        const target = all[${pass - 1}]
+        if (target && target.getAttribute('aria-expanded') === 'false') target.click()
+        for (const d of document.querySelectorAll('details')) d.open = true
+        return true })()`)
+      await new Promise((r) => setTimeout(r, 250))
+    }
+    const found = await sweep()
+    for (const offender of found) if (!small.includes(offender)) small.push(offender)
+  }
+  return small
+}
+
+await load(390, 844, true)
+for (const theme of ['light', 'dark']) {
+  await setTheme(theme)
+  const small = await sweepEveryDisclosure(theme)
   check(`[${theme}] every target clears 44x44`, small.length === 0, small.slice(0, 6).join('; '))
 }
 
@@ -317,6 +328,128 @@ const substitute = await cdp.evaluate(`(() => {
            liveRegions: document.querySelectorAll('[role="status"][aria-live="polite"]').length } })()`)
 check('every route row carries its own text', substitute.rows > 0 && substitute.allNamed, `${substitute.rows} rows`)
 check('there is exactly one polite live region', substitute.liveRegions === 1, `${substitute.liveRegions}`)
+
+// 7. FOLLOW MODE — the screen nothing automated had ever entered.
+//
+// Until this section existed, follow mode was the only user-facing screen in
+// the app with no coverage of any kind: `gate.mjs` reached it through neither
+// of its two entry points (it is not a `<details>` and carries no
+// `aria-expanded`), and the 16 vitest files render no components at all. So
+// `.follow` had never been through axe and never been through the 44x44 sweep,
+// and the sheet had been overflowing its own container on every phone in
+// portrait since it was written.
+//
+// Measured at e6ed697, before the fix, in this browser: the sheet's bottom edge
+// lands 13.36px past `.stage` at 390x844 (iPhone SE +23.98, 13 mini +15.28,
+// Pixel 7 +9.11, iPad portrait +2.56), and `.panel`'s padding below 420px is
+// var(--s3) = 12px, not the 16px it is above that width — so the spill clears
+// the padding and overlaps the first `.seg` by 1.36px. The map above the sheet
+// gets a 64px strip on every viewport, because `padding-top` 12 + exit 44 +
+// gap 8 are all fixed pixels and none of them scale.
+//
+// `.follow` and `.sheet` are deliberately NOT in the top-level MANIFEST. The
+// rule stated at the head of this file is that a selector matching zero
+// elements is a failure rather than a skip, and those two match zero elements
+// on every load that has not entered follow mode — putting them up there would
+// fail every normal pass.
+const FOLLOW_MANIFEST = [
+  ['.follow', 'FollowMode.jsx — the overlay'],
+  ['.sheet', 'FollowMode.jsx — the instruction sheet'],
+]
+
+// The button is in `.detail__actions`, deep inside `.panel` and below a stage
+// more than a viewport tall on a phone, so it has to be scrolled to before it
+// can be clicked. `scrollIntoView` first is not cosmetic: it is how a thumb
+// reaches it, and clicking from scrollY 0 would measure a state no user is in.
+async function enterFollow() {
+  const clicked = await cdp.evaluate(`(() => {
+    const b = [...document.querySelectorAll('button')]
+      .find(x => /start this route/i.test(x.textContent || ''))
+    if (!b) return 'absent'
+    if (b.disabled) return 'disabled'
+    b.scrollIntoView({ block: 'center' })
+    b.click()
+    return 'clicked' })()`)
+  for (let i = 0; i < 40; i += 1) {
+    if (await cdp.evaluate(`!!document.querySelector('.follow')`)) return clicked
+    await new Promise((r) => setTimeout(r, 100))
+  }
+  return clicked
+}
+
+await load(390, 844, true)
+const entered = await enterFollow()
+const followCounts = await cdp.evaluate(
+  `(${JSON.stringify(FOLLOW_MANIFEST.map((m) => m[0]))}).map(s => document.querySelectorAll(s).length)`,
+)
+let followOk = true
+FOLLOW_MANIFEST.forEach(([selector, owner], i) => {
+  if (!check(`[follow] ${selector} matches something (${owner})`, followCounts[i] > 0, `${followCounts[i]} found, entry: ${entered}`)) {
+    followOk = false
+  }
+})
+
+if (followOk) {
+  // The overflow that put this section here. Asserted against `.follow`'s
+  // content box rather than the stage's border box so the check keeps meaning
+  // the same thing after the overlay becomes `position: fixed` below 900px:
+  // in both layouts the question is whether the sheet fits the layer that owns
+  // it. `.follow` staying inside the viewport is the second half of that — a
+  // fixed layer taller than the screen is the same defect one level up.
+  const geom = await cdp.evaluate(`(() => {
+    const follow = document.querySelector('.follow')
+    const sheet = document.querySelector('.sheet')
+    const cs = getComputedStyle(follow)
+    const fb = follow.getBoundingClientRect(), sb = sheet.getBoundingClientRect()
+    const contentBottom = fb.bottom - parseFloat(cs.paddingBottom)
+    return {
+      spill: +(sb.bottom - contentBottom).toFixed(2),
+      belowViewport: +(fb.bottom - innerHeight).toFixed(2),
+      strip: +(sb.top - fb.top).toFixed(2),
+      // scrollHeight past clientHeight means flex-shrink squeezed the sheet
+      // below its own text, which an explicit min-height permits because it
+      // overrides the min-height:auto that would otherwise floor it.
+      clipped: sheet.scrollHeight > sheet.clientHeight + 1,
+      clip: sheet.scrollHeight + ' content vs ' + sheet.clientHeight + ' box' } })()`)
+  check(
+    '[follow] the sheet fits inside the follow layer',
+    geom.spill <= 1 && geom.belowViewport <= 1,
+    `sheet overhangs by ${geom.spill}px, layer past viewport by ${geom.belowViewport}px, map strip ${geom.strip}px`,
+  )
+  check('[follow] the sheet is not squeezed below its own content', !geom.clipped, geom.clip)
+
+  const followOverflow = await cdp.evaluate(`(() => {
+    const doc = document.documentElement
+    const wide = [...document.querySelectorAll('*')]
+      .filter(el => el.getBoundingClientRect().right > doc.clientWidth + 1)
+      .slice(0, 5).map(el => el.className || el.tagName)
+    return { scrollW: doc.scrollWidth, clientW: doc.clientWidth, wide } })()`)
+  check(
+    '[follow] no horizontal scroll at 390px',
+    followOverflow.scrollW <= followOverflow.clientW + 1,
+    `${followOverflow.scrollW} vs ${followOverflow.clientW}${followOverflow.wide.length ? ` — ${followOverflow.wide.join(', ')}` : ''}`,
+  )
+
+  for (const theme of ['light', 'dark']) {
+    await setTheme(theme)
+    const small = await sweep()
+    check(`[follow][${theme}] every target clears 44x44`, small.length === 0, small.slice(0, 6).join('; '))
+    await cdp.evaluate(axeSource)
+    const violations = await cdp.evaluate(`(async () => {
+      const r = await axe.run(document, { runOnly: { type: 'tag', values: ['wcag2a','wcag2aa'] } })
+      return r.violations.map(v => \`\${v.id} (\${v.nodes.length})\`) })()`)
+    check(`[follow][${theme}] axe reports no wcag2a/2aa violations`, violations.length === 0, violations.join('; '))
+  }
+
+  // Counted in this pass too, deliberately. The check in section 6 cannot see a
+  // live region rendered inside FollowMode, because the gate never got here —
+  // so "exactly one" was only ever an assertion about the screens it visited.
+  // DESIGN-HANDOFF §6.7 asks for one voice; this is where that is now checked.
+  const followLive = await cdp.evaluate(
+    `document.querySelectorAll('[role="status"][aria-live="polite"]').length`,
+  )
+  check('[follow] there is still exactly one polite live region', followLive === 1, `${followLive}`)
+}
 
 // ------------------------------------------------------------------- report
 

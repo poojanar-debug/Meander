@@ -2969,6 +2969,10 @@ deployment machine, which is worth more than it sounds — the layout gate had
 never been run anywhere but CI, and it is the one this repo already caught
 grading nothing at all.
 
+(The gate is 35 checks as of the phone pass. The ten new ones are a second load
+that enters follow mode and re-runs the overflow check, the 44 x 44 sweep and
+axe there, in both themes. See §13.)
+
 **Installing Chromium put a printer daemon on the box.** The snap pulls in
 `cups`, which starts `cupsd` and `cups-browsed` listening on `0.0.0.0:631`. It
 is not reachable — `cupsd` is a host process, so INPUT rule 7 rejects it on any
@@ -3586,3 +3590,103 @@ Pre-existing, noticed here because it kept appearing in `git status`, not fixed.
 
 **Live API calls this phase:** about a dozen route requests across four gate
 runs, most served from the route cache. No run was rate-limited.
+
+# The phone pass · 2026-08-12
+
+Nine parts, on branch `phone-pass`, from `e6ed697`. Everything below was
+measured on the Oracle A1 VM with the real stack up: self-hosted GraphHopper,
+the real API on `127.0.0.1:8000`, and Chromium 150.0.7871.128 from snap at
+`/snap/bin/chromium`.
+
+## §13 — Follow mode had never been looked at by anything
+
+The brief's first instruction was to point the gate at follow mode *before*
+changing any follow-mode code, on the grounds that a number nobody has
+reproduced is not a measurement. That turned out to matter twice.
+
+**Nothing had ever entered this screen.** `gate.mjs` reaches the app's
+collapsibles two ways — `document.querySelectorAll('details')` and
+`[aria-expanded]` — and "Start this route" is neither, so the gate had never
+seen `.follow`. The 16 vitest files contain 331 `it()`/`test()` call sites and
+render no components at all: no jsdom, no testing-library, no browser-mode
+vitest. Two suites read `FollowMode.jsx` as *source text*
+(`units-callsites.test.js`, and `follow.test.js` covers the geometry module), so
+the file was not unpinned — but its DOM had never existed anywhere outside a
+real user's phone.
+
+The gate is now 35 checks. The ten new ones load 390x844, scroll to the Start
+button the way a thumb has to, click it, wait for `.follow`, and then re-run the
+overflow check, the 44 x 44 sweep and axe in both themes, plus the live-region
+count. `.follow` and `.sheet` are in a manifest of their own rather than the
+top-level one: the gate's stated rule is that a selector matching zero elements
+is a failure and not a skip, so listing them up there would fail every load that
+does not enter follow mode.
+
+**What the new pass found, at `e6ed697`, in a real browser.** The a11y baseline
+is clean — axe reports nothing in either theme and every target clears 44 x 44,
+which is worth knowing because it means what follows is a layout defect and not
+an accessibility one. The layout check fails:
+
+```
+FAIL  [follow] the sheet fits inside the follow layer
+      [sheet overhangs by 25.36px, layer past viewport by -431.17px, map strip 64px]
+```
+
+Per device, the spill past `.stage`'s border box:
+
+| device | viewport | predicted | measured |
+|---|---|---|---|
+| iPhone SE | 375x667 | +24.0 | **+23.98** |
+| iPhone 13 mini | 375x812 | +15.3 | **+15.28** |
+| iPhone 14/15 | 390x844 | +13.4 | **+13.36** |
+| Pixel 7 | 412x915 | +9.1 | **+9.11** |
+| iPad portrait | 768x1024 | +2.6 | **+2.56** |
+
+The map strip above the sheet is **64px on every viewport**, exactly as
+predicted, because `padding-top` 12 + exit 44 + gap 8 are three fixed pixel
+values and none of them scale with the screen.
+
+**Two things the arithmetic got wrong, and one it got right for the wrong
+reason.**
+
+1. The spill past `.follow`'s *content box* at 390x844 is **25.36px**, not
+   13.36px. 13.36 is the spill past the *stage's border box*. The two differ by
+   `.follow`'s 12px `padding-bottom`, and the per-device table above is the
+   border-box number.
+2. **The sheet does reach the trip bar on a 390x844 phone.** The prediction of
+   2.6px of clearance assumed `.panel` has 16px of top padding. It does above
+   420px; at 390px `styles.css:1715` overrides it to `var(--s3)` = **12px**.
+   Measured: `.panel.top` 412.83, `.seg.top` 424.83, `.sheet.bottom` 426.19 —
+   the sheet overlaps the first segment by **1.36px**.
+3. The landscape squeeze reproduces: at 844x390 the sheet box is 154.0px against
+   170px of content, `scrollHeight > clientHeight`, so the text clips. The
+   predicted content height of 208.3px is wrong but the failure is real, and it
+   is the `min-height: 30vh` overriding `min-height: auto` that permits it.
+   iPhone SE *portrait* does **not** clip (box 200.09 against 198 of content).
+
+**The scroll jump is real and much larger than described.** Scrolling to "Start
+this route" the way a thumb must, then clicking, the document teleports:
+
+| device | scrollY before | after |
+|---|---|---|
+| iPhone 14/15 | 1338 | 0 |
+| iPhone SE | 1736 | 0 |
+| Pixel 7 | 1570 | 0 |
+
+That is `exitRef.current?.focus()` with no `preventScroll`. The further
+prediction — that the Stop button lands *under* the 56px topbar — does not
+reproduce, and it cannot: `.stage` is `order: -1`, so it is the first thing in
+the document, the scroll clamps at 0, and the button sits at y=121. The jump is
+the defect; the burial is not.
+
+**The map controls really are buried.** `document.elementFromPoint` at
+`.map__controls`' own centre returns a `<span>` from inside `.follow`.
+`.follow` is z-index 30 over `.map__controls` at 5, so the recentre and zoom
+controls sit underneath the overlay whose whole design justification is that the
+map underneath stays reachable.
+
+**A limiter finding fell out of this for free.** The first measurement pass ran
+against the real API rather than the mock, drove `rate_limited_total` from 21 to
+27 in a single run over seven viewports, and left **three of the seven with no
+routes at all**. Capacity 12, refill 1.0/min, one bucket shared with geocode.
+That is Part 2's thesis reproducing itself on the machine, unprompted.
