@@ -2969,9 +2969,8 @@ deployment machine, which is worth more than it sounds — the layout gate had
 never been run anywhere but CI, and it is the one this repo already caught
 grading nothing at all.
 
-(The gate is 35 checks as of the phone pass. The ten new ones are a second load
-that enters follow mode and re-runs the overflow check, the 44 x 44 sweep and
-axe there, in both themes. See §13.)
+(The gate is 39 checks as of the phone pass: ten that enter follow mode, and
+four over the panel's scroll arrangement. See §13 and §13.2.)
 
 **Installing Chromium put a printer daemon on the box.** The snap pulls in
 `cups`, which starts `cupsd` and `cups-browsed` listening on `0.0.0.0:631`. It
@@ -3796,3 +3795,114 @@ that was checked rather than assumed.** OpenFreeMap's vector source declares
 `maxzoom: 14`, so every zoom past 14 is served by overzooming tiles the client
 already holds — and the whole-route view had already fetched exactly those z14
 tiles. Hence three requests in the session and none of them a tile.
+
+## §13.2 — The trip bar comes out of the scrollport
+
+The ask was that the location and destination stay in front while the rest
+scrolls, and that some gaps be closed. Both halves were real, and the first one
+was worse than it looked.
+
+**Re-measured in Chromium 150 before touching anything**, because the figures in
+the brief were arithmetic on declared tokens and two passes over the same CSS
+had disagreed by 29px. Against an 808px desktop scrollport at 1200x900:
+
+| state | pinned height | share of the scrollport |
+|---|---|---|
+| closed | **133px** | 16.5% |
+| "To" open | 299px | 37.0% |
+| "To" + suggestions | 318.5px | 39.4% (up to ~559 with a full list) |
+| "From" open | 306px | 37.9% |
+| "Compare" open | 391px | 48.4% |
+| **"Time & travel" open** | **801.5px** | **99.2%** |
+
+The predicted 125px closed is 133 measured; the predicted 291px for the
+destination drawer is 299. The last row is new and is the whole argument:
+opening the drawer that holds the dial, the mode select and the units control
+pinned **99.2% of the desktop scrollport**, leaving 6.5px of scrollable results,
+and none of it could be scrolled away because a sticky element at `top: 0` is by
+definition the thing that does not move. A 668px swing in the height of an
+unscrollable region is not something to compensate for with a
+`scroll-padding-top`.
+
+At 320px the bar is **266px** closed, exactly as predicted — though it is
+`static` there, so it does not pin.
+
+**After.** `.tripbar` is a non-scrolling sibling above a new `.panel__scroll`.
+An open drawer now shortens the scrolling area instead of freezing it: with
+"Time & travel" open the bar is 426.5px and about 349px of results remain
+scrollable, against 6.5px before.
+
+Two things had to be got right on the way, and neither was in the plan.
+
+**The bar has to be bounded, or the fix trades a frozen scrollport for an
+unreachable control.** As a `flex: none` sibling its 806.5px would come out of
+the scroller first, and on any window shorter than about 810px the bar itself
+would be clipped by `.panel`'s `overflow-y: hidden` — the units control simply
+gone. So the bar is `flex: 0 1 auto` with `max-height: 55%`, the segments are
+`flex: none`, and the open drawer scrolls inside it. Below 900px `.panel` is
+content-sized, so that percentage resolves against an indefinite height and
+computes to `none`, which is right: the document scrolls there and nothing is
+frozen.
+
+**`flex-basis` on the scroller had to be 0, not `auto`.** With `auto` the
+scroller's flex base size is its entire content height, the column is
+over-subscribed by thousands of pixels, and the shrink is shared with the bar —
+measured, the bar rendered **63.05px against 138px of content**, with the
+segment labels clipped. Below 900px the same declaration is wrong the other way,
+because `.panel` there has no definite height, so the mobile override sets
+`flex: none`.
+
+**The seams.** `.panel`'s 16px flex gap and `.tripbar`'s 8px `padding-bottom`
+both sat between the bar and `#results` — 24px of dead paper — while the bar's
+background is `var(--paper)`, byte-identical to the panel's (both computed
+`rgb(246, 243, 236)`), with no `border-bottom` and no `box-shadow` in the rule
+at all. One separation now, with a 1px `var(--rule)` edge in it, exactly as
+`.topbar` has always had.
+
+**The skip link.** `grep -rn "scroll-margin\|scroll-padding" frontend/` returned
+zero matches. Measured before: pressing Tab then Enter on load put `#results` at
+**y = -0.2** on mobile with the topbar's bottom edge at 56, so the top 56px of
+the results region was behind an opaque bar. `html { scroll-padding-top:
+var(--topbar-h) }` fixes it; measured after, the same keystroke lands the region
+at 56.
+
+One correction to what was predicted: on the happy path the `<h2>` reading
+"Three ways back" sits 88px into `#results`, so **the heading itself was not
+buried** — what was buried was the top of the region, which in the `error`,
+`idle`, `locating` and `loading` states is the `StatusBanner`. And on desktop it
+never happened at all: `.panel` was its own scrollport starting below the
+topbar, so scrolling inside it could not hide anything behind the bar. The
+alternative reading in the brief is the correct one.
+
+`--topbar-h` is now a token in the theme-invariant block, read through
+`var(--safe-top)` rather than `env()` so the four-call budget stays at four.
+
+## §13.3 — The gate could grade the previous build
+
+Found while doing the above, and it is the more serious finding of the two.
+
+`gate.mjs` launches Chrome with a fixed `--user-data-dir`, so the profile
+survives between runs, and `sw.js` precaches the app shell and serves it
+**cache-first without revalidating**. A gate run therefore graded whatever build
+was current the last time that profile was used.
+
+It was observed rather than reasoned about: a run straight after the panel
+restructure reported `.panel__scroll` matching **zero elements** while `grep`
+found the class in the served bundle and `curl` confirmed the preview was
+serving the new asset hash. The manifest caught it — a selector matching nothing
+is a failure here, which is the whole design of this gate — but only by
+accident, and every check after it would have been grading the wrong build
+silently.
+
+The same trap then cost one wrong measurement in a throwaway script: a trip bar
+read as 57.72px against 138px of content, from a stale shell.
+
+The gate now unregisters every service worker and empties every cache before its
+first load. Verified the way this repo verifies things: prime the profile with a
+green build, then ship a build the gate must reject, and confirm it rejects it
+on that same profile. It does.
+
+`live-gate.mjs` gained four checks over the same structure, at 390x844 against
+the deployed build. It had no reference to `.panel`, `.tripbar` or sticky
+positioning at all — 26 checks about a deployed site, none of them about the
+shape of the thing serving them.

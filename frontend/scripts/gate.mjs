@@ -40,7 +40,8 @@ const CHROME =
 const MANIFEST = [
   ['.app', 'App.jsx — the layout root'],
   ['.topbar', 'Topbar.jsx'],
-  ['.panel', 'App.jsx — the scrolling column'],
+  ['.panel', 'App.jsx — the left column'],
+  ['.panel__scroll', 'App.jsx — the part of it that scrolls'],
   ['.stage', 'App.jsx — the map column'],
   ['button.route', 'RouteRow.jsx — a real row, not a skeleton'],
   ['.route__sub', 'RouteRow.jsx — the distance line'],
@@ -166,6 +167,27 @@ async function setTheme(theme) {
   await cdp.evaluate(`document.documentElement.dataset.theme = '${theme}'`)
   await new Promise((r) => setTimeout(r, 200))
 }
+
+// Clear any service worker and cache left by a previous run, before grading
+// anything.
+//
+// This is not housekeeping. `--user-data-dir` above is a fixed path, so the
+// profile survives between runs, and `sw.js` precaches the shell and serves it
+// **cache-first without revalidating**. A gate run therefore grades whatever
+// build was current the last time this profile was used. Observed: a run
+// straight after a restructure reported `.panel__scroll` matching zero elements
+// while the class was present in the served bundle, because the worker was
+// answering with the previous shell. The manifest caught it — a selector
+// matching nothing is a failure here — but only by accident, and every check
+// after it would have been grading the wrong build.
+await cdp.send('Page.navigate', { url: URL_ })
+await new Promise((r) => setTimeout(r, 600))
+await cdp.evaluate(`(async () => {
+  const regs = (await navigator.serviceWorker?.getRegistrations?.()) ?? []
+  await Promise.all(regs.map(r => r.unregister()))
+  const keys = (await caches?.keys?.()) ?? []
+  await Promise.all(keys.map(k => caches.delete(k)))
+  return regs.length })()`).catch(() => null)
 
 await load(390, 844, true)
 
@@ -299,26 +321,70 @@ for (const theme of ['light', 'dark']) {
 }
 
 // 5. The two-column layout above the breakpoint, one column below it.
+//
+// Two of these checks changed subject when the trip bar came out of the
+// scrollport, and are renamed to say what they now measure. The scroller used
+// to be `.panel` itself with a sticky `.tripbar` as its first child; it is now
+// `.panel__scroll`, a sibling below the bar. The old assertions would have gone
+// green against `.panel` on the day the restructure was reverted, which is the
+// wrong way round for a gate.
 await load(1200, 900, false)
 const desktop = await cdp.evaluate(`(() => {
-  const layout = getComputedStyle(document.querySelector('.layout'))
+  const cs = (s) => getComputedStyle(document.querySelector(s))
+  const layout = cs('.layout')
   const panel = document.querySelector('.panel').getBoundingClientRect()
   const stage = document.querySelector('.stage').getBoundingClientRect()
+  const bar = document.querySelector('.tripbar').getBoundingClientRect()
+  const scroller = document.querySelector('.panel__scroll').getBoundingClientRect()
   return { columns: layout.gridTemplateColumns, sideBySide: stage.left >= panel.right - 2,
-           panelScrolls: getComputedStyle(document.querySelector('.panel')).overflowY } })()`)
+           scrollScrolls: cs('.panel__scroll').overflowY,
+           panelScrolls: cs('.panel').overflowY,
+           // The bar sits above the scrolling area rather than inside it, which
+           // is the whole point: an open drawer must shorten the scrollport,
+           // not freeze the top of it.
+           barAbove: bar.bottom <= scroller.top + 2,
+           barEdge: cs('.tripbar').borderBottomWidth } })()`)
 check('the panel and the stage sit side by side above 900px', desktop.sideBySide, desktop.columns)
-check('the panel is the scrolling column above 900px', desktop.panelScrolls === 'auto', desktop.panelScrolls)
+check(
+  'the scrolling area below the trip bar is the scrolling column above 900px',
+  desktop.scrollScrolls === 'auto' && desktop.panelScrolls !== 'auto',
+  `.panel__scroll ${desktop.scrollScrolls}, .panel ${desktop.panelScrolls}`,
+)
+check('the trip bar sits outside the scrolling area', desktop.barAbove, `edge ${desktop.barEdge}`)
+// A pinned element with no edge against a same-coloured field is why the scroll
+// read as broken rather than as pinned. `.topbar` has always had this border.
+check('the trip bar has a bottom edge', parseFloat(desktop.barEdge) > 0, desktop.barEdge)
 
 await load(390, 844, true)
 const mobile = await cdp.evaluate(`(() => {
+  const cs = (s) => getComputedStyle(document.querySelector(s))
   const panel = document.querySelector('.panel').getBoundingClientRect()
   const stage = document.querySelector('.stage').getBoundingClientRect()
   return { stacked: stage.bottom <= panel.top + 2,
-           pageScrolls: getComputedStyle(document.querySelector('.panel')).overflowY } })()`)
+           // Both axes of both elements. Per CSS Overflow 3, when one axis is
+           // not visible the other computes to auto — so an override naming
+           // only overflow-y leaves a scroll container on the axis nobody
+           // mentioned, and the document would gain a nested scroller on every
+           // phone. That is a behaviour break, not a failed assertion.
+           axes: [cs('.panel').overflowY, cs('.panel').overflowX,
+                  cs('.panel__scroll').overflowY, cs('.panel__scroll').overflowX],
+           scrollPaddingTop: cs('html').scrollPaddingTop } })()`)
 check('the stage sits above the panel below 900px', mobile.stacked)
 // Deliberately asserting the design rather than the original gate's premise:
 // below the breakpoint the document scrolls as one, by design.
-check('the panel does not scroll independently below 900px', mobile.pageScrolls === 'visible', mobile.pageScrolls)
+check(
+  'neither the panel nor its scroller scrolls independently below 900px',
+  mobile.axes.every((v) => v === 'visible'),
+  mobile.axes.join(' / '),
+)
+// The skip link is the first focusable element in the app and points at
+// `#results`, which has no rule of its own. Without this the document scrolls
+// it to y = 0, under an opaque bar 56px tall.
+check(
+  'the document scroller clears the topbar',
+  mobile.scrollPaddingTop !== 'auto' && parseFloat(mobile.scrollPaddingTop) >= 56,
+  mobile.scrollPaddingTop,
+)
 
 // 6. The route list is a complete text substitute for the map.
 const substitute = await cdp.evaluate(`(() => {

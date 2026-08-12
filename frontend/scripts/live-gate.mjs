@@ -287,6 +287,54 @@ check('routes arrive in the browser from the Pages origin', gotRoutes, gotRoutes
 const routeCount = await cdp.evaluate(`document.querySelectorAll('button.route').length`)
 check('three routes rendered', routeCount === 3, `${routeCount} rendered`)
 
+// ------------------------------- 3b. the panel's scroll arrangement, deployed
+//
+// This file had no reference to `.panel`, `.tripbar` or sticky positioning at
+// all — 26 checks against a deployed build, none of them about the structure
+// the panel is made of. The offline gate now guards the restructure that took
+// the trip bar out of the scrollport; if that is worth guarding there it is
+// worth guarding against what is actually served, where a stale CSS asset or a
+// half-deployed build would show up as exactly this shape and nothing else
+// would notice.
+//
+// Checked at 390x844, which is where this gate already runs, so both the panel
+// and its scroller are in their mobile arrangement: the document scrolls as one
+// and neither may be a scroll container on either axis.
+const structure = await cdp.evaluate(`(() => {
+  const panel = document.querySelector('.panel')
+  const scroll = document.querySelector('.panel__scroll')
+  const bar = document.querySelector('.tripbar')
+  if (!panel || !scroll || !bar) {
+    return { present: false, missing: [!panel && '.panel', !scroll && '.panel__scroll', !bar && '.tripbar'].filter(Boolean) }
+  }
+  const cs = (e) => getComputedStyle(e)
+  return {
+    present: true,
+    axes: [cs(panel).overflowY, cs(panel).overflowX, cs(scroll).overflowY, cs(scroll).overflowX],
+    barAbove: bar.getBoundingClientRect().bottom <= scroll.getBoundingClientRect().top + 2,
+    barEdge: cs(bar).borderBottomWidth,
+    scrollPaddingTop: cs(document.documentElement).scrollPaddingTop,
+  } })()`)
+check(
+  'the panel, its scroller and the trip bar are all served',
+  structure.present,
+  structure.present ? '' : `missing ${structure.missing.join(', ')}`,
+)
+if (structure.present) {
+  check(
+    'the deployed panel does not scroll independently at 390px',
+    structure.axes.every((v) => v === 'visible'),
+    structure.axes.join(' / '),
+  )
+  check('the deployed trip bar sits above the scroller', structure.barAbove)
+  check('the deployed trip bar has a bottom edge', parseFloat(structure.barEdge) > 0, structure.barEdge)
+  check(
+    'the deployed document scroller clears the topbar',
+    parseFloat(structure.scrollPaddingTop) >= 56,
+    structure.scrollPaddingTop,
+  )
+}
+
 // ------------------------------------------------------ 4. SSE actually streams
 
 if (chunks.length && responseAt !== null) {

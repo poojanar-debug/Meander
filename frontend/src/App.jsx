@@ -672,6 +672,11 @@ export default function App() {
             onClearUnits={onClearUnits}
           />
 
+          {/* Everything below the trip bar scrolls; the bar itself does not.
+              It used to be a sticky first child of this scroller, which pinned
+              between 133px and 801.5px of an 808px desktop scrollport depending
+              on which drawer was open — up to 99.2% of it, unscrollable. */}
+          <div className="panel__scroll">
           <DepartureStrip
             bestDeparture={state.bestDeparture}
             reason={state.reason}
@@ -757,6 +762,7 @@ export default function App() {
           <div className="panel__spacer" aria-hidden="true" />
 
           <About ref={aboutRef} cache={state.cache} />
+          </div>
         </main>
 
         {/* Full-screen below 900px while following, and only then. The class is

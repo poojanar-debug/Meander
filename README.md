@@ -52,13 +52,19 @@ only thing being measured.
 **WCAG 2.1 AA, checked rather than asserted.** `frontend/scripts/gate.mjs` runs axe-core against a
 real headless Chrome in both themes and reports no wcag2a/wcag2aa violations, alongside a 44 x 44
 target sweep, a no-horizontal-scroll check at 320 px and 390 px, and an assertion that every route
-row carries its own text. 35 checks in total, and the gate refuses to run any of them if its
+row carries its own text. 39 checks in total, and the gate refuses to run any of them if its
 selector manifest does not match — the difference between grading the app and grading nothing.
 
 Ten of those are a second pass that enters follow mode and re-runs the sweep, axe and the overflow
 check there. Follow mode was the one user-facing screen with no automated coverage of any kind: the
 gate reached it through neither of its entry points, and no test in the suite renders a component.
 It had been overflowing its own container on every phone in portrait since it was written.
+
+Four more guard the panel's scroll arrangement, and the gate now clears any service worker left in
+its profile before grading. It had none, and `sw.js` serves the shell cache-first without
+revalidating, so a run could silently grade the *previous* build — observed once, on a restructure
+whose new class the manifest reported as matching zero elements while it was present in the served
+bundle.
 
 `.github/workflows/ci.yml` runs it on every push and `make check` includes it. The paragraph that
 used to sit here said axe-core was "still a devDependency and nothing runs it", which was true when
