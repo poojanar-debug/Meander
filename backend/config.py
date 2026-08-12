@@ -532,6 +532,23 @@ TEST_LOCATIONS: tuple[TestLocation, ...] = (
         "Flat, exceptionally well tagged for surface and smoothness.",
         ("park", "green", "well-tagged"),
     ),
+    TestLocation(
+        "ella-sri-lanka",
+        "Ella, Sri Lanka",
+        6.875280,
+        81.038330,
+        # The location that started Part 4. The demo region set cut Sri Lanka to
+        # a 1x1 degree box around Colombo, which left Ella 76 km east of the
+        # edge and answered a Sri Lankan user with "Meander does not cover that
+        # area yet" for their own country.
+        #
+        # It earns its place beyond that: at **1,041 m** it is the first test
+        # location that is not at sea level, and it is in steep terrain, which
+        # is exactly where a ~90 m SRTM grid is least trustworthy. Every other
+        # location here exercises the elevation path at approximately zero.
+        "1,041 m in steep hill country. The only test location not at sea level.",
+        ("rural", "elevation", "hills"),
+    ),
 )
 
 TEST_LOCATIONS_BY_SLUG: dict[str, TestLocation] = {loc.slug: loc for loc in TEST_LOCATIONS}

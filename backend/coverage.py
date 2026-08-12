@@ -19,8 +19,11 @@ told the truth: Meander does not cover that area yet, and here is what it does.
 
 from __future__ import annotations
 
+import json
 import time
 from dataclasses import dataclass
+from pathlib import Path
+from typing import Literal
 
 import httpx
 
@@ -134,7 +137,81 @@ def message(extent: Coverage) -> str:
     )
 
 
-def unroutable_point_message(extent: Coverage) -> str:
+_REGION_MANIFEST = "regions.manifest.json"
+_regions_cache: tuple[Coverage, ...] | None | Literal[False] = False
+
+
+def _manifest_paths() -> tuple[Path, ...]:
+    """Where the per-region boxes might be, in the two places this code runs."""
+    return (
+        # Inside the API image, put there by the Dockerfile's COPY.
+        Path("/app/graphhopper") / _REGION_MANIFEST,
+        # A developer or a test running from the repo.
+        Path(__file__).resolve().parents[1] / "graphhopper" / _REGION_MANIFEST,
+    )
+
+
+def reset_region_cache() -> None:
+    """For tests. The manifest is a build artefact and does not change at run time."""
+    global _regions_cache
+    _regions_cache = False
+
+
+def region_boxes() -> tuple[Coverage, ...] | None:
+    """The boxes actually imported, or None when nothing recorded them.
+
+    Written by `scripts/graphhopper.sh setup` and committed, because the graph
+    lives on the router's disk in a different container and GraphHopper exposes
+    no per-region endpoint. Absence is a legitimate state — a graph built before
+    this existed, or by hand — and it must degrade to the hedged wording rather
+    than to a guess.
+    """
+    global _regions_cache
+    if _regions_cache is not False:
+        return _regions_cache
+
+    _regions_cache = None
+    for path in _manifest_paths():
+        try:
+            raw = json.loads(path.read_text())
+        except (OSError, ValueError):
+            continue
+        boxes: list[Coverage] = []
+        for entry in raw.get("regions") or []:
+            bbox = entry.get("bbox")
+            if isinstance(bbox, list | tuple) and len(bbox) >= 4:
+                try:
+                    boxes.append(Coverage(*(float(v) for v in bbox[:4])))
+                except (TypeError, ValueError):
+                    continue
+        if boxes:
+            _regions_cache = tuple(boxes)
+            log.info("region_manifest_loaded", extra={"regions": len(boxes)})
+        break
+    return _regions_cache
+
+
+def inside_an_imported_region(lat: float, lon: float) -> bool | None:
+    """True, False, or None when there is no manifest to ask.
+
+    ⚠ A box here is the *cut* box, and osmium's complete-ways extraction keeps
+    ways that cross the boundary — so the imported extent slightly overruns it.
+    Measured on this deployment: the cut union is (-0.65, 6.43, 80.35, 52.86)
+    while the router reports (-1.449894, 6.379104, 80.389202, 54.991951). A
+    point just outside a box can therefore still route.
+
+    That asymmetry is why this is used only to explain a failure the router has
+    already returned, and never as a pre-flight test. Refusing a request because
+    a point falls outside a cut box would refuse points that route.
+    """
+    boxes = region_boxes()
+    if boxes is None:
+        return None
+    return any(box.contains(lat, lon) for box in boxes)
+
+
+def unroutable_point_message(extent: Coverage, lat: float | None = None,
+                             lon: float | None = None) -> str:
     """For a point *inside* the bounding box that the router still cannot snap.
 
     The bbox is a union, and this is where that matters. The `demo` region set
@@ -145,18 +222,33 @@ def unroutable_point_message(extent: Coverage) -> str:
     sentence coverage.py was written to stop, arriving by the one path the
     pre-flight check cannot see.
 
-    ⚠ **This deliberately does not claim which cause it is.** Two things produce
-    "Cannot find point" on a finite graph — an area that was never imported, and
-    a genuinely unroutable spot inside one that was, like the middle of the
-    Serpentine — and the API cannot tell them apart, because /info reports only
-    the union. Asserting either would be a guess presented as a fact, which is
-    the habit this project exists not to have. So it names both and lets the
-    reader decide which applies to where they are standing.
+    Two things produce "Cannot find point" on a finite graph: an area that was
+    never imported, and a genuinely unroutable spot inside one that was, like
+    the middle of the Serpentine. This used to name both and let the reader
+    decide, because /info reports only the union and asserting either would have
+    been a guess presented as a fact.
 
-    Establishing the truth properly needs per-region boxes, which GraphHopper
-    does not expose; `scripts/graphhopper.sh regions` has them, on the router's
-    disk, in a different container from the API. BLOCKED.md records it.
+    **It can now tell them apart, when a region manifest exists.** The boxes are
+    written at build time by `scripts/graphhopper.sh` and committed; with them,
+    a point in none of them gets the definite answer, and a point inside one
+    gets the other definite answer. Without them — an older graph, or one built
+    by hand — the hedged sentence is still what gets said, because the hedge was
+    never dishonest, only unhelpful.
     """
+    inside = None if lat is None or lon is None else inside_an_imported_region(lat, lon)
+
+    if inside is False:
+        return (
+            "Meander does not cover that area yet. This server has only part of the "
+            f"world's map loaded — {extent.describe()}, and not all of it even inside "
+            "that — and this area is not one of the parts. Nothing you did caused "
+            "this, and moving a little will not help."
+        )
+    if inside is True:
+        return (
+            "This area is on the map, but no path was found close enough to that "
+            "exact spot. Try moving the start a little."
+        )
     return (
         "No routable path was found near that point. This server has only part of "
         f"the world's map loaded — {extent.describe()}, and not all of it even "

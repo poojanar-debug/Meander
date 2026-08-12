@@ -3906,3 +3906,157 @@ on that same profile. It does.
 the deployed build. It had no reference to `.panel`, `.tripbar` or sticky
 positioning at all — 26 checks about a deployed site, none of them about the
 shape of the thing serving them.
+
+## §13.4 — Sri Lanka whole, and a router bbox nobody had read
+
+Searching Ella returned "Meander does not cover that area yet". The cause is
+three lines: `demo_regions()` downloads the whole Sri Lanka extract and then
+cuts it to a 1x1 degree box around Colombo. Ella is at 6.87528 N, **81.03833 E**
+— its latitude is inside the box, its longitude is 0.68833 degrees, **76.1 km**,
+east of the edge at 80.35.
+
+**The router's own bbox, read before anything was touched:**
+
+```
+[-1.449894, 6.379104, 80.389202, 54.991951]
+```
+
+`Coverage.describe()` renders that as **"roughly 6°N to 55°N, 1°W to 80°E"**,
+which is the sentence in the report, character for character. The predicted
+figure was 53°N, derived from the union of the three cut boxes
+`(-0.65, 6.43, 80.35, 52.86)` — and that derivation is wrong for a findable
+reason: osmium's complete-ways extraction keeps ways that cross a cut boundary,
+so the imported extent overruns the cut. **The measured bbox is the one that
+reproduces what the user saw.**
+
+`test_coverage.py`'s `DEMO_BBOX` was `[-8.584844, 5.919332, 81.877776,
+62.007902]` under a comment claiming it was "as the real self-hosted graph
+reports". It was the **`countries`** set's union — 81.877776 is Sri Lanka's whole
+eastern extent, 62.0 is northern Britain — and it is used by eleven references
+across ten tests. Under it, Ella is *inside* the box, which is the exact
+opposite of the behaviour those tests describe. Replaced with the measured
+value; Paris stays inside on both axes, so the pre-flight test survives.
+
+### The rebuild
+
+`graphhopper/regions.custom`, all three lines, because `regions_for_set()` is a
+plain case statement and `custom` **replaces** the set rather than extending
+`demo` — a file holding only the Sri Lanka line would silently drop Greater
+London and Noord-Holland, taking out three of the five `TEST_LOCATIONS`, all
+three of `verify_selfhosted.py`'s in-graph assertions and the gate's origin.
+
+The whole extract was already on disk and verified (143.7 MB, dated 2026-08-09)
+against the 45.7 MB cut, so `download_extracts()` reused it — checked rather
+than assumed, as was its age. `build_graph()` opens with
+`rm -rf "$DATA_DIR/graph-cache"`, so the working graph was copied aside first
+and kept until the new one was serving.
+
+| | before | after |
+|---|---|---|
+| merged extract | 355.7 MB | 453.6 MB |
+| graph | 486 MB | **623 MB** |
+| import | — | **339 s** with an 8g heap |
+| serve heap | `GH_HEAP: 3g` | unchanged, and it fits |
+| `/info` bbox | `[-1.449894, 6.379104, 80.389202, 54.991951]` | `[-1.449894, 5.919332, 81.877776, 54.991951]` |
+
+623 MB against the ~700 MB projected, inside the existing `GH_HEAP: 3g` and
+`mem_limit: 5g` pins. **`countries` stays ruled out**: PROGRESS §800 records it
+as 6.6 GB of graph and §1404 puts its serve heap at 20 GB, against 11,927 MB of
+host RAM. Neither the 24g import nor the 20g serve fits, and that is arithmetic
+rather than an opinion.
+
+**The outage was 123 seconds**, from staging the graph to both containers
+healthy again. The graph is baked into the router image with no volume, so the
+recreate is the outage; the API was recreated with `--force-recreate` in the
+same command because `coverage.py` caches `/info` for an hour in a process
+global with no reset hook, and without a genuine restart Ella would have kept
+failing for up to an hour after the router was right.
+
+### Real routes, through the deployed API
+
+```
+Ella   (6.875280, 81.038330)  fastest  5892 m   97.7 min  ascent 512.8 m  start 1017 m
+                              nature   6699 m  117.0 min  ascent 571.9 m
+                              accessible blocked, 2 blockers
+Kandy  (7.290572, 80.633728)  fastest  5672 m   92.9 min  ascent 383.3 m  start  501 m
+                              nature   2460 m   43.8 min  ascent 146.6 m
+```
+
+Both score `geometry_only` rather than `clip`, correctly: the 146 pre-warmed
+CLIP segments are Colombo, London and Amsterdam, and nothing has scored the hill
+country. Colombo Fort still returns `clip`, so the change did not break scoring
+where scoring exists.
+
+`verify_selfhosted.py` passes at all three in-graph locations with three
+distinct geometries and `smoothness` present. Edinburgh is still skipped, which
+is right — it is in Scotland, and `custom` does not import Britain.
+
+Ella joins `TEST_LOCATIONS`. At **1,041 m** it is the first location in the set
+that is not at sea level, in steep terrain, which is exactly where a ~90 m SRTM
+grid is least trustworthy — every other location exercises the elevation path at
+approximately zero.
+
+## §13.5 — Route accuracy: two parameters, and one of them is a trap
+
+Both measured against the rebuilt graph, before-and-after geometry for the same
+request, twelve probes deliberately placed beside motorways, flyovers, tunnels,
+bridges and ferry landings.
+
+### `snap_prevention` is silently ignored, and the correct key is plural
+
+The first run reported no effect at all: 0 of 11 probes moved. That was not the
+answer, it was a bug in the experiment — and it is the finding.
+
+**`snap_prevention` in a POST body does nothing.** Proof, in three parts: a
+bogus value (`not_a_real_road_class`) returns HTTP 200 with a byte-identical
+route, so nothing is parsing it; the same set passed as **GET query parameters**
+changes the answer (snap 66.0 m -> 88.1 m, route 3779 m -> 3642 m); and on the
+car profile at the Amsterdam A10 the start snaps to `road_class: motorway` and
+`snap_prevention` does not move it by a metre, which is precisely the case the
+parameter exists for.
+
+The POST body spells it **`snap_preventions`**, plural. With that key the POST
+reproduces the GET result exactly.
+
+**Had this been added as written, it would have been a no-op that looked like a
+fix** — and an expensive one, because anything added to `_base_body` changes the
+signature every committed fixture is keyed on and would have required
+re-recording all ~90 in the same commit.
+
+With the correct key, on the foot profile: **1 of 11 probes moved.** Only
+Waterloo Bridge, where the start moved 29.7 m *off* the bridge. Every other
+probe was unchanged, and the reason is structural — the foot custom model
+already excludes motorway and trunk, so those two members of the set can never
+bite. Only bridge, tunnel and ferry can.
+
+**Recommendation: do not send it.** The one thing it changes on a walking app is
+to push a walker who is standing on a bridge footway 29.7 m off the bridge, and
+a footway on Waterloo Bridge is a perfectly good place to begin a walk. The
+usual set is written for car profiles. If it is ever wanted, `["ferry"]` alone
+is the defensible subset, and it costs a full fixture re-record to find out.
+
+### `way_point_max_distance` is not worth its payload
+
+| | default | `way_point_max_distance: 0` |
+|---|---|---|
+| geometry points, 11 routes | 1,236 | 1,591 (x1.29) |
+| payload | 76,581 B | 86,102 B (x1.12, +9,521 B) |
+| route length | — | **identical, 0.0 m difference on every probe** |
+| **worst deviation of the simplified line from the full one** | — | **0.49 m** |
+
+That last number is the answer. The concern was that every downstream metre in
+this app is measured off the simplified line — the barrier corridor, the
+cumulative distances, the follow-mode projection. The simplification displaces
+the line by at most **half a metre**, against a 10 m barrier corridor and a 40 m
+off-route threshold. 12% more payload on an SSE path with no outbound cap, for
+0.49 m, is not a trade worth making, and it too would cost a fixture re-record.
+
+**Contraction hierarchies stay off** (`graphhopper/config.yml:27-58`): custom
+models require flexible mode. Recorded here so the next reader does not try.
+
+**Alternative routes** remain a proposal. `algorithm: alternative_route` would
+give genuinely different corridors rather than three custom-model variations on
+one, and it interacts with the `scenic` candidate ladder that currently
+re-posts the same request at different `distance_influence` values. Not landed:
+it changes the shape of the answer rather than its accuracy, and it is another
+fixture re-record.

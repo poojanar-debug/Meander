@@ -914,6 +914,12 @@ async def route_events(req: RouteRequest) -> AsyncIterator[dict[str, Any]]:
         Upgraded only when the router actually has a finite extent. Against the
         hosted API, which has the planet, "Cannot find point" really does mean a
         lake and the original advice is right.
+
+        The origin is passed through so `unroutable_point_message` can consult
+        the per-region manifest and give a definite answer instead of naming
+        both possibilities. It is the origin rather than the destination because
+        the router reports "Cannot find point 0" for the start, which is the
+        point this branch is about.
         """
         failure = failures[0] if failures else NoRouteFound("No route could be found from there.")
         if not getattr(failure, "point_not_snappable", False):
@@ -922,7 +928,7 @@ async def route_events(req: RouteRequest) -> AsyncIterator[dict[str, Any]]:
         if extent is None:
             return failure
         log.info("unroutable_point_on_a_finite_graph")
-        return OutsideCoverage(unroutable_point_message(extent))
+        return OutsideCoverage(unroutable_point_message(extent, origin.lat, origin.lon))
 
     routes: list[Route] = []
     routed: list[tuple[str, str, RawRoute]] = []

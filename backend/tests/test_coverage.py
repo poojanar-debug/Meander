@@ -18,8 +18,28 @@ from backend import main as main_mod
 from backend.models import Point, RouteRequest
 from backend.routing import OutsideCoverage
 
-# Sri Lanka + Britain + the Netherlands, as the real self-hosted graph reports.
-DEMO_BBOX = [-8.584844, 5.919332, 81.877776, 62.007902]
+# The `demo` region set, as the real self-hosted graph reports it. Read off the
+# running router rather than derived:
+#
+#   docker compose ... exec api python -c \
+#     "import httpx,json;print(json.dumps(httpx.get('http://graphhopper:8989/info').json()['bbox']))"
+#   [-1.449894, 6.379104, 80.389202, 54.991951]
+#
+# **The previous value was the `countries` set's union, under a comment claiming
+# it was this one.** 81.877776 is Sri Lanka's whole eastern extent and 62.007902
+# is northern Britain; `demo` cuts Sri Lanka to a 1x1 degree box around Colombo
+# and never imports Scotland at all. Eleven references across ten tests were
+# asserting against a graph this deployment has never built — and under it Ella
+# (6.875 N, 81.038 E) is *inside* the box, which is the exact opposite of the
+# behaviour those tests exist to describe.
+#
+# Note this is wider than the three cut boxes themselves, whose union is
+# (-0.65, 6.43, 80.35, 52.86): osmium's complete-ways extraction keeps ways that
+# cross a boundary, so the imported extent overruns the cut. That is why
+# `describe()` renders "6°N to 55°N" here and "6°N to 53°N" from the cut union —
+# and 55 is what the screenshot shows, so this constant is the one that
+# reproduces what a user actually saw.
+DEMO_BBOX = [-1.449894, 6.379104, 80.389202, 54.991951]
 
 
 async def _no_extent(*a, **k):

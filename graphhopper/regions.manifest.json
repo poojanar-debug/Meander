@@ -1,0 +1,10 @@
+{
+  "region_set": "custom",
+  "built_at": "2026-08-12T14:19:23Z",
+  "note": "Per-region boxes. GraphHopper /info reports only their union; see backend/coverage.py.",
+  "regions": [
+    {"path": "asia/sri-lanka", "bbox": [79.16416,5.621275,82.64612,10.07153]},
+    {"path": "europe/united-kingdom/england/greater-london", "bbox": [-0.65,51.02,0.36,52.03]},
+    {"path": "europe/netherlands/noord-holland", "bbox": [4.36,51.86,5.37,52.86]}
+  ]
+}

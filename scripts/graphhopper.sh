@@ -83,12 +83,20 @@ REGION_SET="${GH_REGION_SET:-demo}"
 #
 # The demo set cuts from the smallest Geofabrik sub-extract that contains each
 # location rather than from the country, so the download is ~250 MB instead of
-# ~3.5 GB before any bbox is applied. The boxes are +/-0.5 degrees, roughly
-# 55 km, around each cluster:
+# ~3.5 GB before any bbox is applied. The boxes are +/-0.5 degrees around each
+# cluster:
 #
 #   Colombo Fort + Viharamahadevi Park   6.93,79.85 and 6.91,79.86
 #   Hyde Park + Euston Road             51.51,-0.16 and 51.52,-0.14
 #   Vondelpark                          52.36,4.86
+#
+# ⚠ That is "roughly 55 km" north-south only. This comment used to say 55 km
+# flat, which is right on one axis and wrong on the other everywhere except the
+# tropics: a degree of longitude shrinks with the cosine of the latitude.
+# North-south the half-widths are 55.3 / 56.2 / 55.6 km; east-west they are
+# 55.6 km in Sri Lanka, **35.0 km at London** and **34.4 km at Amsterdam**.
+# Only the Sri Lanka box is actually square in ground distance; the other two
+# are 1.01 degrees wide precisely because a square degree box there would not be.
 #
 # ⚠ 55 km is comfortable for every foot and bike budget and for a short drive.
 # It is **not** enough for a 360-minute car route, which at the conservative
@@ -360,6 +368,46 @@ cut_and_merge() {
   echo "  merged: $(du -h "$MERGED" | cut -f1)"
 }
 
+# The per-region boxes, written where the API can read them.
+#
+# GraphHopper's /info reports one bbox: the union of everything imported. For a
+# region set that is three separate extracts spanning Sri Lanka to Britain, that
+# rectangle contains Paris, Berlin and most of Europe, all of which are in the
+# rectangle and in none of the boxes. The API could not tell "never imported"
+# from "no path near that exact spot", so it said both and let the reader
+# choose — honest, and hedged, and fixable, because this script knows the boxes.
+#
+# Written into the repo rather than only next to the graph, because the graph
+# lives on the router's disk in a different container from the API. It is
+# committed for the same reason `regions.custom` is: it is the record of what
+# was actually built.
+#
+# For a whole-extract line the box is the extract's own header bbox, read with
+# `osmium fileinfo` — header only, so it costs nothing even on a 143 MB file.
+write_region_manifest() {
+  local out="$GH_DIR/regions.manifest.json" region bbox file first=1
+  {
+    printf '{\n  "region_set": %s,\n' "\"$REGION_SET\""
+    printf '  "built_at": %s,\n' "\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\""
+    printf '  "note": "Per-region boxes. GraphHopper /info reports only their union; see backend/coverage.py.",\n'
+    printf '  "regions": [\n'
+    while IFS='|' read -r region bbox; do
+      [ -n "$region" ] || continue
+      file="$DATA_DIR/$(echo "$region" | tr '/' '-')-latest.osm.pbf"
+      if [ -z "$bbox" ]; then
+        # "(minlon,minlat,maxlon,maxlat)" out of osmium's header dump.
+        bbox="$(osmium fileinfo -g header.boxes "$file" 2>/dev/null \
+                 | head -1 | tr -d '() ' )"
+      fi
+      [ $first -eq 1 ] || printf ',\n'
+      first=0
+      printf '    {"path": "%s", "bbox": [%s]}' "$region" "$bbox"
+    done < <(regions_for_set "$REGION_SET")
+    printf '\n  ]\n}\n'
+  } > "$out"
+  echo "  manifest: $out"
+}
+
 build_graph() {
   local java started elapsed
   java="$(find_java)"
@@ -411,6 +459,9 @@ case "${1:-}" in
     download_extracts
     cut_and_merge
     build_graph
+    # After build_graph, so a failed import never leaves a manifest describing a
+    # graph that does not exist.
+    write_region_manifest
     echo
     echo "Done. Start it with:  scripts/graphhopper.sh serve"
     echo "Then add to .env:     MEANDER_GRAPHHOPPER_URL=http://localhost:$PORT/route"
@@ -447,6 +498,16 @@ case "${1:-}" in
       echo "  not running on :$PORT"
       exit 1
     fi
+    ;;
+
+  manifest)
+    # Regenerate the per-region boxes without rebuilding the graph. Separate
+    # from `setup` because the manifest describes the region SET, not the
+    # import: a graph built before this existed can be described after the fact,
+    # and a mistake in the JSON can be fixed in a second rather than in six
+    # minutes of reimport.
+    write_region_manifest
+    cat "$GH_DIR/regions.manifest.json"
     ;;
 
   regions)

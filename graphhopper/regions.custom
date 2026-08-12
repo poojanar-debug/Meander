@@ -1,0 +1,26 @@
+# The region set this deployment actually builds. Read by scripts/graphhopper.sh
+# under GH_REGION_SET=custom; one "geofabrik/path|minlon,minlat,maxlon,maxlat"
+# per line, an empty bbox meaning take the whole extract, '#' comments stripped.
+#
+# ⚠ ALL THREE LINES ARE REQUIRED. `regions_for_set()` is a plain case statement:
+# `custom` REPLACES the set, it does not extend `demo`. A file holding only the
+# Sri Lanka line silently drops Greater London and Noord-Holland, which takes out
+# three of the five TEST_LOCATIONS, all three of verify_selfhosted.py's in-graph
+# assertions, and the London origin the layout gate drives the app from.
+
+# Sri Lanka entire. The demo set cut this to a 1x1 degree box around Colombo,
+# which put Ella (6.875 N, 81.038 E) 76 km outside the eastern edge and told a
+# Sri Lankan user that Meander does not cover their country. Measured before the
+# change, straight off the running router: bbox
+# [-1.449894, 6.379104, 80.389202, 54.991951], which Coverage.describe() renders
+# as "roughly 6°N to 55°N, 1°W to 80°E" — the exact sentence in the report.
+#
+# 143.7 MB of extract (already on disk and verified, dated 2026-08-09) against
+# the 45.7 MB cut. It brings in Kandy, Galle, Nuwara Eliya, Jaffna and
+# Trincomalee as well, and Ella at 1,041 m is the first test location that is
+# not at sea level.
+asia/sri-lanka|
+
+# Unchanged from the demo set. See the note above about why they are here.
+europe/united-kingdom/england/greater-london|-0.65,51.02,0.36,52.03
+europe/netherlands/noord-holland|4.36,51.86,5.37,52.86

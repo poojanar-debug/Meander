@@ -60,5 +60,12 @@ data/*.db-shm
 !graphhopper/config.yml
 !graphhopper/docker-entrypoint.sh
 !graphhopper/graph-dist/
+# The one file the API image does COPY out of this directory: the per-region
+# boxes, so it can tell "never imported" from "no path near that exact spot".
+# Unlike the three above, leaving this excluded does not merely cost context
+# transfer — the API build fails on the COPY, loudly, which is the right way for
+# that mistake to surface.
+!graphhopper/regions.manifest.json
+!graphhopper/regions.custom
 graphhopper/data/
 graphhopper/*.jar
