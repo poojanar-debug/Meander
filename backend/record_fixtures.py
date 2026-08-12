@@ -20,7 +20,7 @@ from . import fixtures as fx
 from .config import TEST_LOCATIONS_BY_SLUG, settings
 from .geometry import LatLon
 from .logging_setup import configure_logging, get_logger
-from .routing import GRAPHHOPPER_CREDIT_COST, route_accessible, route_fastest, route_nature
+from .routing import GRAPHHOPPER_CREDIT_COST, route_accessible, route_fastest, route_scenic
 
 log = get_logger(__name__)
 
@@ -39,7 +39,7 @@ def _scenarios():
 async def _record_graphhopper(force: bool) -> int:
     scenarios = _scenarios()
     budget = fx.get_budget()
-    # Three presets per scenario, and nature may climb its ladder up to 3 rungs.
+    # Three presets per scenario, and scenic may climb its ladder up to 3 rungs.
     worst_case = len(scenarios) * 5 * GRAPHHOPPER_CREDIT_COST
     remaining = budget.remaining("graphhopper")
     print(f"GraphHopper: {len(scenarios)} scenarios, worst case {worst_case} credits, "
@@ -58,15 +58,15 @@ async def _record_graphhopper(force: bool) -> int:
             dest = LatLon(d.lat, d.lon)
 
         fastest = None
-        for name in ("fastest", "nature", "accessible"):
+        for name in ("fastest", "scenic", "accessible"):
             if force:
                 body_sig = _signature_for(origin, dest, scenario, name)
                 fx.fixture_path("graphhopper", body_sig).unlink(missing_ok=True)
             try:
                 if name == "fastest":
                     fastest = await route_fastest(origin, dest, scenario.minutes, scenario.mode)
-                elif name == "nature":
-                    await route_nature(origin, dest, scenario.minutes, scenario.mode, fastest)
+                elif name == "scenic":
+                    await route_scenic(origin, dest, scenario.minutes, scenario.mode, fastest)
                 else:
                     await route_accessible(origin, dest, scenario.minutes, scenario.mode)
             # A recording run must survive one bad scenario: the point is to

@@ -4,7 +4,7 @@
     python3 -m scripts.verify_selfhosted    # in another
 
 Self-hosting exists for one reason: the hosted free tier cannot execute a
-`custom_model`, so the nature and accessible presets come back blocked. This
+`custom_model`, so the scenic and accessible presets come back blocked. This
 checks the three things that have to be true for that to have been worth doing,
 in every region the running graph actually contains — locations outside it are
 skipped and named, because which region set was built is an operator's choice
@@ -28,7 +28,7 @@ from dataclasses import dataclass
 
 from backend.config import GRAPHHOPPER_URL, graphhopper_is_self_hosted, path_details
 from backend.geometry import LatLon
-from backend.routing import route_accessible, route_fastest, route_nature
+from backend.routing import route_accessible, route_fastest, route_scenic
 
 
 @dataclass(frozen=True)
@@ -94,11 +94,11 @@ async def check(spot: Spot) -> list[str]:
         return [f"{spot.name}: fastest did not route ({type(exc).__name__})"]
 
     routes = {"fastest": fastest}
-    for name, fn in (("nature", route_nature), ("accessible", route_accessible)):
+    for name, fn in (("scenic", route_scenic), ("accessible", route_accessible)):
         try:
             routes[name] = (
                 await fn(spot.point, None, spot.minutes, spot.mode, fastest)
-                if name == "nature"
+                if name == "scenic"
                 else await fn(spot.point, None, spot.minutes, spot.mode)
             )
         except Exception as exc:  # noqa: BLE001
@@ -134,7 +134,7 @@ async def main_async() -> int:
 
     if not graphhopper_is_self_hosted():
         print(
-            "\nThis is the hosted API. The nature and accessible presets cannot run "
+            "\nThis is the hosted API. The scenic and accessible presets cannot run "
             "there — set MEANDER_GRAPHHOPPER_URL to your own server first.",
             file=sys.stderr,
         )

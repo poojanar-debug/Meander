@@ -168,7 +168,7 @@ curl -s $SITE/api/health | jq '.routing | {self_hosted, self_hosted_source, path
 curl -s $SITE/api/health | jq .cache
 curl -s -X POST $SITE/api/routes -H 'content-type: application/json' \
   -d '{"origin":{"lat":51.507489,"lon":-0.162207},"minutes":35,"mode":"auto",
-       "objectives":["fastest","nature","accessible"]}' \
+       "objectives":["fastest","scenic","accessible"]}' \
   | jq '.routes[] | {id, status, scoring_method, confidence}'
 ```
 
@@ -263,7 +263,7 @@ extended, because most of it was never about Render.
 | `scoring_method: "geometry_only"` | No pre-warmed CLIP scores for that area. Run Step 0b for it. Everywhere outside the five demo locations, this is expected. |
 | `segments_scored: 0` when you warmed the cache | `MEANDER_CACHE_DB` is set in the task definition. It points the API away from the `data/cache.db` baked into the image and **nothing else looks wrong**. Leave it unset. |
 | Every route identical | GraphHopper accepted `custom_model` and ignored it. `ch.disable` must accompany it — the classic failure, and it is silent. `scripts/verify_selfhosted.py` checks for exactly this. |
-| `nature` and `accessible` blocked, "flexible routing mode" | You are pointed at the hosted GraphHopper free tier, which cannot execute a custom model. Point `MEANDER_GRAPHHOPPER_URL` at your own router. |
+| `scenic` and `accessible` blocked, "flexible routing mode" | You are pointed at the hosted GraphHopper free tier, which cannot execute a custom model. Point `MEANDER_GRAPHHOPPER_URL` at your own router. |
 | `path_details` has no `smoothness` | `MEANDER_GRAPHHOPPER_SELF_HOSTED` is not `1`. The accessible model has silently stopped excluding impassable surfaces. This is the most dangerous one on the list. |
 | 429 with "used up its routing allowance" | The daily ceiling. Working as intended. |
 | `/api/health` 404s from your laptop but `/healthz` is fine | Deliberate, since the Caddyfile stopped allowlisting it. `/api/health` is a strict superset of `/metrics` — the same counters, plus the router's internal URL, key-presence booleans, cache counts and the rate limiter's own configuration — and `/metrics` was already firewalled to hide exactly that, so publishing the larger one was the wrong way round. Read it on the VM: `curl -s 127.0.0.1:8000/api/health`. `/healthz` stays public because UptimeRobot polls it and it discloses a status string and a version. |

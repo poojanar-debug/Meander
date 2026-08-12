@@ -115,7 +115,7 @@ the 3 : 1 graphical-object threshold but not the 4.5 : 1 text threshold.
 | id | light | dark | dash | pattern name |
 |---|---|---|---|---|
 | `fastest` | `#C2703D` | `#E8A46F` | `[1,0]` | solid |
-| `nature` | `#2F7D53` | `#6FC38E` | `[3,2]` | dashed |
+| `scenic` | `#2F7D53` | `#6FC38E` | `[3,2]` | dashed |
 | `accessible` | `#5B6ECF` | `#95A4F0` | `[1,2]` | dotted |
 | `quiet` | `#8A5CB4` | `#C2A0E8` | `[6,3]` | long dash |
 | `shade` | `#1E7A78` | `#63C4BE` | `[5,2,1,2]` | dash-dot |
@@ -123,7 +123,7 @@ the 3 : 1 graphical-object threshold but not the 4.5 : 1 text threshold.
 
 All six clear 3 : 1 against `--paper` and `--raised` in both themes.
 
-**Score meters use `--accent` only.** Nature / Clean air / Shade are distinguished by their labels,
+**Score meters use `--accent` only.** Scenic / Clean air / Shade are distinguished by their labels,
 not by hue. This removes the current collision where blue means both "the Fastest route" and "the
 clean-air score".
 
@@ -299,7 +299,7 @@ Replaces `RouteList` + `RouteCard`. A `<ul>` of `<li><button class="route" aria-
 Each row is **uniform height** regardless of content. Anatomy top to bottom:
 
 ```
-▌  Nature                      [Showing]        26 min
+▌  Scenic                      [Showing]        26 min
    ▬ ▬  dashed  ·  2.1 km  ·  3 rest stops
    Green  79%   Air  71%   Shade  58%
    ▬▬▬▬▬▬▬▬     ▬▬▬▬▬▬▬     ▬▬▬▬▬
@@ -558,7 +558,7 @@ Fields:
 Behaviour:
 
 - The profile applies to **every objective**, not only `accessible`. A profile that blocks steps
-  must block them on the Nature route too.
+  must block them on the Scenic route too.
 - Stored in `localStorage['meander:profile']`. The sheet carries a visible line: *"Stored on this
   device only. Never sent anywhere but the routing request itself."* plus a **Clear profile** button.
 - When a profile is active: the topbar button shows an `--accent` dot, and the results head reads

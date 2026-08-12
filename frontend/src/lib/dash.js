@@ -27,8 +27,8 @@ export const OBJECTIVES = [
     pattern: 'solid',
   },
   {
-    id: 'nature',
-    label: 'Nature',
+    id: 'scenic',
+    label: 'Scenic',
     color: '#2F7D53',
     colorDark: '#6FC38E',
     dash: [3, 2],
@@ -88,7 +88,7 @@ export function styleFor(id) {
  *
  * Kept as a lookup rather than a CSS variable read because the map needs a
  * literal colour string for `setPaintProperty` — MapLibre paints to a canvas
- * and cannot resolve `var(--route-nature)`.
+ * and cannot resolve `var(--route-scenic)`.
  */
 export function routeColor(id, theme = 'light') {
   const style = styleFor(id)

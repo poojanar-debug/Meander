@@ -1,13 +1,13 @@
-"""Nature must always be measured against a fastest route.
+"""Scenic must always be measured against a fastest route.
 
-`objectives` accepts any subset, so {"objectives": ["nature"]} is a valid public
-request. Without a baseline, route_nature receives fastest=None and **both** of
-its bars quietly switch off — the 1.6x NATURE_DURATION_CAP and the "must be
+`objectives` accepts any subset, so {"objectives": ["scenic"]} is a valid public
+request. Without a baseline, route_scenic receives fastest=None and **both** of
+its bars quietly switch off — the 1.6x SCENIC_DURATION_CAP and the "must be
 greener than fastest" floor. Every candidate then counts as acceptable and the
-winner ships labelled Nature with no preset_note.
+winner ships labelled Scenic with no preset_note.
 
-That is a label with nothing behind it, which route_nature's own docstring says
-must never happen: "a 'nature' route no greener than the plain one is a label
+That is a label with nothing behind it, which route_scenic's own docstring says
+must never happen: "a 'scenic' route no greener than the plain one is a label
 without a thing behind it".
 """
 
@@ -40,13 +40,13 @@ def stub_scoring(monkeypatch: pytest.MonkeyPatch):
     from backend import geometry as geometry_mod
 
     def fake_score(points, elevations=None, details=None, clip_score=None):
-        return type("S", (), {"nature": 0.9 if len(points) == 12 else 0.1, "air": None})()
+        return type("S", (), {"scenic": 0.9 if len(points) == 12 else 0.1, "air": None})()
 
     monkeypatch.setattr(geometry_mod, "score_geometry", fake_score)
 
 
 # ---------------------------------------------------------------------------
-# route_nature itself
+# route_scenic itself
 # ---------------------------------------------------------------------------
 
 
@@ -66,7 +66,7 @@ async def test_without_a_baseline_every_bar_is_off(
 
     monkeypatch.setattr(routing, "_post_route", fake_post)
 
-    result = await routing.route_nature(ORIGIN, None, 30, "foot", fastest=None)
+    result = await routing.route_scenic(ORIGIN, None, 30, "foot", fastest=None)
 
     # It still returns the best it can — but it must say the promise is unbacked.
     assert result.preset_note == routing.UNCOMPARED_NOTE
@@ -84,9 +84,9 @@ async def test_with_a_baseline_the_cap_rejects_an_overlong_candidate(
     monkeypatch.setattr(routing, "_post_route", fake_post)
 
     fastest = _stub("fastest", 40.0, green=False)  # cap = 64 min
-    result = await routing.route_nature(ORIGIN, None, 30, "foot", fastest)
+    result = await routing.route_scenic(ORIGIN, None, 30, "foot", fastest)
 
-    assert result.duration_min > 40.0 * routing.NATURE_DURATION_CAP
+    assert result.duration_min > 40.0 * routing.SCENIC_DURATION_CAP
     assert result.preset_note is not None
     assert "longer than you asked for" in result.preset_note
 
@@ -103,10 +103,17 @@ async def test_with_a_baseline_the_greenness_floor_rejects_a_dull_candidate(
     monkeypatch.setattr(routing, "_post_route", fake_post)
 
     fastest = _stub("fastest", 30.0, green=False)
-    result = await routing.route_nature(ORIGIN, None, 30, "foot", fastest)
+    result = await routing.route_scenic(ORIGIN, None, 30, "foot", fastest)
 
     assert result.preset_note is not None
-    assert "greener than the fastest" in result.preset_note.lower()
+    # **Changed wording, same claim.** The user-facing copy says "more scenic"
+    # rather than "greener" since the term was renamed: the score being compared
+    # is the one the card labels Scenic, and `scoring.py`'s active prompt pair
+    # measures visual appeal rather than greenery specifically. The internal
+    # vocabulary — `greenness()`, SCENIC_GREENNESS_WEIGHT, this file's own
+    # names — is deliberately unchanged, because it names a measurable property
+    # read by people who can see the code that computes it.
+    assert "more scenic than the fastest" in result.preset_note.lower()
 
 
 # ---------------------------------------------------------------------------
@@ -124,10 +131,10 @@ async def _drain(req: RouteRequest) -> dict:
 
 
 @pytest.mark.asyncio
-async def test_nature_only_request_still_routes_a_baseline(
+async def test_scenic_only_request_still_routes_a_baseline(
     stub_scoring, tmp_cache_db, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """{"objectives": ["nature"]} must not disable the cap and the floor."""
+    """{"objectives": ["scenic"]} must not disable the cap and the floor."""
     monkeypatch.setenv("MEANDER_GRAPHHOPPER_SELF_HOSTED", "0")
 
     seen: list[str] = []
@@ -139,16 +146,16 @@ async def test_nature_only_request_still_routes_a_baseline(
     monkeypatch.setattr(routing, "_post_route", fake_post)
     monkeypatch.setattr(main_mod, "enrich_context", _no_enrichment)
 
-    req = RouteRequest(origin=Point(lat=6.9337, lon=79.8501), minutes=30, objectives=["nature"])
+    req = RouteRequest(origin=Point(lat=6.9337, lon=79.8501), minutes=30, objectives=["scenic"])
     payload = await _drain(req)
 
     assert "fastest" in seen, "a baseline must be routed even when not requested"
     # ...and it must not leak into the answer the caller asked for.
-    assert [r["id"] for r in payload["routes"]] == ["nature"]
+    assert [r["id"] for r in payload["routes"]] == ["scenic"]
 
 
 @pytest.mark.asyncio
-async def test_nature_only_says_so_when_the_baseline_fails(
+async def test_scenic_only_says_so_when_the_baseline_fails(
     stub_scoring, tmp_cache_db, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A failed baseline degrades to an honest caveat, not a silent claim."""
@@ -162,11 +169,11 @@ async def test_nature_only_says_so_when_the_baseline_fails(
     monkeypatch.setattr(routing, "_post_route", fake_post)
     monkeypatch.setattr(main_mod, "enrich_context", _no_enrichment)
 
-    req = RouteRequest(origin=Point(lat=6.9337, lon=79.8501), minutes=30, objectives=["nature"])
+    req = RouteRequest(origin=Point(lat=6.9337, lon=79.8501), minutes=30, objectives=["scenic"])
     payload = await _drain(req)
 
-    nature = next(r for r in payload["routes"] if r["id"] == "nature")
-    assert nature["status_note"] == routing.UNCOMPARED_NOTE
+    scenic = next(r for r in payload["routes"] if r["id"] == "scenic")
+    assert scenic["status_note"] == routing.UNCOMPARED_NOTE
 
 
 @pytest.mark.asyncio
@@ -185,7 +192,7 @@ async def test_an_explicit_fastest_is_not_routed_twice(
     monkeypatch.setattr(main_mod, "enrich_context", _no_enrichment)
 
     req = RouteRequest(
-        origin=Point(lat=6.9337, lon=79.8501), minutes=30, objectives=["fastest", "nature"]
+        origin=Point(lat=6.9337, lon=79.8501), minutes=30, objectives=["fastest", "scenic"]
     )
     await _drain(req)
 
@@ -208,7 +215,7 @@ async def _no_enrichment(geometries, depart_at=None):
 # (WEIGHT_CLIP is 0.45) and then rendered with one that included it. The floor
 # and the card disagreed, and the card is what a person reads.
 #
-# Found by pre-warming the cache and looking: Hyde Park returned a nature route
+# Found by pre-warming the cache and looking: Hyde Park returned a scenic route
 # at 0.4806 against a fastest route at 0.4854 — passing a floor it visibly
 # failed.
 
@@ -229,7 +236,7 @@ def clip_dominated_scoring(monkeypatch: pytest.MonkeyPatch):
     def fake_score(points, elevations=None, details=None, clip_score=None):
         geometry_only = 0.9 if len(points) == 12 else 0.1
         return type("S", (), {
-            "nature": geometry_only if clip_score is None else clip_score,
+            "scenic": geometry_only if clip_score is None else clip_score,
             "air": None,
         })()
 
@@ -248,7 +255,7 @@ async def test_the_greenness_floor_uses_the_same_score_the_card_shows(
 
     The candidate here scores 0.9 on geometry alone and 0.1 once CLIP is
     counted; the baseline is the other way round. Judged on the geometry proxy
-    it sails through and ships labelled Nature with no note. Judged on the
+    it sails through and ships labelled Scenic with no note. Judged on the
     number that reaches the card, it is plainly *less* green than the fastest
     route and has to say so.
     """
@@ -260,13 +267,14 @@ async def test_the_greenness_floor_uses_the_same_score_the_card_shows(
     monkeypatch.setattr(routing, "_post_route", fake_post)
 
     fastest = _stub("fastest", 30.0, green=False)   # 9 points: clip says 0.9
-    result = await routing.route_nature(ORIGIN, None, 30, "foot", fastest)
+    result = await routing.route_scenic(ORIGIN, None, 30, "foot", fastest)
 
     assert result.preset_note is not None, (
         "a route the card will show as less green than fastest was accepted "
         "silently — the floor is being applied to a different number"
     )
-    assert "greener" in result.preset_note
+    # See the note above: the sentence a user reads says "more scenic".
+    assert "more scenic" in result.preset_note
 
 
 @pytest.mark.asyncio
@@ -282,6 +290,6 @@ async def test_a_candidate_greener_on_the_shown_score_still_passes(
     monkeypatch.setattr(routing, "_post_route", fake_post)
 
     fastest = _stub("fastest", 30.0, green=True)    # 12 points: clip says 0.1
-    result = await routing.route_nature(ORIGIN, None, 30, "foot", fastest)
+    result = await routing.route_scenic(ORIGIN, None, 30, "foot", fastest)
 
     assert result.preset_note is None

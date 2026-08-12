@@ -137,7 +137,7 @@ function buildRoutes(req) {
   const fastestGeom = isLoop
     ? loop(origin, 420 * scale, 0)
     : polyline(origin, 22, 2100 * scale, 0.02)
-  const natureGeom = isLoop
+  const scenicGeom = isLoop
     ? loop(origin, 520 * scale, 3)
     : polyline(origin, 22, 2100 * scale, 0.22)
   const accessibleGeom = isLoop
@@ -149,7 +149,7 @@ function buildRoutes(req) {
   // progress said 2.6 km for the same walk — real routing data never does that,
   // so the mock should not either.
   const fastestM = Math.round(lengthOf(fastestGeom))
-  const natureM = Math.round(lengthOf(natureGeom))
+  const scenicM = Math.round(lengthOf(scenicGeom))
   const accessibleM = Math.round(lengthOf(accessibleGeom))
 
   // Route.elevation, in the shape backend/models.py:99-116 defines. The three
@@ -157,7 +157,7 @@ function buildRoutes(req) {
   // the same way `shade: null` below covers them for scores:
   //
   //   fastest      measured, nothing over the limit
-  //   nature       measured, two stretches over it — the hatched case
+  //   scenic       measured, two stretches over it — the hatched case
   //   accessible   null, meaning the router returned no elevation, which is
   //                NOT the same statement as "this route is level"
   //
@@ -195,7 +195,7 @@ function buildRoutes(req) {
     duration_min: Math.round(18 * scale),
     distance_m: fastestM,
     mode,
-    scores: { nature: 0.31, air: 0.62, shade: 0.2 },
+    scores: { scenic: 0.31, air: 0.62, shade: 0.2 },
     elevation: profile(fastestM, 6, []),
     scoring_method: 'clip',
     confidence: 0.88,
@@ -213,24 +213,24 @@ function buildRoutes(req) {
     status_note: null,
   }
 
-  const nature = {
-    id: 'nature',
-    label: 'Nature',
+  const scenic = {
+    id: 'scenic',
+    label: 'Scenic',
     status: 'ok',
-    geometry: natureGeom,
+    geometry: scenicGeom,
     duration_min: Math.round(26 * scale),
-    distance_m: natureM,
+    distance_m: scenicM,
     mode,
-    scores: { nature: 0.79, air: 0.71, shade: 0.58 },
-    elevation: profile(natureM, 24, [[12, 19], [38, 44]]),
+    scores: { scenic: 0.79, air: 0.71, shade: 0.58 },
+    elevation: profile(scenicM, 24, [[12, 19], [38, 44]]),
     scoring_method: 'clip',
     confidence: 0.72,
     rest_stops: [
-      { ...pointAt(natureGeom, 0.18), type: 'bench', at_m: 340 },
-      { ...pointAt(natureGeom, 0.46), type: 'drinking water', at_m: 910 },
-      { ...pointAt(natureGeom, 0.78), type: 'bench', at_m: 1580 },
+      { ...pointAt(scenicGeom, 0.18), type: 'bench', at_m: 340 },
+      { ...pointAt(scenicGeom, 0.46), type: 'drinking water', at_m: 910 },
+      { ...pointAt(scenicGeom, 0.78), type: 'bench', at_m: 1580 },
     ],
-    steps: steps(natureGeom, natureM, 26 * scale, [
+    steps: steps(scenicGeom, scenicM, 26 * scale, [
       'Green Path',
       'Lake Walk',
       'Park Lane',
@@ -243,7 +243,7 @@ function buildRoutes(req) {
     blockers: [
       {
         type: 'kerb',
-        ...pointAt(natureGeom, 0.55),
+        ...pointAt(scenicGeom, 0.55),
         description: 'Dropped kerb missing where the path crosses the service road.',
       },
     ],
@@ -269,7 +269,7 @@ function buildRoutes(req) {
     // render them alike — null gets a hatched track and the words "not
     // measured", 0 gets a real, empty bar. Without a null anywhere in the mock
     // that branch was never seen.
-    scores: { nature: 0.44, air: 0.65, shade: null },
+    scores: { scenic: 0.44, air: 0.65, shade: null },
     // null, not a flat profile — see the note beside `profile` above.
     elevation: null,
     scoring_method: 'geometry_only',
@@ -302,8 +302,8 @@ function buildRoutes(req) {
     status_note: 'Two barriers on this route cannot be avoided with the current road data.',
   }
 
-  const byId = { fastest, nature, accessible }
-  const requested = req.objectives?.length ? req.objectives : ['fastest', 'nature', 'accessible']
+  const byId = { fastest, scenic, accessible }
+  const requested = req.objectives?.length ? req.objectives : ['fastest', 'scenic', 'accessible']
   return requested.map(
     (id) =>
       byId[id] ?? {
@@ -314,7 +314,7 @@ function buildRoutes(req) {
         duration_min: 0,
         distance_m: 0,
         mode,
-        scores: { nature: 0, air: 0, shade: 0 },
+        scores: { scenic: 0, air: 0, shade: 0 },
         scoring_method: 'placeholder',
         confidence: 0,
         rest_stops: [],
@@ -330,7 +330,7 @@ function buildRoutes(req) {
 const NARRATION = {
   fastest:
     'Straight up the main road. Loud and treeless, but it is the shortest way there and the pavement is wide the whole distance.',
-  nature:
+  scenic:
     'Cuts east into the park after four minutes and stays under trees almost to the end. Two benches on the way, and a water fountain roughly half way.',
   accessible:
     'Follows quiet residential streets with dropped kerbs — until the canal crossing, where three steps stop it. Nothing in the road data offers a way around.',

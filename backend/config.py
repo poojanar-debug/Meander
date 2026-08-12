@@ -29,7 +29,7 @@ FixtureMode = Literal["replay", "record", "live"]
 # Endpoints. Kept here so fixtures.py can map a hostname back to a service name
 # and apply that service's live-call budget.
 # Overridable so the app can be pointed at a self-hosted GraphHopper. The
-# hosted free tier cannot run custom models (see BLOCKED.md #0), so the nature
+# hosted free tier cannot run custom models (see BLOCKED.md #0), so the scenic
 # and accessible presets only work against a server you run yourself:
 #
 #   MEANDER_GRAPHHOPPER_URL=http://localhost:8989/route
@@ -68,7 +68,7 @@ def graphhopper_is_self_hosted() -> bool:
        be used with CH". Only the *fastest* round trip is affected — the other
        two presets carry a custom model and get ``ch.disable`` regardless — and
        a fastest failure is re-raised, so the whole request dies.
-    4. ``route_nature()`` searches all six loop candidates and picks on merit
+    4. ``route_scenic()`` searches all six loop candidates and picks on merit
        when unmetered, but only the first two with an early break when it thinks
        it is paying per call. So this flag changes **which route the user gets**,
        not merely how the server is operated.

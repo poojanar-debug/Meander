@@ -54,7 +54,7 @@ from backend import fixtures as fx
 from backend.config import FIXTURE_DIR, GRAPHHOPPER_URL, TEST_LOCATIONS_BY_SLUG
 from backend.geometry import LatLon, haversine_m, path_length_m
 from backend.models import EffectiveMode
-from backend.routing import build_request_body, route_accessible, route_fastest, route_nature
+from backend.routing import build_request_body, route_accessible, route_fastest, route_scenic
 
 # Metres per second, used to turn a synthetic distance into a synthetic duration.
 SPEED_M_S: dict[str, float] = {"foot": 1.35, "bike": 4.2, "car": 9.0}
@@ -62,7 +62,7 @@ SPEED_M_S: dict[str, float] = {"foot": 1.35, "bike": 4.2, "car": 9.0}
 # How far the preset bows away from the straight line, as a fraction of the
 # straight-line distance. This is what makes the three presets measurably
 # different geometries rather than three copies of the same one.
-BOW_FRACTION: dict[str, float] = {"fastest": 0.03, "nature": 0.34, "accessible": 0.13}
+BOW_FRACTION: dict[str, float] = {"fastest": 0.03, "scenic": 0.34, "accessible": 0.13}
 
 # Realistic tag mixes per preset. "MISSING" is included on purpose: most of the
 # world is untagged, and the accessibility engine has to cope with that.
@@ -73,7 +73,7 @@ DETAIL_MIX: dict[str, dict[str, list[tuple[str, float]]]] = {
         "surface": [("ASPHALT", 0.6), ("PAVING_STONES", 0.15), ("MISSING", 0.25)],
         "road_environment": [("ROAD", 0.92), ("BRIDGE", 0.08)],
     },
-    "nature": {
+    "scenic": {
         "road_class": [("FOOTWAY", 0.3), ("PATH", 0.3), ("TRACK", 0.15),
                        ("RESIDENTIAL", 0.15), ("PEDESTRIAN", 0.1)],
         "surface": [("COMPACTED", 0.25), ("GROUND", 0.2), ("ASPHALT", 0.2),
@@ -180,10 +180,10 @@ def _a_to_b(origin: LatLon, dest: LatLon, preset: str, rng: random.Random) -> li
 def _loop(origin: LatLon, target_distance_m: float, preset: str,
           rng: random.Random) -> list[LatLon]:
     """A closed loop through the origin, roughly ``target_distance_m`` long."""
-    lobes = {"fastest": 0.0, "nature": 3.0, "accessible": 0.0}[preset]
-    wobble = {"fastest": 0.06, "nature": 0.22, "accessible": 0.03}[preset]
+    lobes = {"fastest": 0.0, "scenic": 3.0, "accessible": 0.0}[preset]
+    wobble = {"fastest": 0.06, "scenic": 0.22, "accessible": 0.03}[preset]
     radius = target_distance_m / (2 * math.pi)
-    start_bearing = math.radians({"fastest": 20.0, "nature": 95.0, "accessible": 200.0}[preset])
+    start_bearing = math.radians({"fastest": 20.0, "scenic": 95.0, "accessible": 200.0}[preset])
     centre = _offset(origin, radius * math.cos(start_bearing), radius * math.sin(start_bearing))
 
     n = 72
@@ -203,7 +203,7 @@ def _loop(origin: LatLon, target_distance_m: float, preset: str,
 
 def _elevations(points: list[LatLon], preset: str, rng: random.Random) -> list[float]:
     base = 8.0 + rng.uniform(0, 20)
-    amplitude = {"fastest": 2.0, "nature": 22.0, "accessible": 1.2}[preset]
+    amplitude = {"fastest": 2.0, "scenic": 22.0, "accessible": 1.2}[preset]
     n = len(points)
     return [
         round(base + amplitude * math.sin(3.1 * i / n * math.pi) + rng.uniform(-0.4, 0.4), 1)
@@ -263,8 +263,8 @@ def _synth_payload(body: dict[str, Any], preset: str, scenario: Scenario) -> dic
 
     elevations = _elevations(points, preset, rng)
     distance_m = path_length_m(points)
-    # Nature is genuinely slower per metre: unsealed surfaces and more turns.
-    speed = SPEED_M_S[profile] * {"fastest": 1.0, "nature": 0.88, "accessible": 0.95}[preset]
+    # Scenic is genuinely slower per metre: unsealed surfaces and more turns.
+    speed = SPEED_M_S[profile] * {"fastest": 1.0, "scenic": 0.88, "accessible": 0.95}[preset]
     time_ms = int(distance_m / speed * 1000)
 
     return {
@@ -420,7 +420,7 @@ async def _generate(scenario: Scenario, force: bool) -> list[str]:
         elif any("STEPS" in str(rule.get("if", "")) for rule in custom_model["priority"]):
             preset = "accessible"
         else:
-            preset = "nature"
+            preset = "scenic"
         return httpx.Response(200, json=_synth_payload(body, preset, scenario))
 
     transport = httpx.MockTransport(handler)
@@ -428,7 +428,7 @@ async def _generate(scenario: Scenario, force: bool) -> list[str]:
     fx._client = httpx.AsyncClient(transport=transport)
     try:
         with fx.recording_as(fx.PROVENANCE_SYNTHETIC):
-            for preset in ("fastest", "nature", "accessible"):
+            for preset in ("fastest", "scenic", "accessible"):
                 if preset in scenario.unroutable:
                     continue
                 body = build_request_body(origin_pt, dest_pt, scenario.minutes,
@@ -467,14 +467,14 @@ async def _report(scenario: Scenario) -> str:
 
     lines = [f"  {scenario.slug} ({scenario.mode}, {scenario.minutes} min)"]
     fastest = None
-    for name, fn in (("fastest", route_fastest), ("nature", route_nature),
+    for name, fn in (("fastest", route_fastest), ("scenic", route_scenic),
                      ("accessible", route_accessible)):
         try:
-            if name == "nature":
-                # The whole RawRoute, not its duration. route_nature derives
+            if name == "scenic":
+                # The whole RawRoute, not its duration. route_scenic derives
                 # both the duration cap *and* the greenness floor from it, so a
                 # float here raised AttributeError and the report printed
-                # "nature blocked" for a preset that had generated perfectly.
+                # "scenic blocked" for a preset that had generated perfectly.
                 route = await fn(origin_pt, dest_pt, scenario.minutes, scenario.mode, fastest)
             else:
                 route = await fn(origin_pt, dest_pt, scenario.minutes, scenario.mode)

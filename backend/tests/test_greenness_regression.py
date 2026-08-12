@@ -1,4 +1,4 @@
-"""The product promise, pinned: a route labelled Nature is greener, or says it isn't.
+"""The product promise, pinned: a route labelled Scenic is greener, or says it isn't.
 
 This is the one claim the whole application is named after, and until now
 nothing asserted it end to end. `scripts/verify_selfhosted.py` checks something
@@ -6,12 +6,12 @@ adjacent — that the three presets return *different geometries* against a live
 self-hosted server — which is a check on the router, needs a network, and would
 pass perfectly happily on three routes of identical greenness.
 
-What is asserted here is the contract `route_nature` states in its own
+What is asserted here is the contract `route_scenic` states in its own
 docstring: a candidate must clear two bars, the 1.6x duration cap and being
 greener than the fastest route, and when neither can be met the route still
 ships with a `preset_note` naming the promise it missed. So the invariant is
-not "nature is always greener" — it is **nature is greener, or it admits it**.
-A silently-less-green route labelled Nature is the failure this file exists to
+not "scenic is always greener" — it is **scenic is greener, or it admits it**.
+A silently-less-green route labelled Scenic is the failure this file exists to
 catch, because it is a label with nothing behind it.
 
 Offline, from the committed fixtures. Three of the five demo locations have a
@@ -30,11 +30,11 @@ import pytest
 from backend import routing
 from backend.config import TEST_LOCATIONS_BY_SLUG
 from backend.geometry import LatLon, score_geometry
-from backend.routing import NATURE_DURATION_CAP
+from backend.routing import SCENIC_DURATION_CAP
 from backend.scoring import clip_term_for_route
 
 # (slug, minutes, mode). Only combinations with a committed fixture pair; the
-# probe that found them is `route_fastest` + `route_nature` in replay mode.
+# probe that found them is `route_fastest` + `route_scenic` in replay mode.
 CASES = [
     ("colombo-fort", 30, "foot"),
     ("hyde-park-london", 35, "foot"),
@@ -51,52 +51,52 @@ CASES = [
 # The floor is 1.15x rather than any of those. Asserting the measured value
 # would fail on any change to the scoring weights or to the pre-warmed cache —
 # both legitimate — while 1.15x still catches the thing worth catching: a
-# nature route that has stopped being meaningfully greener than the plain one.
+# scenic route that has stopped being meaningfully greener than the plain one.
 MIN_GREENNESS_RATIO = 1.15
 
 
 def _greenness(route) -> float:
-    """The nature score as the card will show it, CLIP term included.
+    """The scenic score as the card will show it, CLIP term included.
 
     Deliberately built the same way `main.py` builds it. Computing it any other
     way here would let the two drift apart, which is precisely the defect this
-    module's sibling test in test_nature_baseline.py was written for: the
+    module's sibling test in test_scenic_baseline.py was written for: the
     greenness floor used to be measured without the CLIP term while the card
     was rendered with it.
     """
     clip = clip_term_for_route(route.points)
     return score_geometry(
         route.points, route.elevations or None, route.details, clip_score=clip.score
-    ).nature
+    ).scenic
 
 
 async def _pair(slug: str, minutes: int, mode: str):
     location = TEST_LOCATIONS_BY_SLUG[slug]
     origin = LatLon(location.lat, location.lon)
     fastest = await routing.route_fastest(origin, None, minutes, mode)
-    nature = await routing.route_nature(origin, None, minutes, mode, fastest)
-    return fastest, nature
+    scenic = await routing.route_scenic(origin, None, minutes, mode, fastest)
+    return fastest, scenic
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(("slug", "minutes", "mode"), CASES)
-async def test_nature_is_greener_or_says_it_is_not(slug: str, minutes: int, mode: str) -> None:
+async def test_scenic_is_greener_or_says_it_is_not(slug: str, minutes: int, mode: str) -> None:
     """THE CONTRACT. Everything else in this file is detail."""
-    fastest, nature = await _pair(slug, minutes, mode)
+    fastest, scenic = await _pair(slug, minutes, mode)
 
-    greener = _greenness(nature) > _greenness(fastest)
+    greener = _greenness(scenic) > _greenness(fastest)
 
-    assert greener or nature.preset_note, (
-        f"{slug}: the nature route scores {_greenness(nature):.4f} against the "
+    assert greener or scenic.preset_note, (
+        f"{slug}: the scenic route scores {_greenness(scenic):.4f} against the "
         f"fastest route's {_greenness(fastest):.4f} and carries no preset_note. "
-        "A card labelled Nature that is not greener, and does not say so, is a "
+        "A card labelled Scenic that is not greener, and does not say so, is a "
         "label with nothing behind it."
     )
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(("slug", "minutes", "mode"), CASES)
-async def test_nature_is_greener_by_a_margin_worth_having(
+async def test_scenic_is_greener_by_a_margin_worth_having(
     slug: str, minutes: int, mode: str
 ) -> None:
     """Greener by enough to be worth the extra minutes it costs.
@@ -104,30 +104,30 @@ async def test_nature_is_greener_by_a_margin_worth_having(
     A route 0.1% greener technically satisfies the bar above and is not a
     feature. These three currently clear 1.70x to 2.51x; the floor is 1.15x.
     """
-    fastest, nature = await _pair(slug, minutes, mode)
-    if nature.preset_note:
-        pytest.skip(f"{slug} could not keep the promise and says so: {nature.preset_note}")
+    fastest, scenic = await _pair(slug, minutes, mode)
+    if scenic.preset_note:
+        pytest.skip(f"{slug} could not keep the promise and says so: {scenic.preset_note}")
 
-    ratio = _greenness(nature) / _greenness(fastest)
+    ratio = _greenness(scenic) / _greenness(fastest)
     assert ratio >= MIN_GREENNESS_RATIO, (
-        f"{slug}: nature is only {ratio:.2f}x greener than fastest "
-        f"({_greenness(fastest):.4f} -> {_greenness(nature):.4f}). It used to be "
+        f"{slug}: scenic is only {ratio:.2f}x greener than fastest "
+        f"({_greenness(fastest):.4f} -> {_greenness(scenic):.4f}). It used to be "
         "1.70x or better on all three. Something has stopped steering."
     )
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(("slug", "minutes", "mode"), CASES)
-async def test_nature_stays_inside_the_duration_cap_or_says_it_did_not(
+async def test_scenic_stays_inside_the_duration_cap_or_says_it_did_not(
     slug: str, minutes: int, mode: str
 ) -> None:
     """The second bar. A greener route that takes three times as long is not
     the answer to "I have 35 minutes"."""
-    fastest, nature = await _pair(slug, minutes, mode)
-    cap = fastest.duration_min * NATURE_DURATION_CAP
+    fastest, scenic = await _pair(slug, minutes, mode)
+    cap = fastest.duration_min * SCENIC_DURATION_CAP
 
-    assert nature.duration_min <= cap or nature.preset_note, (
-        f"{slug}: {nature.duration_min:.1f} min against a cap of {cap:.1f} "
+    assert scenic.duration_min <= cap or scenic.preset_note, (
+        f"{slug}: {scenic.duration_min:.1f} min against a cap of {cap:.1f} "
         "with no preset_note."
     )
 
@@ -137,19 +137,19 @@ async def test_nature_stays_inside_the_duration_cap_or_says_it_did_not(
 async def test_the_route_chosen_is_the_route_measured(slug: str, minutes: int, mode: str) -> None:
     """The selection and the display must be looking at the same number.
 
-    `route_nature` picks among candidates using its own `greenness()`; the card
+    `route_scenic` picks among candidates using its own `greenness()`; the card
     shows what `main.py` computes. If those two ever diverge again — the last
     time, one included the CLIP term and the other did not — every other
     assertion in this file passes while the user reads something that
     contradicts them.
     """
-    _, nature = await _pair(slug, minutes, mode)
+    _, scenic = await _pair(slug, minutes, mode)
 
-    clip = clip_term_for_route(nature.points)
+    clip = clip_term_for_route(scenic.points)
     as_displayed = score_geometry(
-        nature.points, nature.elevations or None, nature.details, clip_score=clip.score
-    ).nature
-    as_selected = _greenness(nature)
+        scenic.points, scenic.elevations or None, scenic.details, clip_score=clip.score
+    ).scenic
+    as_selected = _greenness(scenic)
 
     assert as_selected == pytest.approx(as_displayed, abs=1e-9)
 

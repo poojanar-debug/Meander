@@ -4060,3 +4060,92 @@ one, and it interacts with the `scenic` candidate ladder that currently
 re-posts the same request at different `distance_influence` values. Not landed:
 it changes the shape of the answer rather than its accuracy, and it is another
 fixture re-record.
+
+## §13.6 — `nature` becomes `scenic`, and the codebase already agreed
+
+The ask was that the term not be confined to greenery, because a route's beauty
+can be a landmark, a beach, architecture or water. **The codebase had written
+that down already and called it a defect.** `scoring.py`'s comment block
+recorded, as one of two reasons to be sceptical of the scores:
+
+> "beautiful"/"ugly" measures **aesthetic appeal, not greenery**, and this score
+> is presented as a nature score. It correlates here, but a photogenic stone
+> street would score well without a tree in it. That is a construct mismatch,
+> not a bug.
+
+So the rename **closes** a documented construct mismatch rather than opening
+one, and that block is rewritten to say so.
+
+`ACTIVE_PROMPT_VARIANT` stays `v2_plain` — ("A photo of a beautiful place", "A
+photo of an ugly place"), no nature word in either half. The nature-worded
+variant `v3_nature` stays too, under its own key, because it is disqualified for
+inverting on the Colombo pair and the recorded table has to keep naming it.
+Changing the active variant would make all 146 committed segment scores
+invisible in one step — `scoring.py` reads with `variant=ACTIVE_PROMPT_VARIANT`
+and `cache.py` appends `AND prompt_variant = ?` — and drop every route to
+`geometry_only`, losing the 0.45-weight CLIP term.
+
+### The census, reproduced before touching anything
+
+| | measured here | in the brief |
+|---|---|---|
+| case-insensitive `nature` | 933 | 930 |
+| inside `signature` | **388** | 387 |
+| files matching `(?<![A-Za-z])nature` | **53** | 53 |
+| preceded by an underscore | **88** | 89 |
+| word-boundary matches in `fixtures/` | **0** | 0 |
+
+The underscore count is the one that matters. `\bnature` does not match
+`route_nature` or `_nature_...`, so a `\b` rename silently misses 88 sites and
+one whole test file. The rename ran on `(?<![A-Za-z])nature`, which catches
+them, and `signature` is untouched at 388 — a bare `s/nature/scenic/g` would
+have produced `sigscenic` in the fixture cache key and detonated the entire
+fixture layer.
+
+`fixtures/` needed no change and got none; `git status fixtures/` is empty.
+`naturalness` — a genuinely different, OSM-tag-derived sub-term at
+`WEIGHT_NATURALNESS = 0.20` — is intact at 24 occurrences, and `geometry.py`
+carries both names in one NamedTuple, which is why that file was read rather
+than pattern-matched.
+
+Three things the pattern would have got wrong, protected by hand:
+
+- **`v3_nature`** is a prompt-variant key naming a measured, disqualified
+  variant. Renamed by the sweep, restored afterwards.
+- **`README.md:17`**, "Time in nature is now prescribed clinically", is the
+  English word and the reason the project exists. Restored.
+- **`graphhopper/config.yml`**'s four occurrences are all comments. Checked
+  specifically, because a profile the router resolves by string would have meant
+  a graph rebuild; the profiles are `foot`, `bike` and `car`.
+
+### Old links still work
+
+`objectives` travels in the URL, so a strict rename would 422 every link anyone
+had shared. `nature` is accepted on the way in and **never emitted**, on both
+sides:
+
+- `models.py` — a `mode="before"` field validator, which is load-bearing:
+  `objectives` is typed `list[RouteId]`, a Literal that no longer contains
+  "nature", so an after-validator would never run because the request would
+  already have been rejected.
+- `permalink.js` — mapped during decode, never during encode, so a link opened
+  and re-shared quietly upgrades itself.
+
+Pinned by three tests: an old link routes and comes back as `scenic`; the old
+name appears nowhere in the response, checked against the whole serialised
+payload; and an unknown objective is still rejected, because `mode="before"`
+runs ahead of the Literal and is the one place a bad id could slip through.
+
+### The vocabulary problem underneath
+
+The real one is not `nature`, it is **`green`**: 263 occurrences outside
+`fixtures/`. Four of them reach a user, and those four changed with the term:
+three `preset_note` sentences in `routing.py` and one line of `FirstRun`. The
+internal vocabulary — `greenness()`, `SCENIC_GREENNESS_WEIGHT`,
+`test_greenness_regression.py` — is deliberately untouched: it names a
+measurable property of a route and is read by people who can see the code that
+computes it. Renaming the term and leaving the copy calling it greenery would
+have left the app describing one thing by two names, which is the defect the
+rename existed to close.
+
+Two test assertions on that copy changed with it, and say so in place.

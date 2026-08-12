@@ -23,7 +23,7 @@ Every error uses one envelope:
   "minutes": 25,
   "mode": "auto",
   "depart_at": "2026-09-04T17:40:00Z",
-  "objectives": ["fastest", "nature", "accessible"]
+  "objectives": ["fastest", "scenic", "accessible"]
 }
 ```
 
@@ -34,7 +34,7 @@ Every error uses one envelope:
 | `minutes` | no | 20–360, default 35. The time budget, and the primary input. |
 | `mode` | no | `auto` \| `foot` \| `bike` \| `car`. Default `auto`. |
 | `depart_at` | no | ISO 8601. Used for sun position and air quality. |
-| `objectives` | no | Up to three of `fastest` `nature` `accessible` `quiet` `shade` `air`. Defaults to the first three. |
+| `objectives` | no | Up to three of `fastest` `scenic` `accessible` `quiet` `shade` `air`. Defaults to the first three. |
 
 Unknown fields are rejected with `422` rather than ignored.
 
@@ -59,7 +59,7 @@ minutes > 120          -> car
       "duration_min": 18.0,
       "distance_m": 1450,
       "mode": "foot",
-      "scores": { "nature": 0.31, "air": 0.62, "shade": 0.20 },
+      "scores": { "scenic": 0.31, "air": 0.62, "shade": 0.20 },
       "scoring_method": "clip",
       "confidence": 0.88,
       "rest_stops": [{ "lat": 6.93, "lon": 79.86, "type": "bench", "at_m": 180 }],

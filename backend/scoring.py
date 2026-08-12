@@ -114,15 +114,31 @@ PROMPT_VARIANTS: dict[str, tuple[str, str]] = {
 # greener than the park. An inverted score is not a weak score, it is a wrong
 # one, and it is disqualifying however well the name fits.
 #
-# ⚠ Two reasons to still be sceptical, both recorded rather than resolved:
+# ⚠ One reason to still be sceptical:
 #   * n is small — 4 to 6 images per location, and only 2 for Viharamahadevi,
 #     which is the single point deciding the one pair that separates the
 #     candidates. That pair is also the only non-European one.
-#   * "beautiful"/"ugly" measures **aesthetic appeal, not greenery**, and this
-#     score is presented as a nature score. It correlates here, but a
-#     photogenic stone street would score well without a tree in it. That is a
-#     construct mismatch, not a bug, and it is why every response still carries
-#     `scoring_method`.
+#
+# **The second reason is gone, and the term is named for it.** This block used
+# to record a construct mismatch: "beautiful"/"ugly" measures aesthetic appeal
+# rather than greenery, and the score was presented as a *nature* score, so a
+# photogenic stone street would have scored well without a tree in it. That was
+# a defect in the label, not in the measurement — the prompt was always the
+# honest one, and `v3_nature`, the variant whose wording matched the old label,
+# is disqualified above for inverting on the Colombo pair.
+#
+# The term is now called **scenic**, which is what this prompt pair actually
+# measures: visual appeal, of which greenery is one source and landmarks,
+# beaches, architecture and water are others. Renaming closed the mismatch
+# rather than opening one, and `ACTIVE_PROMPT_VARIANT` is deliberately
+# untouched — the 146 committed segment scores are all `v2_plain`, and
+# `scoring.py` reads with `variant=ACTIVE_PROMPT_VARIANT` while
+# `cache.py` appends `AND prompt_variant = ?`, so changing it would make every
+# one of them invisible in a single step and drop every route to
+# `geometry_only`.
+#
+# Every response still carries `scoring_method`, because a name is not a
+# measurement.
 ACTIVE_PROMPT_VARIANT = "v2_plain"
 
 
@@ -383,7 +399,7 @@ async def score_point(
 
 @dataclass(frozen=True)
 class ClipTerm:
-    """The CLIP contribution to a route's nature score, and how much of the
+    """The CLIP contribution to a route's scenic score, and how much of the
     route it actually covers."""
 
     score: float | None

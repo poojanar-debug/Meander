@@ -70,7 +70,7 @@ def body_for(index: int, minutes: int) -> dict:
         "origin": {"lat": lat, "lon": lon},
         "minutes": minutes,
         "mode": "auto",
-        "objectives": ["fastest", "nature", "accessible"],
+        "objectives": ["fastest", "scenic", "accessible"],
     }
 
 

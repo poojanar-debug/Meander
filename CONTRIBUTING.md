@@ -86,7 +86,7 @@ plausible-looking wrong answer:
 | | |
 |---|---|
 | GraphHopper POST takes `[lon, lat]`; GET takes `"lat,lon"` | One converter in `routing.py`, used everywhere, with a unit test. Do not inline a second one. |
-| `custom_model` is silently ignored without `"ch.disable": true` | Symptom: the nature route comes back identical to fastest. |
+| `custom_model` is silently ignored without `"ch.disable": true` | Symptom: the scenic route comes back identical to fastest. |
 | `heading` is ignored when `algorithm=round_trip` | Do not depend on loop direction. |
 | Mapillary bbox must be < 0.01° square (since 2026-01-16) | Sample points along the polyline, one ±0.002° bbox per point. |
 | Render free tier is 512 MB; CLIP needs 2–3 GB | `requirements-deploy.txt` must never contain `torch` or `open-clip-torch`. |
@@ -115,7 +115,7 @@ contradiction. Pull requests touching the frontend need to hold WCAG 2.1 AA:
 
 ## Commits
 
-Conventional commits: `feat(routing): add nature custom model`. Run the test suite before every
+Conventional commits: `feat(routing): add scenic custom model`. Run the test suite before every
 commit.
 
 ## Never

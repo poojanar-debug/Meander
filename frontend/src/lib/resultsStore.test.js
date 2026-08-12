@@ -520,7 +520,7 @@ describe('the same spot, measured', () => {
     for (const other of [
       { ...REQ, minutes: 45 },
       { ...REQ, mode: 'bike' },
-      { ...REQ, objectives: ['nature'] },
+      { ...REQ, objectives: ['scenic'] },
       { ...REQ, destination: { lat: 51.5079, lon: -0.1283 } },
     ]) {
       expect(await readRoutes(other), JSON.stringify(other)).toBeNull()

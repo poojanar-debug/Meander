@@ -6,7 +6,7 @@ Three things in here have cost people whole days:
    converters live in this module, are the only ones in the codebase, and are
    unit-tested. Do not inline a third.
 2. **``custom_model`` is silently ignored unless ``"ch.disable": true`` is set.**
-   The symptom is a nature route identical to the fastest route — no error, no
+   The symptom is a scenic route identical to the fastest route — no error, no
    warning. ``_base_body`` always sets it.
 3. **``heading`` is ignored when ``algorithm=round_trip``.** Loop direction is
    not controllable; do not build anything that depends on it.
@@ -38,8 +38,8 @@ log = get_logger(__name__)
 # One route request is roughly three GraphHopper credits.
 GRAPHHOPPER_CREDIT_COST = 3
 
-# Nature must not wander indefinitely. Spec constant.
-NATURE_DURATION_CAP = 1.6
+# Scenic must not wander indefinitely. Spec constant.
+SCENIC_DURATION_CAP = 1.6
 
 # Metres per minute, used only to turn a time budget into a round-trip distance.
 # Deliberately conservative — an overshoot costs the user their time budget.
@@ -120,7 +120,7 @@ class OutsideCoverage(RoutingError):
 class PresetUnavailable(RoutingError):
     """This objective cannot be routed on the current GraphHopper plan.
 
-    A first-class outcome, not a bug: the nature and accessible presets steer
+    A first-class outcome, not a bug: the scenic and accessible presets steer
     the router with a custom model, and custom models need flexible mode, which
     free packages do not include. The honest response is to report that preset
     as blocked with the reason, rather than quietly returning the fastest route
@@ -156,7 +156,7 @@ def from_post_point(pair: Sequence[float]) -> LatLon:
 # ---------------------------------------------------------------------------
 
 
-def nature_custom_model(distance_influence: int) -> dict[str, Any]:
+def scenic_custom_model(distance_influence: int) -> dict[str, Any]:
     """Prefer green, quiet, unsealed-but-walkable ways over arterial roads.
 
     ``distance_influence`` trades detour length against preference strength:
@@ -188,7 +188,7 @@ def nature_custom_model(distance_influence: int) -> dict[str, Any]:
     }
 
 
-# Candidates for the nature preset, as (distance_influence, loop_distance_scale).
+# Candidates for the scenic preset, as (distance_influence, loop_distance_scale).
 #
 # A single escalating ladder does not work. For a point-to-point route,
 # distance_influence is a usable lever: higher values pull the route back
@@ -203,8 +203,8 @@ def nature_custom_model(distance_influence: int) -> dict[str, Any]:
 # So the presets are generated as a small candidate set and the greenest one
 # that fits the duration cap wins — which is what the specification actually
 # asks for: maximum greenery, capped at 1.6x the fastest duration.
-NATURE_DISTANCE_INFLUENCE_LADDER = (20, 45, 90)
-NATURE_LOOP_CANDIDATES: tuple[tuple[int, float], ...] = (
+SCENIC_DISTANCE_INFLUENCE_LADDER = (20, 45, 90)
+SCENIC_LOOP_CANDIDATES: tuple[tuple[int, float], ...] = (
     (20, 1.0),
     (20, 0.8),
     (20, 0.6),
@@ -217,21 +217,33 @@ NATURE_LOOP_CANDIDATES: tuple[tuple[int, float], ...] = (
 # undershoots the time budget is a bad answer to "I have thirty minutes" even if
 # it is green — picking purely on greenness turned a 30-minute request into an
 # 18-minute loop. These weights are a judgement, not a measurement.
-NATURE_GREENNESS_WEIGHT = 0.6
-NATURE_BUDGET_FIT_WEIGHT = 0.4
+SCENIC_GREENNESS_WEIGHT = 0.6
+SCENIC_BUDGET_FIT_WEIGHT = 0.4
 
 # Below this fraction of the requested time, a route is short enough that the
 # card should say so rather than let someone assume it fills their budget.
-NATURE_BUDGET_UNDERSHOOT = 0.7
+SCENIC_BUDGET_UNDERSHOOT = 0.7
 
 # Said when there was no fastest route to measure against, so neither the
 # duration cap nor the greenness floor could be applied. The caller routes a
 # baseline specifically to avoid this, so reaching it means that baseline
 # request itself failed — rare, but the alternative is presenting an unchecked
 # route under a label that promises it was checked.
+# ⚠ "more scenic", not "greener", and the four sentences a user can actually
+# read were changed together. The score being compared is the composite the
+# frontend labels Scenic, and `scoring.py`'s active prompt pair is "a beautiful
+# place" / "an ugly place" — visual appeal, of which greenery is one source and
+# landmarks, beaches and architecture are others. Renaming the term and leaving
+# the copy calling it greenery would have left the app describing one thing by
+# two names, which is the defect the rename existed to close.
+#
+# The **internal** vocabulary is deliberately untouched: 263 `green*` tokens
+# outside `fixtures/`, including `SCENIC_GREENNESS_WEIGHT` and the greenness
+# regression suite. Those name a measurable property of a route and are read by
+# people who can see the code that computes it.
 UNCOMPARED_NOTE = (
     "This route could not be compared against the fastest one, so we cannot "
-    "promise it is greener than the direct way or inside your time budget."
+    "promise it is more scenic than the direct way or inside your time budget."
 )
 
 
@@ -672,11 +684,11 @@ def build_request_body(
     else:
         body["points"] = [to_post_point(origin), to_post_point(destination)]
 
-    if preset == "nature":
-        body["custom_model"] = nature_custom_model(
+    if preset == "scenic":
+        body["custom_model"] = scenic_custom_model(
             distance_influence
             if distance_influence is not None
-            else NATURE_DISTANCE_INFLUENCE_LADDER[0]
+            else SCENIC_DISTANCE_INFLUENCE_LADDER[0]
         )
     elif preset == "accessible":
         body["custom_model"] = accessible_custom_model()
@@ -702,24 +714,24 @@ async def route_fastest(origin: LatLon, destination: LatLon | None, minutes: int
     return await _post_route(body, mode, "fastest")
 
 
-async def route_nature(
+async def route_scenic(
     origin: LatLon,
     destination: LatLon | None,
     minutes: int,
     mode: EffectiveMode,
     fastest: RawRoute | None = None,
 ) -> RawRoute:
-    """The greenest route that fits inside ``NATURE_DURATION_CAP`` x fastest.
+    """The greenest route that fits inside ``SCENIC_DURATION_CAP`` x fastest.
 
     Generates a few candidates and picks the best, rather than walking a ladder
     until something fits. That is what the specification asks for in as many
     words, and it is the only thing that works for round trips, where
     GraphHopper responds discontinuously to both available levers (see
-    NATURE_LOOP_CANDIDATES).
+    SCENIC_LOOP_CANDIDATES).
 
     A candidate has to clear two bars before it is even considered: inside the
     duration cap, and **greener than the fastest route**. The second is not
-    optional — a "nature" route no greener than the plain one is a label
+    optional — a "scenic" route no greener than the plain one is a label
     without a thing behind it. Among those, greenness is balanced against how
     well the route uses the time asked for, because picking on greenness alone
     turned a thirty-minute request into an eighteen-minute loop.
@@ -738,7 +750,7 @@ async def route_nature(
 
         This used to call ``score_geometry`` without the CLIP term, and it was
         wrong in a way nothing could detect until now: CLIP carries weight 0.45,
-        the largest single term in the nature score, so a route was *chosen* on
+        the largest single term in the scenic score, so a route was *chosen* on
         a measure that excluded the dominant component and then *displayed* with
         one that included it. The "greener than the fastest route" bar — the one
         this function exists to enforce, and which the docstring above calls not
@@ -749,7 +761,7 @@ async def route_nature(
         shipped with zero CLIP rows, so ``clip_score`` was always None and the
         two measures were arithmetically identical. Pre-warming the cache is
         what made them able to disagree, and the first warmed run disagreed
-        straight away: at Hyde Park the nature route showed 0.4806 against the
+        straight away: at Hyde Park the scenic route showed 0.4806 against the
         fastest route's 0.4854 while still passing the floor.
 
         The lookup is a cache read — no torch, no network — and the request path
@@ -761,9 +773,9 @@ async def route_nature(
             route.elevations or None,
             route.details,
             clip_score=clip.score,
-        ).nature
+        ).scenic
 
-    cap = fastest.duration_min * NATURE_DURATION_CAP if fastest else None
+    cap = fastest.duration_min * SCENIC_DURATION_CAP if fastest else None
     floor = greenness(fastest) if fastest else None
     is_loop = destination is None
 
@@ -772,16 +784,16 @@ async def route_nature(
     # metered path takes the first acceptable candidate.
     unmetered = graphhopper_is_self_hosted()
     if is_loop:
-        candidates = NATURE_LOOP_CANDIDATES if unmetered else NATURE_LOOP_CANDIDATES[:2]
+        candidates = SCENIC_LOOP_CANDIDATES if unmetered else SCENIC_LOOP_CANDIDATES[:2]
     else:
-        candidates = tuple((infl, 1.0) for infl in NATURE_DISTANCE_INFLUENCE_LADDER)
+        candidates = tuple((infl, 1.0) for infl in SCENIC_DISTANCE_INFLUENCE_LADDER)
 
     acceptable: list[tuple[float, RawRoute]] = []
     fallback: tuple[float, RawRoute] | None = None
 
     async def _candidate(influence: int, scale: float) -> RawRoute:
-        body = build_request_body(origin, destination, minutes, mode, "nature", influence, scale)
-        return await _post_route(body, mode, "nature")
+        body = build_request_body(origin, destination, minutes, mode, "scenic", influence, scale)
+        return await _post_route(body, mode, "scenic")
 
     if unmetered:
         # Independent requests against a server that charges nothing, so there
@@ -800,7 +812,7 @@ async def route_nature(
                 results.append((spec, outcome))
             else:
                 log.info(
-                    "nature_candidate_failed",
+                    "scenic_candidate_failed",
                     extra={"distance_influence": spec[0], "loop_scale": spec[1],
                            "error": type(outcome).__name__},
                 )
@@ -832,8 +844,8 @@ async def route_nature(
         # noise rather than on greenness — which is the only thing that
         # distinguishes them for this shape of request.
         merit = (
-            NATURE_GREENNESS_WEIGHT * green
-            + NATURE_BUDGET_FIT_WEIGHT * _budget_fit(candidate.duration_min, minutes)
+            SCENIC_GREENNESS_WEIGHT * green
+            + SCENIC_BUDGET_FIT_WEIGHT * _budget_fit(candidate.duration_min, minutes)
             if is_loop
             else green
         )
@@ -844,7 +856,7 @@ async def route_nature(
                 break
         else:
             log.info(
-                "nature_candidate_rejected",
+                "scenic_candidate_rejected",
                 extra={
                     "distance_influence": influence,
                     "loop_scale": scale,
@@ -863,11 +875,11 @@ async def route_nature(
         chosen = acceptable[0][1]
         # Loop-only for the same reason the merit term is: "shorter than the
         # time you asked for" is not a defect a point-to-point route can have.
-        if is_loop and minutes > 0 and chosen.duration_min < minutes * NATURE_BUDGET_UNDERSHOOT:
+        if is_loop and minutes > 0 and chosen.duration_min < minutes * SCENIC_BUDGET_UNDERSHOOT:
             chosen.preset_note = (
-                "This is the greenest route available near you, but it is "
-                "noticeably shorter than the time you asked for — nothing "
-                "greener was reachable within your budget."
+                "This is the most scenic route available near you, but it is "
+                "noticeably shorter than the time you asked for. Nothing "
+                "better was reachable within your budget."
             )
         elif fastest is None:
             chosen.preset_note = UNCOMPARED_NOTE
@@ -877,16 +889,16 @@ async def route_nature(
     _, chosen = fallback
     over_cap = cap is not None and chosen.duration_min > cap
     log.warning(
-        "nature_no_acceptable_candidate",
+        "scenic_no_acceptable_candidate",
         extra={"over_cap": over_cap, "candidates": len(candidates)},
     )
     chosen.preset_note = (
-        "No greener route was found inside your time budget. This is the "
-        "shortest one that is meaningfully greener, and it is longer than you "
+        "No more scenic route was found inside your time budget. This is the "
+        "shortest one that is meaningfully better, and it is longer than you "
         "asked for."
         if over_cap
-        else "No route near you was greener than the fastest one, so this is "
-             "much the same way."
+        else "No route near you was more scenic than the fastest one, so this "
+             "is much the same way."
     )
     return chosen
 
@@ -899,7 +911,7 @@ async def route_accessible(origin: LatLon, destination: LatLon | None, minutes: 
 
 PRESETS = {
     "fastest": route_fastest,
-    "nature": route_nature,
+    "scenic": route_scenic,
     "accessible": route_accessible,
 }
 
@@ -1018,7 +1030,7 @@ async def geocode_search(query: str) -> list[GeocodeResult]:
 
 
 __all__ = [
-    "NATURE_DURATION_CAP",
+    "SCENIC_DURATION_CAP",
     "GeocodeError",
     "NoRouteFound",
     "PresetUnavailable",
@@ -1030,10 +1042,10 @@ __all__ = [
     "from_post_point",
     "geometry_for_wire",
     "loop_returned_to_origin",
-    "nature_custom_model",
     "route_accessible",
     "route_fastest",
-    "route_nature",
+    "route_scenic",
+    "scenic_custom_model",
     "to_get_point",
     "to_post_point",
 ]

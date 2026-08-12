@@ -53,7 +53,7 @@ const initialState = {
   phase: 'idle', // idle | locating | loading | success | error
   minutes: 35,
   mode: 'auto',
-  objectives: ['fastest', 'nature', 'accessible'],
+  objectives: ['fastest', 'scenic', 'accessible'],
   origin: null,
   dest: null,
   routes: [],

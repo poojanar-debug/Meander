@@ -6,7 +6,7 @@
 
 Two of the three presets need a `custom_model`, and the hosted free tier
 cannot execute one — it answers "Free packages cannot use flexible mode". So
-`nature` and `accessible` came back blocked, and the app had one working
+`scenic` and `accessible` came back blocked, and the app had one working
 preset out of three.
 
 ## Decision

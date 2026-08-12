@@ -340,7 +340,7 @@ def budget_applies(service: str) -> tuple[bool, str]:
     called ``try_spend()``, so the cap applied to a deployed instance.
 
     Do the arithmetic that made this a launch blocker. ``_post_route`` passes
-    ``cost=3``, and one round-trip request runs up to 6 nature candidates plus
+    ``cost=3``, and one round-trip request runs up to 6 scenic candidates plus
     fastest plus accessible: 8 x 3 = 24 units against an 80-unit cap. **Three
     route requests per container, ever**, and then 503 until someone deleted a
     file they had never heard of.

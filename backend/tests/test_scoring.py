@@ -423,7 +423,7 @@ def test_scoring_method_becomes_clip_once_segments_are_cached(tmp_cache_db) -> N
     points = _line(HYDE, 900)
     _seed_clip_scores(get_cache(), points)
 
-    route = _scored_route("nature", "Nature", _raw_route(points, synthetic=False))
+    route = _scored_route("scenic", "Scenic", _raw_route(points, synthetic=False))
 
     assert route.scoring_method == "clip"
     # confidence_note is the accessibility coverage sentence, not a scoring one:
@@ -436,7 +436,7 @@ def test_scoring_method_becomes_clip_once_segments_are_cached(tmp_cache_db) -> N
 def test_scoring_method_is_geometry_only_without_cached_segments(tmp_cache_db) -> None:
     from backend.main import _scored_route
 
-    route = _scored_route("nature", "Nature", _raw_route(_line(HYDE, 900), synthetic=False))
+    route = _scored_route("scenic", "Scenic", _raw_route(_line(HYDE, 900), synthetic=False))
 
     assert route.scoring_method == "geometry_only"
 
@@ -449,21 +449,21 @@ def test_a_synthetic_route_stays_placeholder_even_with_clip_scores(tmp_cache_db)
     points = _line(HYDE, 900)
     _seed_clip_scores(get_cache(), points)
 
-    route = _scored_route("nature", "Nature", _raw_route(points, synthetic=True))
+    route = _scored_route("scenic", "Scenic", _raw_route(points, synthetic=True))
 
     assert route.scoring_method == "placeholder"
 
 
-def test_a_high_clip_score_lifts_the_nature_score(tmp_cache_db) -> None:
+def test_a_high_clip_score_lifts_the_scenic_score(tmp_cache_db) -> None:
     from backend.cache import get_cache
     from backend.main import _scored_route
 
     points = _line(HYDE, 900)
-    without = _scored_route("nature", "Nature", _raw_route(points, synthetic=False))
+    without = _scored_route("scenic", "Scenic", _raw_route(points, synthetic=False))
     _seed_clip_scores(get_cache(), points, 1.0)
-    with_clip = _scored_route("nature", "Nature", _raw_route(points, synthetic=False))
+    with_clip = _scored_route("scenic", "Scenic", _raw_route(points, synthetic=False))
 
-    assert with_clip.scores.nature > without.scores.nature
+    assert with_clip.scores.scenic > without.scores.scenic
 
 
 # --- the dense-bbox refusal ------------------------------------------------

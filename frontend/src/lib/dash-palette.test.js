@@ -32,7 +32,7 @@ const token = (name, source) => {
 }
 
 // id in dash.js -> token name in styles.css
-const ROUTES = ['fastest', 'nature', 'accessible', 'quiet', 'shade', 'air']
+const ROUTES = ['fastest', 'scenic', 'accessible', 'quiet', 'shade', 'air']
 
 /** Every `color`/`colorDark` pair in dash.js, in source order. */
 const pairs = [...dash.matchAll(/color:\s*'(#[0-9a-fA-F]{6})',\s*\n\s*colorDark:\s*'(#[0-9a-fA-F]{6})'/g)].map(

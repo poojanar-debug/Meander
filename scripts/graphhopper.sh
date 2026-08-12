@@ -2,7 +2,7 @@
 #
 # Set up and run a self-hosted GraphHopper for Meander.
 #
-# The hosted free tier cannot run custom models, so the nature and accessible
+# The hosted free tier cannot run custom models, so the scenic and accessible
 # presets only work against a server you run yourself. This script downloads the
 # OSM extracts, merges them into one graph, and starts the server.
 #

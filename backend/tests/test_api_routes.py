@@ -28,7 +28,7 @@ def _body(**overrides: Any) -> dict[str, Any]:
 def test_returns_three_routes(api_client) -> None:
     payload = api_client.post("/api/routes", json=_body()).json()
 
-    assert [r["id"] for r in payload["routes"]] == ["fastest", "nature", "accessible"]
+    assert [r["id"] for r in payload["routes"]] == ["fastest", "scenic", "accessible"]
     assert all(r["label"] for r in payload["routes"])
 
 
@@ -36,8 +36,8 @@ def test_routes_differ_in_duration_and_geometry(api_client) -> None:
     routes = api_client.post("/api/routes", json=_body()).json()["routes"]
     by_id = {r["id"]: r for r in routes}
 
-    assert by_id["nature"]["duration_min"] > by_id["fastest"]["duration_min"]
-    assert by_id["nature"]["geometry"] != by_id["fastest"]["geometry"]
+    assert by_id["scenic"]["duration_min"] > by_id["fastest"]["duration_min"]
+    assert by_id["scenic"]["geometry"] != by_id["fastest"]["geometry"]
     assert by_id["accessible"]["geometry"] != by_id["fastest"]["geometry"]
 
 
@@ -88,11 +88,11 @@ def test_scores_from_synthetic_geometry_stay_labelled_as_placeholders(api_client
         assert "placeholder" in route["confidence_note"].lower()
 
 
-def test_nature_score_ranks_the_nature_route_above_the_fastest(api_client) -> None:
+def test_scenic_score_ranks_the_scenic_route_above_the_fastest(api_client) -> None:
     by_id = {r["id"]: r for r in api_client.post("/api/routes", json=_body()).json()["routes"]}
 
-    assert by_id["nature"]["scores"]["nature"] > by_id["fastest"]["scores"]["nature"]
-    assert by_id["nature"]["scores"]["air"] > by_id["fastest"]["scores"]["air"]
+    assert by_id["scenic"]["scores"]["scenic"] > by_id["fastest"]["scores"]["scenic"]
+    assert by_id["scenic"]["scores"]["air"] > by_id["fastest"]["scores"]["air"]
 
 
 def test_a_measured_score_is_a_fraction_and_an_unmeasured_one_is_null(api_client) -> None:
@@ -132,7 +132,7 @@ def test_killing_one_enrichment_service_still_returns_200(api_client, monkeypatc
 
     response = api_client.post("/api/routes", json=_body())
     assert response.status_code == 200
-    assert [r["id"] for r in response.json()["routes"]] == ["fastest", "nature", "accessible"]
+    assert [r["id"] for r in response.json()["routes"]] == ["fastest", "scenic", "accessible"]
 
 
 def test_killing_every_enrichment_service_at_once_still_returns_200(api_client, monkeypatch) -> None:
@@ -200,7 +200,7 @@ def test_a_blocked_route_reports_no_scores_at_all(api_client) -> None:
         if r["id"] == "accessible"
     )
 
-    assert accessible["scores"] == {"nature": None, "air": None, "shade": None}
+    assert accessible["scores"] == {"scenic": None, "air": None, "shade": None}
 
 
 def test_routes_built_from_synthetic_fixtures_say_so(api_client) -> None:
@@ -289,7 +289,7 @@ def test_unknown_fields_are_rejected(api_client) -> None:
 
 
 def test_more_than_three_objectives_is_rejected(api_client) -> None:
-    body = _body(objectives=["fastest", "nature", "accessible", "quiet"])
+    body = _body(objectives=["fastest", "scenic", "accessible", "quiet"])
     assert api_client.post("/api/routes", json=body).status_code == 422
 
 
@@ -303,10 +303,10 @@ def test_unimplemented_objective_is_reported_not_dropped(api_client) -> None:
 
 
 def test_objective_order_is_preserved(api_client) -> None:
-    body = _body(objectives=["accessible", "nature", "fastest"])
+    body = _body(objectives=["accessible", "scenic", "fastest"])
     routes = api_client.post("/api/routes", json=body).json()["routes"]
 
-    assert [r["id"] for r in routes] == ["accessible", "nature", "fastest"]
+    assert [r["id"] for r in routes] == ["accessible", "scenic", "fastest"]
 
 
 # --- caching ---------------------------------------------------------------
@@ -369,7 +369,7 @@ def test_429_fires_when_the_per_ip_bucket_empties(api_client, monkeypatch) -> No
     # last three were hits, and a hit spends no token, so nothing ever reached
     # the limit. Objectives are still part of the key and select which presets
     # run, so each of these is a genuine miss against the same fixtures.
-    objectives = [["fastest"], ["nature"], ["accessible"], ["fastest", "nature"]]
+    objectives = [["fastest"], ["scenic"], ["accessible"], ["fastest", "scenic"]]
     codes = [api_client.post("/api/routes", json=_body(objectives=o)).status_code
              for o in objectives]
 
@@ -421,3 +421,53 @@ def test_health_counts_the_request_without_identifying_it(api_client) -> None:
 
     assert counters["route_requests_total"] == 1
     assert counters["unique_sessions_today"] == 1
+
+
+# ---------------------------------------------------------------------------
+# the deprecated objective name
+# ---------------------------------------------------------------------------
+
+
+def test_a_link_shared_before_the_rename_still_works(api_client) -> None:
+    """`scenic` was called `nature` until 2026-08-12, and `objectives` is in the URL.
+
+    A shared permalink is a promise. `writeUrl` puts the objective ids in the
+    query string and `decodeState` reads them back, so a strict rename would
+    422 every link anyone had sent — and would do it a year after they sent it,
+    for a reason invisible to them.
+    """
+    response = api_client.post("/api/routes", json=_body(objectives=["fastest", "nature"]))
+    assert response.status_code == 200, response.text
+    ids = [r["id"] for r in response.json()["routes"]]
+    assert ids == ["fastest", "scenic"]
+
+
+def test_the_old_name_is_accepted_but_never_emitted(api_client) -> None:
+    """One direction only.
+
+    The alias exists so an old request is understood, not so the old name comes
+    back. Nothing in the response, the labels or the scores may carry it, or the
+    rename would be cosmetic and the two names would live on together.
+    """
+    import json as _json
+
+    payload = api_client.post("/api/routes", json=_body(objectives=["nature"])).json()
+    assert "nature" not in _json.dumps(payload).lower()
+
+
+def test_an_unknown_objective_is_still_rejected() -> None:
+    """The alias must not become a general "accept anything" clause.
+
+    `mode="before"` runs ahead of the Literal, so it is the one place where an
+    unrecognised id could be let through by accident.
+    """
+    from pydantic import ValidationError
+
+    from backend.models import Point, RouteRequest
+
+    with pytest.raises(ValidationError):
+        RouteRequest(origin=Point(lat=51.5, lon=-0.16), minutes=30, objectives=["greenery"])
+
+    # And the alias itself resolves rather than merely passing.
+    req = RouteRequest(origin=Point(lat=51.5, lon=-0.16), minutes=30, objectives=["nature"])
+    assert req.resolved_objectives() == ("scenic",)

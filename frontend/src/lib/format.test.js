@@ -19,7 +19,7 @@ import { METRIC_24 } from './units.js'
 const IMPERIAL = { distance: 'imperial', clock: '12' }
 
 const route = {
-  id: 'nature',
+  id: 'scenic',
   label: 'The green way',
   status: 'ok',
   duration_min: 26,
@@ -153,7 +153,7 @@ describe('unknown coverage is not zero coverage', () => {
 
   it('carries the distinction into the live region', () => {
     const route = {
-      id: 'nature',
+      id: 'scenic',
       label: 'The green way',
       status: 'ok',
       duration_min: 26,

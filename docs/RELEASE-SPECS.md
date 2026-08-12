@@ -79,7 +79,7 @@ export function shareUrl(state) {
 import { OBJECTIVES as ROUTE_OBJECTIVES } from './dash.js'   // lib/dash.js:20
 import { MODE_VERB } from './format.js'                       // lib/format.js:7
 
-const OBJECTIVES = new Set(ROUTE_OBJECTIVES.map((o) => o.id))       // fastest,nature,accessible,quiet,shade,air
+const OBJECTIVES = new Set(ROUTE_OBJECTIVES.map((o) => o.id))       // fastest,scenic,accessible,quiet,shade,air
 const MODES = new Set(['auto', ...Object.keys(MODE_VERB)])          // auto,foot,bike,car
 ```
 
@@ -360,7 +360,7 @@ Every token the launch source touches, and its replacement. **No `--space-*`, `-
 | `--rule` | `#ddd6c6` | not used here | `--rule` | `#dcd5c6` / `#26362c` | same name |
 | `--font-body` | same declaration | inherited via `font: inherit` on `.button` | `--font-body` | identical stack (`styles.css:109-110`) | no change |
 | *(none — launch hard-coded the stack at `styles.css:1682`)* | `ui-monospace, SFMono-Regular, Menlo, monospace` | `.share__url` | **new** `--font-mono` | see §2j | Launch inlined the family; on `main` families are tokens, so add one. Not a colour, so the `ci.yml` hex gate is unaffected. |
-| **Launch route palette** — `--route-fastest #2f6fd0`, `--route-nature #2e8b57`, `--route-accessible #7a4fc4`, `--route-quiet #b06a1f`, `--route-shade #12756c`, `--route-air #b03050`, plus `--score-nature/-air/-shade` aliases | | **not used by this capability at all** | `--route-*` on `main` (`styles.css:44-49` / `:86-91`) and their `lib/dash.js:20-69` mirrors | | `permalink.js` and `ShareButton.jsx` reference no colour. The only contact point is `permalink.js` importing `OBJECTIVES` from `dash.js` for its **id set** — the `color`/`colorDark` fields are never read. Nothing in this change may write a route hex. |
+| **Launch route palette** — `--route-fastest #2f6fd0`, `--route-scenic #2e8b57`, `--route-accessible #7a4fc4`, `--route-quiet #b06a1f`, `--route-shade #12756c`, `--route-air #b03050`, plus `--score-scenic/-air/-shade` aliases | | **not used by this capability at all** | `--route-*` on `main` (`styles.css:44-49` / `:86-91`) and their `lib/dash.js:20-69` mirrors | | `permalink.js` and `ShareButton.jsx` reference no colour. The only contact point is `permalink.js` importing `OBJECTIVES` from `dash.js` for its **id set** — the `color`/`colorDark` fields are never read. Nothing in this change may write a route hex. |
 | `--selected-border`, `--warn-border`, `--map-casing` | | not used here | `--rule-strong`, `--warn-rule`, *(no equivalent — the redesign has no map casing token)* | | listed so an implementer who copies a neighbouring launch rule by accident knows what to do |
 
 **Verification step for the implementer:** after adding the `.share` section, `grep -n -E "\-\-space-|\-\-text-|\-\-ink-muted|\-\-page\b|\-\-recessed|\-\-radius-" frontend/src/styles.css frontend/src/components/ShareButton.jsx frontend/src/lib/permalink.js` must return nothing.
@@ -402,7 +402,7 @@ Satisfied by seeding, not by dispatching. `App.jsx:206-258` is byte-identical af
 `share`, `share__status`, `share__url` — one block, two elements, no modifiers, no third level. The component has no toggled visual state class: the two outcomes differ by *text content* and by whether the `<input>` is in the DOM.
 
 **R10 — `null` ≠ `0` ≠ `[]`.**
-`encodeState` returns `''` (not `null`, not a bare `'?'`) when there is no origin, and `ShareButton` returns `null` on an empty url. `decodeState` returns `null` for "no link", and omits keys rather than emitting `undefined`. An `obj=` that filters down to empty leaves `objectives` absent so `initialState`'s `['fastest','nature','accessible']` survives — it does not become `[]`, which would render an empty rail the user cannot recover from (the condition `App.jsx:87-88` exists to prevent).
+`encodeState` returns `''` (not `null`, not a bare `'?'`) when there is no origin, and `ShareButton` returns `null` on an empty url. `decodeState` returns `null` for "no link", and omits keys rather than emitting `undefined`. An `obj=` that filters down to empty leaves `objectives` absent so `initialState`'s `['fastest','scenic','accessible']` survives — it does not become `[]`, which would render an empty rail the user cannot recover from (the condition `App.jsx:87-88` exists to prevent).
 
 ---
 
@@ -421,7 +421,7 @@ Satisfied by seeding, not by dispatching. `App.jsx:206-258` is byte-identical af
 Ported from `check-permalink.mjs:57-129`, with four new ones for `departAt` and two for the geolocation guard.
 
 `describe('encode / decode round trip')`
-1. **round trip preserves every field** — origin name, dest name, minutes, mode, objectives array (deep equal). Fixture: `{origin:{lat:6.933727,lon:79.85008,name:'Colombo Fort'}, dest:{lat:51.507489,lon:-0.162207,name:'Hyde Park'}, minutes:65, mode:'bike', objectives:['nature','accessible']}`.
+1. **round trip preserves every field** — origin name, dest name, minutes, mode, objectives array (deep equal). Fixture: `{origin:{lat:6.933727,lon:79.85008,name:'Colombo Fort'}, dest:{lat:51.507489,lon:-0.162207,name:'Hyde Park'}, minutes:65, mode:'bike', objectives:['scenic','accessible']}`.
 2. **THE CONTRACT: the same request body comes out the other side** — `expect(buildRouteRequest({...FULL, ...decodeState(encodeState(FULL))})).toEqual(buildRouteRequest(FULL))`. This is the one that matters; it is why `COORD_DP` is 6.
 3. **coordinates survive to routing precision** — `|Δlat| < 1e-5`, `|Δlon| < 1e-5`.
 4. **a loop has no destination rather than a null one** — with `dest: null`, `decoded.dest` is `undefined` and `'destination' in buildRouteRequest(...)` is `false` (guards `client.js:35`).
@@ -437,8 +437,8 @@ Ported from `check-permalink.mjs:57-129`, with four new ones for `departAt` and 
 `describe('hostile input: somebody else wrote this link')`
 11. **a garbage coordinate is rejected outright** — `?from=notacoord`, `?from=999,999`, `?from=51.5` all → `null`.
 12. **minutes is clamped to the range the dial can show** — `min=99999` → undefined; `min=-5` → undefined; `min=63` → `65` (snapped to the 5-minute step, matching `TimeDial.jsx:5 STEP`).
-13. **an unknown mode or objective is dropped, not passed through** — `mode=teleport` → undefined; `obj=nature,rm -rf,air` → `['nature','air']`.
-14. **objectives are deduplicated and capped at three** — `obj=nature,nature,air,shade,quiet,fastest` → length 3, all distinct (matches the `.slice(-3)` cap at `App.jsx:90`).
+13. **an unknown mode or objective is dropped, not passed through** — `mode=teleport` → undefined; `obj=scenic,rm -rf,air` → `['scenic','air']`.
+14. **objectives are deduplicated and capped at three** — `obj=scenic,scenic,air,shade,quiet,fastest` → length 3, all distinct (matches the `.slice(-3)` cap at `App.jsx:90`).
 15. **a hostile name cannot be unbounded** — 5000-character `fromName` → `origin.name.length <= 120`.
 16. **a missing name degrades to the coordinates** — `decodeState('?from=51.50749,-0.16221').origin.name` matches `/51\.5/`.
 
@@ -518,7 +518,7 @@ Sixteen cases in four describes:
 
 `departure time` *(all new; `departAt` does not exist on feat/launch)* — (7) a future departure round-trips and `depart_at` is byte-identical in the request body; (8) a departure before the top of the current hour is dropped and `expiredDeparture` is set (floor matches `DepartureStrip.jsx:33-34`); (9) a departure inside the current hour is kept; (10) a garbage timestamp is dropped without flagging an expiry.
 
-`hostile input: somebody else wrote this link` (ported from `check-permalink.mjs:92-129`) — (11) `?from=notacoord`, `?from=999,999`, `?from=51.5` all decode to `null`; (12) `min=99999`/`min=-5` dropped, `min=63` snaps to `65` (matching `TimeDial.jsx:5 STEP = 5`); (13) `mode=teleport` dropped, `obj=nature,rm -rf,air` → `['nature','air']`; (14) objectives deduplicated and capped at three (matching `App.jsx:90 .slice(-3)`); (15) a 5000-character `fromName` is truncated to ≤120; (16) a missing name degrades to the coordinates.
+`hostile input: somebody else wrote this link` (ported from `check-permalink.mjs:92-129`) — (11) `?from=notacoord`, `?from=999,999`, `?from=51.5` all decode to `null`; (12) `min=99999`/`min=-5` dropped, `min=63` snaps to `65` (matching `TimeDial.jsx:5 STEP = 5`); (13) `mode=teleport` dropped, `obj=scenic,rm -rf,air` → `['scenic','air']`; (14) objectives deduplicated and capped at three (matching `App.jsx:90 .slice(-3)`); (15) a 5000-character `fromName` is truncated to ≤120; (16) a missing name degrades to the coordinates.
 
 `writeUrl and shareUrl` (needs a stubbed `window`) — (17) *new* — a geolocated origin (`name === 'Your location'`) leaves `history.replaceState` uncalled while `shareUrl` still returns a usable link; (18) *new* — `pushState` is never called, which is the "no location history" rule as an executable assertion; (19) `encodeState` never emits `fromName` for `'Your location'` (ported from `check-permalink.mjs:86-89`).
 
@@ -718,7 +718,7 @@ Tokens the launch sites reference indirectly, for completeness — none is neede
 | --text-1 (0.875rem / 14px) | no exact match. --t-small is 0.8125rem (13px), --t-body 0.9375rem (15px). Not used at any of the 9 sites — it appears at feat/launch:519 (.sheet__snap), :1573, :1638, :1645, all sibling rules. |
 | --text-2 .. --text-6 | --t-body / --t-h3 / --t-h2 / --t-metric / --t-display, by value, not by index. Not used at any of the 9 sites. |
 | --ink: #14213d | --ink: #16241c. Not used at any of the 9 sites. |
-| launch route palette (--route-fastest #2f6fd0, --route-nature #2e8b57, --route-accessible #7a4fc4, --route-quiet #b06a1f, --route-shade #12756c, --route-air #b03050) | current dark-green palette at styles.css:44-49 / :86-91, mirrored in lib/dash.js:24-77. Not used at any of the 9 sites. Do not touch. |
+| launch route palette (--route-fastest #2f6fd0, --route-scenic #2e8b57, --route-accessible #7a4fc4, --route-quiet #b06a1f, --route-shade #12756c, --route-air #b03050) | current dark-green palette at styles.css:44-49 / :86-91, mirrored in lib/dash.js:24-77. Not used at any of the 9 sites. Do not touch. |
 | --page / --recessed / --ink-muted / --warn-border | --paper / --sunken / --ink-2 / --warn-rule |
 | --selected-border | no equivalent. Use --accent. |
 | --map-casing | no equivalent. The current map uses --raised for the same job (MapView.jsx:336, :394, :411). |
@@ -930,7 +930,7 @@ I verified this end to end. `PYTHONPATH=. .venv/bin/python` + `TestClient`, `POS
 
 ```
 fastest    | pending True  | ok      | n=120 asc=42.1 desc=39.1 max=49.3 limit=8.0 dN=3720.0 spans=[[0,2],[3,6],[62,66],[70,73],[83,85],[112,114],[116,119]]
-nature     | pending True  | ok      | n=120 asc=53.7 desc=50.7 max=49.3 limit=8.0 dN=4200.0 spans=[[0,2],[3,6],[55,58],[62,64],[73,75],[77,80],[90,93],[93,95],[113,115],[117,119]]
+scenic     | pending True  | ok      | n=120 asc=53.7 desc=50.7 max=49.3 limit=8.0 dN=4200.0 spans=[[0,2],[3,6],[55,58],[62,64],[73,75],[77,80],[90,93],[93,95],[113,115],[117,119]]
 accessible | pending True  | blocked | n=120 asc=44.2 desc=41.2 max=40.0 limit=8.0 dN=3580.0 spans=[[3,5],[15,18],[20,22],[33,36],[37,40],[43,45],[89,91],[95,97],[116,119]]
 … then the same three ids again with pending False and byte-identical elevation objects.
 ```
@@ -976,7 +976,7 @@ const FLAT_M = 1
  *      so `b` can equal the array length and `xs[b]` would be undefined.
  *   2. The thinning rescale at backend/elevation.py:106-115 can push two
  *      originally-separate spans into contact — the live fixture returns
- *      [[90,93],[93,95]] on the nature route. Counting those as two stretches
+ *      [[90,93],[93,95]] on the scenic route. Counting those as two stretches
  *      contradicts elevation.py:89-90, which says one stretch is one thing to
  *      mark. Merging restores the backend's own stated intent.
  */
@@ -1341,7 +1341,7 @@ function profileFor(metres, { bumps, limit = 8.0, seed = 1 }) {
 | Anchor | Insert |
 |---|---|
 | `mock.js:173` — after `blockers: [],` in `fastest` | `elevation: profileFor(fastestM, { bumps: false, seed: 1 }),` |
-| `mock.js:212` — after the `blockers: [ … ],` array closes in `nature` | `// One route with no profile at all, on the same principle as \`shade: null\` at :229 — "the router returned no elevation" is a branch nothing else exercises.`<br>`elevation: null,` |
+| `mock.js:212` — after the `blockers: [ … ],` array closes in `scenic` | `// One route with no profile at all, on the same principle as \`shade: null\` at :229 — "the router returned no elevation" is a branch nothing else exercises.`<br>`elevation: null,` |
 | `mock.js:258` — after the `blockers: [ … ],` array closes in `accessible` | `// The blocked route carries the steep spans. That pairing is the feature.`<br>`elevation: profileFor(accessibleM, { bumps: true, seed: 3 }),` |
 | `mock.js:282` — after `blockers: [],` in the unknown-objective stub | `elevation: null, // matches backend/main.py:637-650, which builds these without one` |
 
@@ -1381,7 +1381,7 @@ Every token the launch component's CSS (`feat/launch:frontend/src/styles.css:186
 | `--warn-ink` | `#8a2c14` / dark `#ffb59b` | steep fill, warn text | **`--warn-ink`** | `#8a2c14` light / `#f5b49b` dark | Light value coincides; dark does not. Reference the token. |
 | — (no launch counterpart) | — | hatch ground | **`--warn-ground`** | `#f7e9e1` light / `#2a1811` dark | New use, existing token. |
 | `--font-body` | Newsreader/IBM Plex set | `.profile__title` | **`--font-body`** via `.detail__h` (`styles.css:1285`) | identical value | No change needed. |
-| launch route palette — `--route-fastest #2f6fd0`, `--route-nature #2e8b57`, `--route-accessible #7a4fc4`, `--route-quiet #b06a1f`, `--route-shade #12756c`, `--route-air #b03050`, plus `--score-*` aliases | — | **not used by this component** | — | — | ElevationProfile references no route-identity colour on either branch. There is nothing to map, and `frontend/src/lib/dash.js` is not touched. |
+| launch route palette — `--route-fastest #2f6fd0`, `--route-scenic #2e8b57`, `--route-accessible #7a4fc4`, `--route-quiet #b06a1f`, `--route-shade #12756c`, `--route-air #b03050`, plus `--score-*` aliases | — | **not used by this component** | — | — | ElevationProfile references no route-identity colour on either branch. There is nothing to map, and `frontend/src/lib/dash.js` is not touched. |
 | `--safe-*` insets, `--page`, `--selected-border`, `--map-casing`, `--warn-border`, `--radius-card`, `--radius-chip`, `--text-2..6` | — | not used by this component | — | — | Listed only so the implementer can confirm nothing else leaks in. |
 
 Also mapped, structurally rather than by token: launch's `<h4 className="profile__title">Climb</h4>` inside a bare `<div className="profile">` becomes `<h4 className="detail__h">Climb</h4>` inside `<section className="detail__section">`, which is the pattern at `RouteDetail.jsx:104-105`, `:125-126`, `:130-131`. This keeps the h3 → h4 heading order the axe harness audits (`a11y.jsx:85`).
@@ -1442,7 +1442,7 @@ The feature introduces **no interactive element at all** — no button, no `<det
 
 1. **`enrichment_pending` must NOT gate this.** Unlike rest stops and the air/shade scores (`models.py:175-184`), elevation is **final on the first SSE pass**. My probe shows the `pending: true` and `pending: false` route events carrying byte-identical elevation objects for all three ids. Gating the profile on `!enrichment_pending` would blank it for the streaming window for no reason. Test B5 pins this. (Separately, Survey B's finding that `rest_stops: []` renders "no rest stops" during that window is a real defect — **out of scope here**, and this spec must not be read as fixing it.)
 2. **`steep_spans` upper bound can equal the array length.** `backend/elevation.py:112` clamps `b` to `len(thin_grid)`, not `len - 1`. `xs[120]` on a 120-element array is `undefined`, which propagates as `NaN` into an SVG `x`/`width` and silently produces an invisible or full-width rect. `mergeSpans` clamps both ends; the launch source clamped only inside the width expression (`:93`) and would have produced `undefined` in the new position sentence. Test T3.
-3. **Touching spans inflate the count.** Live fixture: nature returns `[[90,93],[93,95]]`. Unmerged, the sentence says ten stretches where there are nine. Test T1. Root cause is the thinning rescale at `backend/elevation.py:106-115`; the client-side merge is a presentation fix, not a backend fix — an optional backend cleanup is noted in the tests field.
+3. **Touching spans inflate the count.** Live fixture: scenic returns `[[90,93],[93,95]]`. Unmerged, the sentence says ten stretches where there are nine. Test T1. Root cause is the thinning rescale at `backend/elevation.py:106-115`; the client-side merge is a presentation fix, not a backend fix — an optional backend cleanup is noted in the tests field.
 4. **Steep spans are common, not rare.** On the shipped replay fixtures every one of the three routes has them (7, 10 and 9 raw spans) and `max_gradient_pct` reaches 40–49%. Anyone who assumes the warning paragraph is an edge case will under-design it. It will be on screen for most demo routes, and with 9 merged spans the position sentence runs long. That is accepted: it is the only representation for a non-sighted reader, and it lives in a paragraph, not a chip.
 5. **`preserveAspectRatio="none"` shears the hatch.** ~33° instead of 45° at typical panel widths. Cosmetic, intentional, documented in the CSS comment so nobody "fixes" it by switching to `meet` — which would letterbox the polyline and misalign the steep rects from the line they mark.
 6. **`--ink` is a name collision, not a shared value.** Launch `--ink: #14213d` (navy) vs current `#16241c` (dark green). Copy-pasting the launch CSS block wholesale reintroduces `--space-*`, `--text-*`, `--recessed`, `--ink-muted` and `--radius-control`, none of which are defined on `main`: every one silently resolves to nothing, which for `font-size: var(--text-1)` means inherited size and for `background: var(--recessed)` means transparent. It will *look* almost right and be wrong. Retype the rules from the mapping table; do not `git checkout` the block.
@@ -1472,7 +1472,7 @@ const HILLY = { distances_m: XS, elevations_m: YS, ascent_m: 42.4, descent_m: 39
 
 | # | Name | Asserts | Why it exists |
 |---|---|---|---|
-| **T1** | `merges spans the thinning rescale left touching` | `mergeSpans([[90,93],[93,95]], 120)` → `[[90,95]]` | The live nature-route fixture returns exactly this pair. Unmerged, the sentence claims ten stretches where there are nine, contradicting `backend/elevation.py:89-90`. |
+| **T1** | `merges spans the thinning rescale left touching` | `mergeSpans([[90,93],[93,95]], 120)` → `[[90,95]]` | The live scenic-route fixture returns exactly this pair. Unmerged, the sentence claims ten stretches where there are nine, contradicting `backend/elevation.py:89-90`. |
 | **T2** | `keeps spans that are genuinely separate` | `mergeSpans([[0,2],[3,6]], 120)` → `[[0,2],[3,6]]` | Guards against an over-eager merge. Also from the live fixture. |
 | **T3** | `clamps the exclusive end the backend can emit` | `mergeSpans([[116,120]], 120)` → `[[116,119]]` | `backend/elevation.py:112` clamps `b` to `len(thin_grid)`, so `xs[120]` is `undefined`. Without this, the position sentence prints `—` and the rect gets `NaN`. |
 | **T4** | `drops empty and inverted spans` | `mergeSpans([[5,5],[9,4],[-3,-1]], 120)` → `[]` | Defensive; a zero-width rect is invisible but a reversed one gets a negative width. |
@@ -1877,12 +1877,12 @@ The offline CSS only reaches `--space-4`, so every substitution here is exact.
 | launch | current | note |
 |---|---|---|
 | `--route-fastest: #2f6fd0` | `--route-fastest` (`#c2703d` / dark `#e8a46f`) | |
-| `--route-nature: #2e8b57` | `--route-nature` | |
+| `--route-scenic: #2e8b57` | `--route-scenic` | |
 | `--route-accessible: #7a4fc4` | `--route-accessible` | |
 | `--route-quiet: #b06a1f` | `--route-quiet` | |
 | `--route-shade: #12756c` | `--route-shade` | |
 | `--route-air: #b03050` | `--route-air` | |
-| `--score-nature/-air/-shade` | — | aliases that do not exist here; use `--route-*` |
+| `--score-scenic/-air/-shade` | — | aliases that do not exist here; use `--route-*` |
 
 **No offline surface uses a route colour and none should start.** The saved-copy tiers are warn-family, not route-family; borrowing a route hue would make "saved" look like an objective.
 
@@ -2048,7 +2048,7 @@ Reads `frontend/sw.js` as text (`readFileSync(new URL('../../sw.js', import.meta
 - git show feat/launch:frontend/vite.config.js — 134 lines (checked for a publicDir override: there is none)
 - git show feat/launch:frontend/scripts/check-palette.mjs — 72 lines (read to establish which gate, if any, the icon colours were under)
 - git show feat/launch:frontend/src/styles.css — read :50-59 (launch route palette) and :61-104 (launch surface/ink tokens) for the token mapping
-- git show feat/launch:frontend/src/lib/dash.js — read :47-67 (FALLBACK_COLORS) to confirm the launch nature green
+- git show feat/launch:frontend/src/lib/dash.js — read :47-67 (FALLBACK_COLORS) to confirm the launch scenic green
 
 ### Plan
 
@@ -2090,7 +2090,7 @@ const PATH = [63, 174, 112, 255]
 with:
 
 ```js
-// The plate is --brand (styles.css:27) and the mark is --route-nature's
+// The plate is --brand (styles.css:27) and the mark is --route-scenic's
 // dark-theme value (styles.css:87, mirrored at lib/dash.js:33). The icon is a
 // single un-themed artefact drawn on a dark plate, so the dark block is the
 // right place to read the mark from — that is what the dark values are for.
@@ -2103,7 +2103,7 @@ const PATH = [111, 195, 142, 255]
 ```
 
 **Change 2 — correct the false comment at `:32-34`.** The launch comment reads
-"Ink from the dark theme, path in the nature green that the app already uses for the
+"Ink from the dark theme, path in the scenic green that the app already uses for the
 greenest route. One concept, one colour — the same rule check-palette enforces between
 styles.css and dash.js." **All three clauses were false on `feat/launch`** (see the
 `risks` field). Replace the whole comment with the one written into Change 1, which
@@ -2382,15 +2382,15 @@ and their three hand-kept copies. All five must be remapped.
 | `#1b2430` | `index.html:12` `<meta name="theme-color">` | icon plate | `--brand`, `styles.css:27` | `#1c4633` |
 | `#1b2430` | `manifest.webmanifest:10` `background_color` | icon plate | `--brand`, `styles.css:27` | `#1c4633` |
 | `#1b2430` | `manifest.webmanifest:11` `theme_color` | icon plate | `--brand`, `styles.css:27` | `#1c4633` |
-| `#3fae70` (as `[63,174,112,255]`) | `make-icons.mjs:36` `PATH` | "the nature green … for the greenest route" — **false**, see below | `--route-nature`, **dark** block, `styles.css:87` (mirrored `lib/dash.js:33` `colorDark`) | `[111, 195, 142, 255]` |
+| `#3fae70` (as `[63,174,112,255]`) | `make-icons.mjs:36` `PATH` | "the scenic green … for the greenest route" — **false**, see below | `--route-scenic`, **dark** block, `styles.css:87` (mirrored `lib/dash.js:33` `colorDark`) | `[111, 195, 142, 255]` |
 | launch `--ink: #14213d` | `feat/launch:styles.css:67` | body ink | `--ink: #16241c`, `styles.css:23` | not used by this capability |
-| launch `--route-nature: #2e8b57` | `feat/launch:styles.css:51`, `dash.js:49` | greenest route | `--route-nature: #2f7d53` light / `#6fc38e` dark, `styles.css:45` / `:87` | dark value only |
+| launch `--route-scenic: #2e8b57` | `feat/launch:styles.css:51`, `dash.js:49` | greenest route | `--route-scenic: #2f7d53` light / `#6fc38e` dark, `styles.css:45` / `:87` | dark value only |
 | launch `--radius-card/-control/-chip` | `feat/launch:styles.css:82-84` | radii | `--r-sm/--r-md/--r-lg/--r-pill`, `styles.css:131-134` | not used — the icon's corner radius is a fraction of its own size (`make-icons.mjs:107` `cornerRadius = 0.22`), not a CSS token |
 | `--space-*`, `--text-*` | — | — | `--s1`..`--s8` (`styles.css:120-127`), `--t-*` (`styles.css:112-118`) | **not present in this source at all** |
 
 **Why the mark reads from the *dark* block while the plate reads from the *light* one.**
 The icon is one un-themed artefact on a dark plate. The dark block exists to supply
-values that work on dark surfaces; taking `--route-nature`'s light value (`#2f7d53`)
+values that work on dark surfaces; taking `--route-scenic`'s light value (`#2f7d53`)
 gives 3.21:1 against the plate, taking the dark value (`#6fc38e`) gives **5.00:1**
 (measured, sRGB piecewise). State this rule in the comment so nobody "fixes" it later.
 
@@ -2517,19 +2517,19 @@ exactly this against the recoloured set and all five decode cleanly at `bd=8, ct
 Imports `{ ICONS, INK, PATH, render }` from `./make-icons.mjs` and `{ rgba, token }` from
 `./tokens.mjs`.
 
-**1. `the plate is --brand and the mark is --route-nature, read from styles.css`**
+**1. `the plate is --brand and the mark is --route-scenic, read from styles.css`**
 ```js
 expect(INK).toEqual(rgba(token('--brand', 'light')))     // [28, 70, 51, 255]
-expect(PATH).toEqual(rgba(token('--route-nature', 'dark'))) // [111, 195, 142, 255]
+expect(PATH).toEqual(rgba(token('--route-scenic', 'dark'))) // [111, 195, 142, 255]
 ```
 This is `check-palette.mjs`'s actual job — CSS↔JS agreement — scoped to the two hexes the
 icon owns. Survey C established that job is currently ungated entirely
 (`check_palette.sh:17` reads only `frontend/src/styles.css`), and the icon constants sit in
 a third file no gate has ever looked at.
 
-**2. `the mark is the same green lib/dash.js paints the nature route`**
-Read `../src/lib/dash.js`, parse the `nature` entry's `colorDark` (`dash.js:33`), and compare
-case-insensitively to `token('--route-nature', 'dark')`. Closes the CSS↔`dash.js` drift gap
+**2. `the mark is the same green lib/dash.js paints the scenic route`**
+Read `../src/lib/dash.js`, parse the `scenic` entry's `colorDark` (`dash.js:33`), and compare
+case-insensitively to `token('--route-scenic', 'dark')`. Closes the CSS↔`dash.js` drift gap
 at the one colour this capability depends on, for free. (`dash.js` carries 14 hexes at
 `:24-77` that nothing checks; this covers one pair and is the natural place to widen later.)
 
@@ -3055,8 +3055,8 @@ Sources: `feat/launch:frontend/src/styles.css:1947-2011` (the .report* block) an
 | --selected-border, --map-casing | #8fa0bd, #ffffff | unused here                 | no equivalent; none needed | do not introduce |
 | --target          | 44px                | .report__open                          | --target (44px) | identical |
 | --font-body       | IBM Plex Sans stack | .report__title                         | --font-body | byte-identical declaration on both branches |
-| launch route palette: --route-fastest #2f6fd0, --route-nature #2e8b57, --route-accessible #7a4fc4, --route-quiet #b06a1f, --route-shade #12756c, --route-air #b03050 (feat/launch:styles.css:50-55) | blue-led | NOT used by .report* | current dark-green palette --route-* (styles.css:44-49 light, :86-91 dark, mirrored in lib/dash.js:20-69) | **The report UI must reference no route colour at all.** Do not add a route swatch, edge or tint to the form. |
-| --score-nature / --score-air / --score-shade (aliases, feat/launch:styles.css:57-59) | — | NOT used by .report* | no equivalent, none needed | — |
+| launch route palette: --route-fastest #2f6fd0, --route-scenic #2e8b57, --route-accessible #7a4fc4, --route-quiet #b06a1f, --route-shade #12756c, --route-air #b03050 (feat/launch:styles.css:50-55) | blue-led | NOT used by .report* | current dark-green palette --route-* (styles.css:44-49 light, :86-91 dark, mirrored in lib/dash.js:20-69) | **The report UI must reference no route colour at all.** Do not add a route swatch, edge or tint to the form. |
+| --score-scenic / --score-air / --score-shade (aliases, feat/launch:styles.css:57-59) | — | NOT used by .report* | no equivalent, none needed | — |
 
 Two launch declarations to DROP rather than map:
   - `.report__open { background: none; border: 0; text-decoration: underline }` → replaced by
@@ -3576,8 +3576,8 @@ Sources: `feat/launch:frontend/src/styles.css:1685-1744` (`.takeaway`), `:1746-1
 | `--font-body` | IBM Plex Sans stack | `:1696` | `--font-body` (same name, same stack) | identical |
 | `--map-casing` | #ffffff | — | **no equivalent and none needed** — export draws nothing on the map. | — |
 | `--safe-top/right/bottom/left` | `env(safe-area-inset-*)` | launch print block does not use them | **absent on `main`** (a separate capability). The print block must not reference them. | — |
-| launch route palette `--route-fastest #2f6fd0`, `--route-nature #2e8b57`, `--route-accessible #7a4fc4`, `--route-quiet #b06a1f`, `--route-shade #12756c`, `--route-air #b03050` (`:50-55`) | — | **not used by this capability at all.** Do not import `lib/dash.js`; do not put any colour in the GPX or the GeoJSON. A hex in an exported file would be a fourth copy of the palette (after `styles.css:44-49`, `styles.css:86-91`, `lib/dash.js:24-77`) and there is no gate on it (Survey C §7). | n/a |
-| launch `--score-nature/air/shade` aliases (`:57-59`) | — | not used | **removed on `main`**; score colour is the route colour. | — |
+| launch route palette `--route-fastest #2f6fd0`, `--route-scenic #2e8b57`, `--route-accessible #7a4fc4`, `--route-quiet #b06a1f`, `--route-shade #12756c`, `--route-air #b03050` (`:50-55`) | — | **not used by this capability at all.** Do not import `lib/dash.js`; do not put any colour in the GPX or the GeoJSON. A hex in an exported file would be a fourth copy of the palette (after `styles.css:44-49`, `styles.css:86-91`, `lib/dash.js:24-77`) and there is no gate on it (Survey C §7). | n/a |
+| launch `--score-scenic/air/shade` aliases (`:57-59`) | — | not used | **removed on `main`**; score colour is the route colour. | — |
 | bare `#fff` / `#000` / `#999` in the launch print block (`:1798, 1804-1806, 1811-1812`) | — | print | **new tokens `--print-paper` / `--print-ink` / `--print-rule`** in the theme-invariant `:root` (Edit 6). Never bare hex. | new |
 
 ---
@@ -3590,7 +3590,7 @@ One function, one string, four carriers. The invariant an implementer must prese
 
 ```xml
 <metadata>
-  <name>Meander — Nature</name>
+  <name>Meander — Scenic</name>
   <desc>{esc(provenanceNote(route))}</desc>
   <time>{isoTime}</time>
   <copyright author="OpenStreetMap contributors">
@@ -3668,7 +3668,7 @@ Launch's version (`export.js:21-49`) writes its **own** coverage sentence from `
 3. **Replaced.** `confidenceSentence(route.confidence, route.scoring_method, route.confidence_note).text`, verbatim. This is the whole point of the rewrite: it picks up the `scoring_method === 'placeholder'` branch (`format.js:79-84`), the `< 0.3` / `< 0.6` / else tiers (`:86-98`), and — critically — the **server's own wording** when `confidence_note` is present (`format.js:77`), which is what `RouteDetail.jsx:163` renders on screen. After this change the file and the screen say the same sentence by construction.
 4. **New.** `SCORING_METHOD_LABEL[route.scoring_method] ?? route.scoring_method` (`format.js:147-151`). A coverage percentage with no statement of *how* it was measured is a number this project does not want quoted.
 5. **New.** Rest stops, three-way: `restStopSentence(route.rest_stops)` when non-empty (`format.js:173-187`, currently an unused export — Survey A §1b lists it as free to adopt); `'Rest stops were not checked for this route — that is not the same as there being none.'` when `route.rest_stops == null`; `'No rest stops found along this route.'` when `[]`.
-6. **New.** Unmeasured scores named: for each of `nature`, `air`, `shade` where `route.scores?.[k] === null`, emit `'Nature, shade: not measured.'` A GPX consumer that sees no mention of shade will assume anything; a file that says "not measured" cannot.
+6. **New.** Unmeasured scores named: for each of `scenic`, `air`, `shade` where `route.scores?.[k] === null`, emit `'Scenic, shade: not measured.'` A GPX consumer that sees no mention of shade will assume anything; a file that says "not measured" cannot.
 7. `${route.blockers.length} recorded barrier(s) on this route.` when non-empty — unchanged.
 8. `${route.steps.length} directions included.` when non-empty — unchanged.
 9. Elevation, when `route.elevation` is present — **amended**: `` `Climbs ${Math.round(a)} m, descends ${Math.round(d)} m, steepest ${max}%` `` plus, when `limit_pct` is present, `` ` against a ${limit}% limit` ``. Never hard-code 8. The constant is `MAX_INCLINE_PCT = 8.0` at `backend/accessibility.py:90`, has no JS export and no codegen step, and travels per-route on the wire as `ElevationProfile.limit_pct` (`backend/models.py:116`, set at `backend/elevation.py:124`).
@@ -3689,7 +3689,7 @@ Joined with `' '`.
 - Well-formedness is checked with a ~15-line stack-based tag scanner defined in the test file, not a parser.
 - Pin `now` by passing an explicit `new Date('2026-08-08T09:30:00Z')` to `exportStamp`/`toGpx`; never let a test read the clock.
 
-Fixtures: three route objects at the top of the file, shaped exactly like `frontend/src/api/mock.js:155-178` (`fastest`, well-verified, no blockers), `:180-217` (`nature`, one blocker, three rest stops), `:221-…` (`accessible`, `status: 'blocked'`, `scores.shade: null`, `scoring_method: 'geometry_only'`), plus two synthetic edge cases: `rest_stops: null`, and `scoring_method: 'placeholder'` with `confidence: 0.9`.
+Fixtures: three route objects at the top of the file, shaped exactly like `frontend/src/api/mock.js:155-178` (`fastest`, well-verified, no blockers), `:180-217` (`scenic`, one blocker, three rest stops), `:221-…` (`accessible`, `status: 'blocked'`, `scores.shade: null`, `scoring_method: 'geometry_only'`), plus two synthetic edge cases: `rest_stops: null`, and `scoring_method: 'placeholder'` with `confidence: 0.9`.
 
 | # | describe / it | asserts |
 |---|---|---|
@@ -3802,7 +3802,7 @@ Checked against the actual source; each is verifiable at the citation given.
 
 Environment constraint: `frontend/vite.config.js:20-33` declares only `test: { env: { TZ: 'UTC' } }` — no `environment`, so this runs in Node. No `document`, no `URL.createObjectURL`, no `DOMParser`. Do **not** add jsdom. Consequences: `download`, `downloadGpx`, `downloadGeoJson` and `TakeItWithYou.jsx` are untested by design (note it in a comment above `download()`); GPX well-formedness is checked with a ~15-line stack-based tag scanner defined inside the test file; `now` is always injected (`new Date('2026-08-08T09:30:00Z')`), never read from the clock.
 
-Fixtures at the top of the file, shaped from `frontend/src/api/mock.js`: `fastest` (`mock.js:155-178`, confidence 0.88, no blockers), `nature` (`:180-217`, one blocker, three rest stops), `accessible` (`:221-…`, `status: 'blocked'`, `scores.shade: null`, `scoring_method: 'geometry_only'`), plus `placeholderRoute` (`scoring_method: 'placeholder'`, `confidence: 0.9`), `unknownRoute` (`confidence: null`, `rest_stops: null`), and `elevated` (`elevation: { ascent_m: 66.2, descent_m: 68.7, max_gradient_pct: 8.4, steep_spans: [[42,48]], limit_pct: 8 }`).
+Fixtures at the top of the file, shaped from `frontend/src/api/mock.js`: `fastest` (`mock.js:155-178`, confidence 0.88, no blockers), `scenic` (`:180-217`, one blocker, three rest stops), `accessible` (`:221-…`, `status: 'blocked'`, `scores.shade: null`, `scoring_method: 'geometry_only'`), plus `placeholderRoute` (`scoring_method: 'placeholder'`, `confidence: 0.9`), `unknownRoute` (`confidence: null`, `rest_stops: null`), and `elevated` (`elevation: { ascent_m: 66.2, descent_m: 68.7, max_gradient_pct: 8.4, steep_spans: [[42,48]], limit_pct: 8 }`).
 
 **`describe('provenanceNote')`** — 10 tests
 1. contains `confidenceSentence(r.confidence, r.scoring_method, r.confidence_note).text` verbatim, for all three mock routes.
@@ -4138,12 +4138,12 @@ The gate spawns its own dev server with `VITE_MOCK_API=1`; the hard-coded `serve
 | Launch token / value | Where it appears in the launch source | Current equivalent | Rule |
 |---|---|---|---|
 | `--route-fastest: #2f6fd0` (blue) | `feat/launch:styles.css:50`; matched by `check-palette.mjs:27` | `--route-fastest: #c2703d` `styles.css:44` / dark `#e8a46f` `:86`; `dash.js:24-25` | Read from the tree; never type a value |
-| `--route-nature: #2e8b57` | `feat/launch:styles.css:51` | `#2f7d53` `styles.css:45` / `#6fc38e` `:87`; `dash.js:32-33` | as above |
+| `--route-scenic: #2e8b57` | `feat/launch:styles.css:51` | `#2f7d53` `styles.css:45` / `#6fc38e` `:87`; `dash.js:32-33` | as above |
 | `--route-accessible: #7a4fc4` | `feat/launch:styles.css:52` | `#5b6ecf` `styles.css:46` / `#95a4f0` `:88`; `dash.js:40-41` | as above |
 | `--route-quiet: #b06a1f` | `feat/launch:styles.css:53` | `#8a5cb4` `styles.css:47` / `#c2a0e8` `:89`; `dash.js:48-49` | as above |
 | `--route-shade: #12756c` | `feat/launch:styles.css:54` | `#1e7a78` `styles.css:48` / `#63c4be` `:90`; `dash.js:56-57` | as above |
 | `--route-air: #b03050` | `feat/launch:styles.css:55` | `#b0455f` `styles.css:49` / `#ee8aa0` `:91`; `dash.js:64-65` | as above |
-| `--score-nature/-air/-shade` (aliases) | `feat/launch:styles.css:57-59` | **no equivalent; none needed.** `RouteRow.jsx:5-9` labels scores in text and `styles.css:1391-1394` paints every fill `var(--accent)` — a score bar is not colour-coded by objective | Do not recreate |
+| `--score-scenic/-air/-shade` (aliases) | `feat/launch:styles.css:57-59` | **no equivalent; none needed.** `RouteRow.jsx:5-9` labels scores in text and `styles.css:1391-1394` paints every fill `var(--accent)` — a score bar is not colour-coded by objective | Do not recreate |
 | `--ink: #14213d` (navy) | `feat/launch:styles.css:68` | `--ink: #16241c` `styles.css:23` / `#e8efe8` `:71` | Forbidden value; use the token |
 | `--ink-muted: #545f71` | `feat/launch:styles.css:72` | `--ink-2` `styles.css:24` / `:73` — **and it is load-bearing**: `dash.js:76-77` mirrors it | Assert equality in check-palette |
 | `--page: #f7f4ee` | `feat/launch:styles.css:63` | `--paper` `styles.css:18` / `:68` | Gate check A reads `--paper` |
@@ -4254,7 +4254,7 @@ The static half of the anti-vacuity guarantee. Reads source files with `node:fs`
 A gate with no test is how `check-palette.mjs` came to fail on 12 colours without anyone noticing.
 
 1. `passes against the real tree` — import the module's exported `analyse()` (factor the assertions out of the CLI wrapper so they are callable) and assert zero problems against `frontend/src/styles.css` + the real `OBJECTIVES`. Locks in today's agreement across all 14 hexes.
-2. `catches a light-value drift` — feed a CSS string where `--route-nature` is `#000000`; expect one problem naming `--route-nature` and both values.
+2. `catches a light-value drift` — feed a CSS string where `--route-scenic` is `#000000`; expect one problem naming `--route-scenic` and both values.
 3. `catches a missing dark value` — CSS with a `[data-theme='dark']` block lacking `--route-air`; expect a problem.
 4. `catches a --route-* with no objective` — CSS declaring `--route-scenic`; expect a problem.
 5. `catches fallback drift against --ink-2` — change `--ink-2` in the fixture; expect a problem naming `dash.js:76-77`. This is the pair nothing has ever gated (§E7).
@@ -4618,12 +4618,12 @@ No change required — the harness mounts the real `App` and `ROW_SELECTOR` at `
 | name | launch | current (light) | current (dark) |
 |---|---|---|---|
 | `--route-fastest` | `#2f6fd0` blue | `#c2703d` | `#e8a46f` |
-| `--route-nature` | `#2e8b57` | `#2f7d53` | `#6fc38e` |
+| `--route-scenic` | `#2e8b57` | `#2f7d53` | `#6fc38e` |
 | `--route-accessible` | `#7a4fc4` | `#5b6ecf` | `#95a4f0` |
 | `--route-quiet` | `#b06a1f` | `#8a5cb4` | `#c2a0e8` |
 | `--route-shade` | `#12756c` | `#1e7a78` | `#63c4be` |
 | `--route-air` | `#b03050` | `#b0455f` | `#ee8aa0` |
-| `--score-nature/air/shade` | aliases of the above | **deleted** | use `--route-*` directly |
+| `--score-scenic/air/shade` | aliases of the above | **deleted** | use `--route-*` directly |
 
 ### Unchanged across both branches
 `--target: 44px` (exact — `.chip`'s `min-height`), `--font-display`, `--font-body`.
@@ -4744,7 +4744,7 @@ A source scan with `node:fs` + `new URL('../components/X.jsx', import.meta.url)`
 
 There is no `format.test.js` today. Three suites, all rule-facing:
 
-18. **Live region carries the chosen unit — rule 4.** A minimal fixture route `{id:'nature', label:'The green way', status:'ok', duration_min:26, distance_m:2400, confidence:0.8, scoring_method:'clip'}`. `announceRoutes([r], IMPERIAL)` must contain `'mi'` and must not contain `'km'`; `announceRoutes([r], METRIC_24)` the reverse and `toContain('2.4 km')`. Same for `announceSelection`.
+18. **Live region carries the chosen unit — rule 4.** A minimal fixture route `{id:'scenic', label:'The green way', status:'ok', duration_min:26, distance_m:2400, confidence:0.8, scoring_method:'clip'}`. `announceRoutes([r], IMPERIAL)` must contain `'mi'` and must not contain `'km'`; `announceRoutes([r], METRIC_24)` the reverse and `toContain('2.4 km')`. Same for `announceSelection`.
 19. **Durations are never converted — the guard against a "helpful" implementer.** For every `m` in `[0, 1, 19, 20, 59, 60, 61, 90, 120, 359, 360]`, assert `fmtDur(m)`, `fmtDurSpoken(m)` and `durationParts(m)` produce identical output whether or not a units object is in play, and that none of the three accepts a second parameter that changes anything: `expect(fmtDur(m)).toBe(fmtDur(m, IMPERIAL))`. Also assert `fmtDur.length === 1` — the signature must not have grown.
 20. **`restStopSentence` threads units.** `restStopSentence([{type:'bench', at_m:340}], IMPERIAL)` contains `'ft'` and not `'m.'`; with `METRIC_24` it contains `'340 m'`. (Currently an unused export, `format.js:173`; testing it now means the Phase-2/4 features that adopt it inherit the coverage.)
 
@@ -5124,7 +5124,7 @@ I ran the awk verbatim against the current tree: **it passes** (no output, exit 
 
 ```
 frontend/src/lib/dash.js:24-25   '#C2703D' / '#E8A46F'   (fastest)
-frontend/src/lib/dash.js:32-33   '#2F7D53' / '#6FC38E'   (nature)
+frontend/src/lib/dash.js:32-33   '#2F7D53' / '#6FC38E'   (scenic)
 frontend/src/lib/dash.js:40-41   '#5B6ECF' / '#95A4F0'   (accessible)
 frontend/src/lib/dash.js:48-49   '#8A5CB4' / '#C2A0E8'   (quiet)
 frontend/src/lib/dash.js:56-57   '#1E7A78' / '#63C4BE'   (shade)
@@ -5132,7 +5132,7 @@ frontend/src/lib/dash.js:64-65   '#B0455F' / '#EE8AA0'   (air)
 frontend/src/lib/dash.js:76-77   '#55645A' / '#9BAEA1'   (unknown fallback)
 ```
 
-These are duplicates of `frontend/src/styles.css:44-49` (light) and `:86-91` (dark). Nothing checks that the two agree. `dash.js:32-41` explains why the duplication exists and is legitimate — MapLibre paints to a canvas and `setPaintProperty` cannot resolve `var(--route-nature)` — which is exactly the situation `check-palette.mjs` was written for.
+These are duplicates of `frontend/src/styles.css:44-49` (light) and `:86-91` (dark). Nothing checks that the two agree. `dash.js:32-41` explains why the duplication exists and is legitimate — MapLibre paints to a canvas and `setPaintProperty` cannot resolve `var(--route-scenic)` — which is exactly the situation `check-palette.mjs` was written for.
 
 **`check-palette.mjs` cannot simply be restored — it would fail on the redesign for two structural reasons.** I simulated its logic against the current tree:
 
@@ -5498,7 +5498,7 @@ Full JSX skeleton of `article.detail` (`:70-203`), with every seam:
    * threshold but not the 4.5:1 text threshold. Mirrored in lib/dash.js,
    * which is what the map reads. */
   --route-fastest: #c2703d;
-  --route-nature: #2f7d53;
+  --route-scenic: #2f7d53;
   --route-accessible: #5b6ecf;
   --route-quiet: #8a5cb4;
   --route-shade: #1e7a78;
@@ -5568,11 +5568,11 @@ Full JSX skeleton of `article.detail` (`:70-203`), with every seam:
 | **Surface / ink** | `--paper --raised --sunken --rule --rule-strong --ink --ink-2` | 7 | yes |
 | **Brand / accent** | `--brand --brand-hover --brand-on --brand-tint --accent --ok-ink` | 6 | yes |
 | **Warning** | `--warn-ink --warn-ground --warn-rule` | 3 | yes |
-| **Route palette** | `--route-fastest --route-nature --route-accessible --route-quiet --route-shade --route-air` | 6 | yes |
+| **Route palette** | `--route-fastest --route-scenic --route-accessible --route-quiet --route-shade --route-air` | 6 | yes |
 | **Map palette** | `--map-land --map-park --map-water --map-road` | 4 | yes |
 | **Elevation** | `--shadow-1 --shadow-2` | 2 | yes |
 
-Dark values (`styles.css:66-102`): `--paper:#0c1611 --raised:#132019 --sunken:#080f0b --rule:#26362c --rule-strong:#3a4e42 --ink:#e8efe8 --ink-2:#9baea1 --brand:#7fc79b --brand-hover:#9ad6b0 --brand-on:#0a1710 --brand-tint:#17281e --accent:#8fd3a9 --ok-ink:#8fd3a9 --warn-ink:#f5b49b --warn-ground:#2a1811 --warn-rule:#6b3a24 --route-fastest:#e8a46f --route-nature:#6fc38e --route-accessible:#95a4f0 --route-quiet:#c2a0e8 --route-shade:#63c4be --route-air:#ee8aa0 --map-land:#16221b --map-park:#1d3527 --map-water:#152a33 --map-road:#24332b`.
+Dark values (`styles.css:66-102`): `--paper:#0c1611 --raised:#132019 --sunken:#080f0b --rule:#26362c --rule-strong:#3a4e42 --ink:#e8efe8 --ink-2:#9baea1 --brand:#7fc79b --brand-hover:#9ad6b0 --brand-on:#0a1710 --brand-tint:#17281e --accent:#8fd3a9 --ok-ink:#8fd3a9 --warn-ink:#f5b49b --warn-ground:#2a1811 --warn-rule:#6b3a24 --route-fastest:#e8a46f --route-scenic:#6fc38e --route-accessible:#95a4f0 --route-quiet:#c2a0e8 --route-shade:#63c4be --route-air:#ee8aa0 --map-land:#16221b --map-park:#1d3527 --map-water:#152a33 --map-road:#24332b`.
 
 ## Rules a new feature must honour
 
@@ -5772,7 +5772,7 @@ Breakpoints: `899px` (map moves above panel; `:1416-1456`), `420px` (`:1465-1475
 6. **No third-party runtime requests.** Icons are inline SVG specifically to avoid an icon font (`TripBar.jsx:16-17`); fonts are local-only (`styles.css:4-6`); sun times are computed in-browser (`sun.js:11-13`); follow mode makes no call at all (`follow.js:3-9`, `FollowMode.jsx:22-30`). The only external hosts are the OpenFreeMap style URL (`MapView.jsx:6`) and the same-origin/`VITE_API_BASE` API (`client.js:19`).
 7. **The map is never the only representation.** `MapView.jsx:117-124`, `:546-555` (why `role="img"` cannot go on the container), `:540-544` (the visually-hidden summary). The rail is the accessibility story.
 8. **`MapView` must stay a single instance and must never unmount.** `App.jsx:348-352` gates on `origin`, not on `routes`, for exactly this reason. The StrictMode deferred-creation fix (`MapView.jsx:148-189`), the visibility-aware load deadline (`:191-216`), and the `jump`-not-`fly` hidden-tab guard (`:470-476`) are all marked "should not be tidied away".
-9. **`api/mock.js` is the fixture contract** for any new field. Route object keys: `id, label, status, geometry, duration_min, distance_m, mode, scores{nature,air,shade}, scoring_method, confidence, rest_stops[{lat,lon,type,at_m}], steps[{text,distance_m,duration_min,street_name,sign,interval}], blockers[{type,lat,lon,description}], narration, synthetic_upstream, confidence_note, status_note`. Envelope: `{routes, best_departure, reason, cache{segments_scored,hit_rate}}` (`mock.js:322-327`). The `accessible` fixture deliberately carries `shade: null` as the only exerciser of the unmeasured branch (`mock.js:225-232`).
+9. **`api/mock.js` is the fixture contract** for any new field. Route object keys: `id, label, status, geometry, duration_min, distance_m, mode, scores{scenic,air,shade}, scoring_method, confidence, rest_stops[{lat,lon,type,at_m}], steps[{text,distance_m,duration_min,street_name,sign,interval}], blockers[{type,lat,lon,description}], narration, synthetic_upstream, confidence_note, status_note`. Envelope: `{routes, best_departure, reason, cache{segments_scored,hit_rate}}` (`mock.js:322-327`). The `accessible` fixture deliberately carries `shade: null` as the only exerciser of the unmeasured branch (`mock.js:225-232`).
 
 
 ---
@@ -5838,7 +5838,7 @@ All models in `/Users/poojana/Meander/Meander/backend/models.py`.
 | `duration_min` | `:148` | `RouteRow.jsx:40`, `RouteDetail.jsx:81`, `DaylightGuard.jsx:16,24`, `FollowMode.jsx:135-136`, `lib/format.js:195,208` | ok |
 | `distance_m` | `:149` | `RouteRow.jsx:91`, `RouteDetail.jsx:81`, `FollowMode.jsx:51`, `lib/format.js:195,208` | ok |
 | **`mode`** | `:150` | **nothing** — `grep -rn "route\.mode\|r\.mode\|selectedRoute\.mode\|followRoute\.mode" frontend/src/` is empty. The UI recomputes it client-side instead (`App.jsx:192-195` → `lib/format.js` `effectiveMode`) | **UNREACHABLE** |
-| `scores.nature` | `:87` | `RouteRow.jsx:102` + `RouteDetail.jsx:134` via `SCORE_ROWS` (`RouteRow.jsx:6`) | ok |
+| `scores.scenic` | `:87` | `RouteRow.jsx:102` + `RouteDetail.jsx:134` via `SCORE_ROWS` (`RouteRow.jsx:6`) | ok |
 | `scores.air` | `:88` | same, `RouteRow.jsx:7` | ok |
 | `scores.shade` | `:89` | same, `RouteRow.jsx:8` | ok |
 | `scoring_method` | `:152` | `RouteRow.jsx:130`, `RouteDetail.jsx:65,166`, `lib/format.js:207` | ok |
@@ -5935,11 +5935,11 @@ fed by `_assess` at `backend/main.py:490` (`_guard("elevation_profile", build_pr
 
 ```
 fastest    : n=120, ascent 7.3 m, descent 7.7 m, max 1.9%, steep_spans [],                    limit_pct 8.0
-nature     : n=120, ascent 66.2 m, descent 68.7 m, max 8.4%, steep_spans [[42,48],[50,52],[75,79]], limit_pct 8.0
+scenic     : n=120, ascent 66.2 m, descent 68.7 m, max 8.4%, steep_spans [[42,48],[50,52],[75,79]], limit_pct 8.0
 accessible : n=120, ascent 7.4 m, descent 7.6 m, max 1.8%, steep_spans [],                    limit_pct 8.0
 ```
 
-So the nature route ships three genuinely-over-8% spans, correctly marked, on every request — and nothing renders them.
+So the scenic route ships three genuinely-over-8% spans, correctly marked, on every request — and nothing renders them.
 
 ### (c) Bonus defect found while proving this — `enrichment_pending` is not just unused, its absence causes a false claim
 
@@ -5948,9 +5948,9 @@ So the nature route ships three genuinely-over-8% spans, correctly marked, on ev
 I probed the SSE stream with the same body:
 ```
 progress, progress, progress,
-route fastest (enrichment_pending=true),  route nature (true),  route accessible (true),
+route fastest (enrichment_pending=true),  route scenic (true),  route accessible (true),
 progress,
-route fastest (false), route nature (false), route accessible (false),
+route fastest (false), route scenic (false), route accessible (false),
 progress, done
 ```
 

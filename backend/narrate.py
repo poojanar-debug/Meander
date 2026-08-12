@@ -50,7 +50,7 @@ class NarrationRequest:
     duration_min: float
     distance_m: float
     mode: str
-    nature: float | None
+    scenic: float | None
     air: float | None
     shade: float | None
     status: str
@@ -66,8 +66,8 @@ def _facts(req: NarrationRequest) -> str:
         f"{round(req.distance_m)} metres",
         f"Status: {req.status}",
     ]
-    if req.nature is not None:
-        lines.append(f"Greenery, 0 to 1: {req.nature:.2f}")
+    if req.scenic is not None:
+        lines.append(f"Greenery, 0 to 1: {req.scenic:.2f}")
     if req.air is not None:
         lines.append(f"Air quality, 0 to 1 where 1 is clean: {req.air:.2f}")
     if req.shade is not None:
@@ -153,7 +153,7 @@ def narration_request_for(route: Any, rest_stops: list[Any] | None) -> Narration
         duration_min=route.duration_min,
         distance_m=route.distance_m,
         mode=route.mode,
-        nature=route.scores.nature,
+        scenic=route.scores.scenic,
         air=route.scores.air,
         shade=route.scores.shade,
         status=route.status,

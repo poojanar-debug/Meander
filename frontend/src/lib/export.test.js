@@ -35,14 +35,14 @@ const fastest = {
   ],
   blockers: [],
   rest_stops: [{ type: 'bench', at_m: 900 }],
-  scores: { nature: 0.31, air: 0.62, shade: 0.2 },
+  scores: { scenic: 0.31, air: 0.62, shade: 0.2 },
   steps: [{ text: 'Head north', distance_m: 120 }],
 }
 
-const nature = {
+const scenic = {
   ...fastest,
-  id: 'nature',
-  label: 'Nature',
+  id: 'scenic',
+  label: 'Scenic',
   mode: 'bike',
   confidence: 0.72,
   blockers: [
@@ -62,7 +62,7 @@ const blocked = {
   status: 'blocked',
   status_note: 'A kerb over the limit blocks this route.',
   scoring_method: 'geometry_only',
-  scores: { nature: 0.4, air: 0.5, shade: null },
+  scores: { scenic: 0.4, air: 0.5, shade: null },
   confidence: 0.44,
 }
 
@@ -100,7 +100,7 @@ function wellFormed(xml) {
 describe('provenanceNote', () => {
   it.each([
     ['fastest', fastest],
-    ['nature', nature],
+    ['scenic', scenic],
     ['blocked', blocked],
   ])('carries the same confidence sentence the screen shows (%s)', (_name, route) => {
     // By construction, not by coincidence: both call confidenceSentence.
@@ -151,7 +151,7 @@ describe('provenanceNote', () => {
     expect(none).toContain('No rest stops found')
     expect(none).not.toContain('not checked')
 
-    const some = provenanceNote(nature)
+    const some = provenanceNote(scenic)
     expect(some).toContain('3 rest stops')
     expect(some).not.toContain('not checked')
     expect(some).not.toContain('No rest stops found')
@@ -195,7 +195,7 @@ describe('provenanceNote', () => {
 
   it.each([
     ['fastest', fastest],
-    ['nature', nature],
+    ['scenic', scenic],
     ['blocked', blocked],
     ['unknown', unknown],
   ])('ends with the ODbL attribution (%s)', (_name, route) => {
@@ -209,7 +209,7 @@ describe('toGpx', () => {
   const places = { origin: { lat: 6.933727, lon: 79.85008 }, dest: { lat: 6.9362, lon: 79.8531 } }
 
   it('is a track, not a route', () => {
-    const gpx = toGpx(nature, places, NOW)
+    const gpx = toGpx(scenic, places, NOW)
     expect(gpx).toContain('<trk>')
     expect(gpx).not.toContain('<rte')
   })
@@ -217,8 +217,8 @@ describe('toGpx', () => {
   it('carries the note twice — in the metadata and on the track', () => {
     // Counting <desc> elements would be wrong: a barrier waypoint carries one
     // too. Count the note itself.
-    const gpx = toGpx(nature, places, NOW)
-    const note = provenanceNote(nature)
+    const gpx = toGpx(scenic, places, NOW)
+    const note = provenanceNote(scenic)
       .replace(/&/g, '&amp;')
       .replace(/</g, '&lt;')
       .replace(/>/g, '&gt;')
@@ -229,7 +229,7 @@ describe('toGpx', () => {
 
   it('escapes every XML metacharacter in a barrier description', () => {
     const hostile = {
-      ...nature,
+      ...scenic,
       blockers: [
         {
           type: 'steps',
@@ -257,24 +257,24 @@ describe('toGpx', () => {
   })
 
   it('puts latitude and longitude the right way round', () => {
-    const gpx = toGpx(nature, places, NOW)
+    const gpx = toGpx(scenic, places, NOW)
     const points = [...gpx.matchAll(/<trkpt lat="([^"]+)" lon="([^"]+)"/g)]
-    expect(points).toHaveLength(nature.geometry.length)
+    expect(points).toHaveLength(scenic.geometry.length)
     points.forEach(([, lat, lon], i) => {
-      expect(Number(lat)).toBeCloseTo(nature.geometry[i][1], 6)
-      expect(Number(lon)).toBeCloseTo(nature.geometry[i][0], 6)
+      expect(Number(lat)).toBeCloseTo(scenic.geometry[i][1], 6)
+      expect(Number(lon)).toBeCloseTo(scenic.geometry[i][0], 6)
     })
   })
 
   it('emits one waypoint per barrier, plus start and destination', () => {
-    const gpx = toGpx(nature, places, NOW)
-    expect(gpx.match(/<wpt /g)).toHaveLength(nature.blockers.length + 2)
+    const gpx = toGpx(scenic, places, NOW)
+    expect(gpx.match(/<wpt /g)).toHaveLength(scenic.blockers.length + 2)
     expect(gpx).toContain('Six steps, no ramp')
     expect(gpx).toContain('<name>steps</name>')
   })
 
   it('is well-formed, declared 1.1, and orders waypoints before the track', () => {
-    const gpx = toGpx(nature, places, NOW)
+    const gpx = toGpx(scenic, places, NOW)
     expect(wellFormed(gpx)).toBe(true)
     expect(gpx).toContain('version="1.1"')
     expect(gpx).toContain('xmlns="http://www.topografix.com/GPX/1/1"')
@@ -282,22 +282,22 @@ describe('toGpx', () => {
   })
 
   it('reads the clock once', () => {
-    const gpx = toGpx(nature, places, NOW)
+    const gpx = toGpx(scenic, places, NOW)
     expect(gpx).toContain('<time>2026-08-08T09:30:00.000Z</time>')
   })
 })
 
 describe('toGeoJson', () => {
   it('parses, with the line as the first feature', () => {
-    const parsed = JSON.parse(toGeoJson(nature))
+    const parsed = JSON.parse(toGeoJson(scenic))
     expect(parsed.type).toBe('FeatureCollection')
     expect(parsed.features[0].geometry.type).toBe('LineString')
-    expect(parsed.features[0].geometry.coordinates).toEqual(nature.geometry)
+    expect(parsed.features[0].geometry.coordinates).toEqual(scenic.geometry)
   })
 
   it('gives each barrier its own Point feature', () => {
-    const parsed = JSON.parse(toGeoJson(nature))
-    expect(parsed.features).toHaveLength(nature.blockers.length + 1)
+    const parsed = JSON.parse(toGeoJson(scenic))
+    expect(parsed.features).toHaveLength(scenic.blockers.length + 1)
     for (const feature of parsed.features.slice(1)) {
       expect(feature.geometry.type).toBe('Point')
       expect(feature.properties.kind).toBe('barrier')
@@ -305,8 +305,8 @@ describe('toGeoJson', () => {
   })
 
   it('puts the note on every feature, barriers included', () => {
-    const parsed = JSON.parse(toGeoJson(nature))
-    const note = provenanceNote(nature)
+    const parsed = JSON.parse(toGeoJson(scenic))
+    const note = provenanceNote(scenic)
     for (const feature of parsed.features) {
       expect(feature.properties.note).toBe(note)
     }
@@ -321,23 +321,23 @@ describe('toGeoJson', () => {
 
 describe('the maps handoff', () => {
   it('caps Google at ten points and sets the travel mode', () => {
-    const long = { ...nature, geometry: Array.from({ length: 60 }, (_, i) => [79.85 + i / 1000, 6.93]) }
+    const long = { ...scenic, geometry: Array.from({ length: 60 }, (_, i) => [79.85 + i / 1000, 6.93]) }
     const url = new URL(googleMapsUrl(long))
     const via = url.searchParams.get('waypoints')?.split('|') ?? []
     expect(via.length + 2).toBeLessThanOrEqual(10)
     expect(url.searchParams.get('travelmode')).toBe('bicycling')
-    expect(new URL(googleMapsUrl({ ...nature, mode: 'hovercraft' })).searchParams.get('travelmode')).toBe(
+    expect(new URL(googleMapsUrl({ ...scenic, mode: 'hovercraft' })).searchParams.get('travelmode')).toBe(
       'walking',
     )
   })
 
   it('returns nothing below two points', () => {
-    expect(googleMapsUrl({ ...nature, geometry: [[0, 0]] })).toBeNull()
-    expect(appleMapsUrl({ ...nature, geometry: [[0, 0]] })).toBeNull()
+    expect(googleMapsUrl({ ...scenic, geometry: [[0, 0]] })).toBeNull()
+    expect(appleMapsUrl({ ...scenic, geometry: [[0, 0]] })).toBeNull()
   })
 
   it('gives Apple the endpoints only, because its scheme has no via points', () => {
-    const url = new URL(appleMapsUrl(nature))
+    const url = new URL(appleMapsUrl(scenic))
     expect([...url.searchParams.keys()].sort()).toEqual(['daddr', 'dirflg', 'saddr'])
     expect(url.searchParams.get('waypoints')).toBeNull()
     expect(url.searchParams.get('dirflg')).toBe('w')
@@ -365,7 +365,7 @@ describe('sampleWaypoints', () => {
 
 describe('exportStamp', () => {
   it('reads the clock once, so the name and the contents cannot disagree', () => {
-    const { filename, isoTime } = exportStamp(nature, NOW)
+    const { filename, isoTime } = exportStamp(scenic, NOW)
     expect(filename).toMatch(/^meander-[a-z0-9-]+-\d{4}-\d{2}-\d{2}$/)
     expect(filename.endsWith(isoTime.slice(0, 10))).toBe(true)
   })

@@ -40,7 +40,7 @@ repo and is the specification for the frontend.
   load. Someone who explicitly picked light should stay in light when their
   laptop flips to dark at sunset. The media-query listener therefore re-checks
   storage before acting rather than only being attached conditionally.
-- **Score meters lost their individual hues.** Nature, clean air and shade were
+- **Score meters lost their individual hues.** Scenic, clean air and shade were
   green, blue and amber; `--score-air` was the same blue as the Fastest route's
   line, so blue meant both "this route" and "this score". All three now use
   `--accent` and are told apart by their labels (§2.3).

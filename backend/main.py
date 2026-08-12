@@ -738,7 +738,7 @@ def _scored_route(
         # A null score means "not measured", which is a different statement
         # from zero and is rendered as such.
         scores=Scores(
-            nature=scores.nature if scores else None,
+            scenic=scores.scenic if scores else None,
             air=_blend_air(air, scores.air if scores else None),
             shade=shade,
         ),
@@ -935,33 +935,33 @@ async def route_events(req: RouteRequest) -> AsyncIterator[dict[str, Any]]:
     fastest_route: RawRoute | None = None
     failures: list[RoutingError] = []
 
-    # fastest first when present: nature's duration cap is relative to it.
+    # fastest first when present: scenic's duration cap is relative to it.
     ordered = sorted(objectives, key=lambda o: 0 if o == "fastest" else 1)
 
-    # `objectives` accepts any subset, so {"objectives": ["nature"]} is a valid
-    # public request. Without this, fastest is never routed, route_nature gets
+    # `objectives` accepts any subset, so {"objectives": ["scenic"]} is a valid
+    # public request. Without this, fastest is never routed, route_scenic gets
     # fastest=None, and **both** of its bars quietly switch off: the
-    # NATURE_DURATION_CAP and the "must be greener than fastest" floor. Every
-    # candidate then counts as acceptable and the winner ships labelled Nature
+    # SCENIC_DURATION_CAP and the "must be greener than fastest" floor. Every
+    # candidate then counts as acceptable and the winner ships labelled Scenic
     # with no preset_note — a label with nothing behind it, which is exactly
-    # what route_nature's own docstring says must never happen.
+    # what route_scenic's own docstring says must never happen.
     #
-    # So fastest is routed as a baseline whenever nature is asked for, and
+    # So fastest is routed as a baseline whenever scenic is asked for, and
     # simply not emitted as a route. It costs one request, which is ~24 ms
     # against a self-hosted router.
-    if "nature" in objectives and "fastest" not in objectives:
+    if "scenic" in objectives and "fastest" not in objectives:
         try:
             fastest_route = await PRESETS["fastest"](origin, destination, req.minutes, mode)
         except RoutingError as exc:
-            # Not fatal: the caller did not ask for this route. route_nature
+            # Not fatal: the caller did not ask for this route. route_scenic
             # says on the card that the comparison could not be made.
-            log.info("nature_baseline_unavailable", extra={"kind": exc.kind})
+            log.info("scenic_baseline_unavailable", extra={"kind": exc.kind})
 
     async def _run(objective: str) -> tuple[str, RawRoute | None, RoutingError | None]:
         """Route one objective. Never raises; the caller decides what a failure means."""
         preset_fn = PRESETS[objective]
         try:
-            if objective == "nature":
+            if objective == "scenic":
                 return objective, await preset_fn(
                     origin, destination, req.minutes, mode, fastest_route
                 ), None
@@ -990,9 +990,9 @@ async def route_events(req: RouteRequest) -> AsyncIterator[dict[str, Any]]:
             )
 
     # fastest is routed alone and first. This ordering is load-bearing, not
-    # stylistic: route_nature takes it and derives both the NATURE_DURATION_CAP
+    # stylistic: route_scenic takes it and derives both the SCENIC_DURATION_CAP
     # and the greenness floor from it. A flat gather over all three would pass
-    # fastest=None and silently disable both — see test_nature_baseline.py.
+    # fastest=None and silently disable both — see test_scenic_baseline.py.
     if "fastest" in objectives:
         yield {"type": "progress", "pct": 15, "text": "Routing the fastest way",
                "segments_scored": 0}
@@ -1007,7 +1007,7 @@ async def route_events(req: RouteRequest) -> AsyncIterator[dict[str, Any]]:
             fastest_route = raw
             routed.append(("fastest", ROUTE_LABELS.get("fastest", "Fastest"), raw))
 
-    # nature and accessible are independent of each other, so they go together.
+    # scenic and accessible are independent of each other, so they go together.
     rest = [o for o in ordered if o in PRESETS and o != "fastest"]
     if rest:
         yield {"type": "progress", "pct": 35, "text": "Routing the other ways",
@@ -1717,7 +1717,7 @@ def health(verbose: int = Query(0, ge=0, le=1)) -> dict[str, Any]:
         "status": "ok",
         "version": __version__,
         "clip_available": clip_available(),
-        # Which routing server, and therefore whether the nature and accessible
+        # Which routing server, and therefore whether the scenic and accessible
         # presets can run at all — the hosted free tier cannot execute a custom
         # model, and that fact is otherwise only discoverable by getting a 400.
         "routing": {

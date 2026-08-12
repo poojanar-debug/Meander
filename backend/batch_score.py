@@ -21,7 +21,7 @@ from .cache import get_cache
 from .config import TEST_LOCATIONS, TEST_LOCATIONS_BY_SLUG, settings
 from .geometry import LatLon, sample_every
 from .logging_setup import configure_logging, get_logger
-from .routing import route_fastest, route_nature
+from .routing import route_fastest, route_scenic
 from .scoring import (
     ACTIVE_PROMPT_VARIANT,
     MAX_SAMPLE_POINTS,
@@ -36,7 +36,7 @@ log = get_logger(__name__)
 
 
 async def _points_for_location(slug: str, minutes: int) -> list[LatLon]:
-    """Sample points along the fastest and nature routes from a test location.
+    """Sample points along the fastest and scenic routes from a test location.
 
     Both, because the two presets take different streets and pre-warming only
     one leaves the other permanently on geometry-only scoring.
@@ -45,7 +45,7 @@ async def _points_for_location(slug: str, minutes: int) -> list[LatLon]:
     origin = LatLon(location.lat, location.lon)
 
     collected: list[LatLon] = []
-    for name, router in (("fastest", route_fastest), ("nature", route_nature)):
+    for name, router in (("fastest", route_fastest), ("scenic", route_scenic)):
         try:
             route = await router(origin, None, minutes, "foot")
         # A location that will not route is a reason to skip it, not to abandon

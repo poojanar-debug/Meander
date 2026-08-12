@@ -52,10 +52,10 @@ def _req(**kw) -> RouteRequest:
 
 
 @pytest.mark.asyncio
-async def test_fastest_completes_before_nature_starts(
+async def test_fastest_completes_before_scenic_starts(
     tmp_cache_db, no_enrichment, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Load-bearing, not stylistic: route_nature derives its cap and floor from it.
+    """Load-bearing, not stylistic: route_scenic derives its cap and floor from it.
 
     A flat gather over all three objectives would pass fastest=None and
     silently disable both bars.
@@ -69,13 +69,13 @@ async def test_fastest_completes_before_nature_starts(
         return _stub(preset)
 
     monkeypatch.setattr(routing, "_post_route", fake_post)
-    await _collect(_req(objectives=["fastest", "nature", "accessible"]))
+    await _collect(_req(objectives=["fastest", "scenic", "accessible"]))
 
-    assert order.index("end:fastest") < order.index("start:nature")
+    assert order.index("end:fastest") < order.index("start:scenic")
 
 
 @pytest.mark.asyncio
-async def test_nature_and_accessible_overlap(
+async def test_scenic_and_accessible_overlap(
     tmp_cache_db, no_enrichment, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """They are independent of each other, so they must not be serialised."""
@@ -92,14 +92,14 @@ async def test_nature_and_accessible_overlap(
         return _stub(preset)
 
     monkeypatch.setattr(routing, "_post_route", fake_post)
-    monkeypatch.setenv("MEANDER_GRAPHHOPPER_SELF_HOSTED", "0")  # one nature candidate
-    await _collect(_req(objectives=["fastest", "nature", "accessible"]))
+    monkeypatch.setenv("MEANDER_GRAPHHOPPER_SELF_HOSTED", "0")  # one scenic candidate
+    await _collect(_req(objectives=["fastest", "scenic", "accessible"]))
 
-    assert peak >= 2, "nature and accessible should be in flight together"
+    assert peak >= 2, "scenic and accessible should be in flight together"
 
 
 @pytest.mark.asyncio
-async def test_nature_candidates_run_together_when_unmetered(
+async def test_scenic_candidates_run_together_when_unmetered(
     monkeypatch: pytest.MonkeyPatch
 ) -> None:
     inflight = 0
@@ -116,8 +116,8 @@ async def test_nature_candidates_run_together_when_unmetered(
     monkeypatch.setattr(routing, "_post_route", fake_post)
     monkeypatch.setenv("MEANDER_GRAPHHOPPER_SELF_HOSTED", "1")
 
-    await routing.route_nature(LatLon(51.5, -0.16), None, 30, "foot", _stub("fastest", 40.0))
-    assert peak == len(routing.NATURE_LOOP_CANDIDATES)
+    await routing.route_scenic(LatLon(51.5, -0.16), None, 30, "foot", _stub("fastest", 40.0))
+    assert peak == len(routing.SCENIC_LOOP_CANDIDATES)
 
 
 @pytest.mark.asyncio
@@ -137,12 +137,12 @@ async def test_metered_candidates_stay_sequential(monkeypatch: pytest.MonkeyPatc
     monkeypatch.setattr(routing, "_post_route", fake_post)
     monkeypatch.setenv("MEANDER_GRAPHHOPPER_SELF_HOSTED", "0")
 
-    await routing.route_nature(LatLon(51.5, -0.16), None, 30, "foot", _stub("fastest", 40.0))
+    await routing.route_scenic(LatLon(51.5, -0.16), None, 30, "foot", _stub("fastest", 40.0))
     assert peak == 1
 
 
 @pytest.mark.asyncio
-async def test_one_failed_nature_candidate_does_not_lose_the_others(
+async def test_one_failed_scenic_candidate_does_not_lose_the_others(
     monkeypatch: pytest.MonkeyPatch
 ) -> None:
     calls = {"n": 0}
@@ -156,14 +156,14 @@ async def test_one_failed_nature_candidate_does_not_lose_the_others(
     monkeypatch.setattr(routing, "_post_route", fake_post)
     monkeypatch.setenv("MEANDER_GRAPHHOPPER_SELF_HOSTED", "1")
 
-    result = await routing.route_nature(
+    result = await routing.route_scenic(
         LatLon(51.5, -0.16), None, 30, "foot", _stub("fastest", 40.0)
     )
     assert result.duration_min == 20.0
 
 
 @pytest.mark.asyncio
-async def test_every_nature_candidate_failing_still_raises(
+async def test_every_scenic_candidate_failing_still_raises(
     monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Total failure must not be laundered into a route."""
@@ -175,7 +175,7 @@ async def test_every_nature_candidate_failing_still_raises(
     monkeypatch.setenv("MEANDER_GRAPHHOPPER_SELF_HOSTED", "1")
 
     with pytest.raises(routing.NoRouteFound):
-        await routing.route_nature(LatLon(51.5, -0.16), None, 30, "foot", _stub("fastest", 40.0))
+        await routing.route_scenic(LatLon(51.5, -0.16), None, 30, "foot", _stub("fastest", 40.0))
 
 
 # ---------------------------------------------------------------------------
@@ -201,7 +201,7 @@ async def test_routes_are_emitted_before_enrichment(
     monkeypatch.setattr(main_mod, "enrich_context", slow_enrich)
 
     events = []
-    async for event in main_mod.route_events(_req(objectives=["fastest", "nature"])):
+    async for event in main_mod.route_events(_req(objectives=["fastest", "scenic"])):
         if event["type"] == "route":
             marks.append(f"route:{event['route']['id']}:"
                          f"{'pending' if event['route']['enrichment_pending'] else 'final'}")
@@ -278,7 +278,7 @@ async def test_the_expensive_assessment_runs_once_per_route(
 
     monkeypatch.setattr(routing, "_post_route", fake_post)
 
-    await _collect(_req(objectives=["fastest", "nature"]))
+    await _collect(_req(objectives=["fastest", "scenic"]))
     assert calls["n"] == 2
 
 
@@ -348,7 +348,7 @@ async def test_a_fast_request_is_untouched_by_the_deadline(
     events = [
         e
         async for e in main_mod.route_events_with_deadline(
-            _req(objectives=["fastest", "nature"]), deadline_s=30
+            _req(objectives=["fastest", "scenic"]), deadline_s=30
         )
     ]
     done = next(e for e in events if e["type"] == "done")

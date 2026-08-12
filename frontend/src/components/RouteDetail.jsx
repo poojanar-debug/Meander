@@ -24,7 +24,7 @@ function CachedNote({ ageMs }) {
 }
 
 const SCORE_ROWS = [
-  { key: 'nature', label: 'Nature' },
+  { key: 'scenic', label: 'Scenic' },
   { key: 'air', label: 'Clean air' },
   { key: 'shade', label: 'Shade' },
 ]

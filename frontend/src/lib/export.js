@@ -18,7 +18,7 @@ import {
   restStopSentence,
 } from './format.js'
 
-const SCORE_LABEL = { nature: 'Nature', air: 'Air', shade: 'Shade' }
+const SCORE_LABEL = { scenic: 'Scenic', air: 'Air', shade: 'Shade' }
 
 const esc = (value) =>
   String(value ?? '')

@@ -42,7 +42,7 @@
    * threshold but not the 4.5:1 text threshold. Mirrored in lib/dash.js,
    * which is what the map reads. */
   --route-fastest: #c2703d;
-  --route-nature: #2f7d53;
+  --route-scenic: #2f7d53;
   --route-accessible: #5b6ecf;
   --route-quiet: #8a5cb4;
   --route-shade: #1e7a78;
@@ -84,7 +84,7 @@
   --warn-rule: #6b3a24;
 
   --route-fastest: #e8a46f;
-  --route-nature: #6fc38e;
+  --route-scenic: #6fc38e;
   --route-accessible: #95a4f0;
   --route-quiet: #c2a0e8;
   --route-shade: #63c4be;

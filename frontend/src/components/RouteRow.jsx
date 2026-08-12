@@ -4,7 +4,7 @@ import { cacheChipText, cacheTier, formatCacheAge } from '../lib/offline.js'
 import VerificationMeter from './VerificationMeter.jsx'
 
 const SCORE_ROWS = [
-  { key: 'nature', label: 'Green' },
+  { key: 'scenic', label: 'Green' },
   { key: 'air', label: 'Air' },
   { key: 'shade', label: 'Shade' },
 ]

@@ -49,6 +49,20 @@ const STEP = 5
 const MAX_NAME = 120
 const MAX_OBJECTIVES = 3
 
+/**
+ * Objective ids that used to be written into links, mapped to what they are
+ * called now.
+ *
+ * `scenic` was `nature` until 2026-08-12. Read on the way in and never written:
+ * `encodeState` only ever emits current ids, so a link opened and re-shared
+ * quietly upgrades itself. Without this, every link anyone had shared would
+ * come back with its objectives silently dropped — `OBJECTIVES.has('nature')`
+ * is false, the filter removes it, and the user gets the default three with no
+ * indication that the link asked for something else. The backend accepts the
+ * same alias, for the same reason and in one direction only.
+ */
+const DEPRECATED_OBJECTIVES = { nature: 'scenic' }
+
 const loc = () => (typeof window === 'undefined' ? null : window.location)
 
 const encodePlace = (place) => `${place.lat.toFixed(COORD_DP)},${place.lon.toFixed(COORD_DP)}`
@@ -123,7 +137,14 @@ export function decodeState(search) {
 
   const obj = params.get('obj')
   if (obj) {
-    const wanted = [...new Set(obj.split(',').filter((id) => OBJECTIVES.has(id)))]
+    const wanted = [
+      ...new Set(
+        obj
+          .split(',')
+          .map((id) => DEPRECATED_OBJECTIVES[id] ?? id)
+          .filter((id) => OBJECTIVES.has(id)),
+      ),
+    ]
     if (wanted.length) state.objectives = wanted.slice(0, MAX_OBJECTIVES)
   }
 

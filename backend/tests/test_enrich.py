@@ -377,11 +377,11 @@ async def test_recorded_overpass_data_finds_real_benches() -> None:
     app is actually for, and it is the shape a hermetic suite should depend on.
     """
     from backend.enrich import enrich_context
-    from backend.routing import route_accessible, route_fastest, route_nature
+    from backend.routing import route_accessible, route_fastest, route_scenic
 
     routes = [
         (await route_fastest(LONDON, None, 35, "foot")).points,
-        (await route_nature(LONDON, None, 35, "foot")).points,
+        (await route_scenic(LONDON, None, 35, "foot")).points,
         (await route_accessible(LONDON, None, 35, "foot")).points,
     ]
     context = await enrich_context(routes)
