@@ -403,6 +403,48 @@ h3 {
   color: var(--brand);
 }
 
+/* The wordmark is a button now: pressing it starts a new walk.
+   No background and no border, deliberately — one would read as a third pill
+   beside the theme toggle and About on the right, and this is a wordmark that
+   happens to be pressable rather than a control that happens to say Meander.
+   `color: inherit` and `font: inherit` are what keep it looking like the h1 it
+   is inside; a UA-styled button here would undo the display face and the
+   letter-spacing above. */
+.topbar__home {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s2);
+  /* The 44px floor, met by the control rather than by its text. */
+  min-height: var(--target);
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  letter-spacing: inherit;
+  cursor: pointer;
+}
+.topbar__home:hover .topbar__logo {
+  color: var(--accent);
+}
+
+/* Sized in em so it tracks the wordmark: ~24px beside 22px of text, and it
+   grows with Dynamic Type instead of staying at whatever px it was born.
+   `flex: none` so a narrow bar squeezes the word and never the mark. */
+.topbar__logo {
+  flex: none;
+  color: var(--brand);
+}
+
+/* 320px is the narrowest width the gate tests, and the bar has to hold the
+   wordmark, the theme pill and About there. The mark is the one thing on it
+   that carries no information the wordmark does not. */
+@media (max-width: 379px) {
+  .topbar__logo {
+    display: none;
+  }
+}
+
 .topbar__tagline {
   color: var(--ink-2);
   font-size: var(--t-micro);

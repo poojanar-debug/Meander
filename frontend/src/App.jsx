@@ -235,6 +235,28 @@ function reducer(state, action) {
     case 'follow':
       return { ...state, follow: action.value }
 
+    /**
+     * Back to the beginning, keeping only what is a display preference.
+     *
+     * **Not routed through `withRefetch()`.** That bumps `nonce`, and the fetch
+     * effect keys on `nonce` alone — so a reset would immediately re-request
+     * the search it had just cleared. Landing on `initialState`'s 0 both
+     * changes the value and lands on the one the effect ignores.
+     *
+     * The honest reason, rather than the convenient one: the effect would in
+     * fact return a line earlier anyway, at `if (!state.origin)`, because
+     * `origin` is now null. That is a second reason and not the first, and
+     * writing it as the first would leave the next person thinking the nonce
+     * does not matter here. It does — it is what makes a reset while three
+     * routes are streaming not turn into a fourth request.
+     *
+     * Theme and units survive because they are persisted display preferences
+     * that the user set deliberately and that no search produced. Everything
+     * else goes.
+     */
+    case 'reset':
+      return { ...initialState, theme: state.theme, units: state.units }
+
     default:
       return state
   }
@@ -606,9 +628,59 @@ export default function App() {
 
   // The first-run card replaces panel and stage entirely (§7). Gating on
   // `origin` rather than on `routes` means the map is never created until there
-  // is somewhere to draw — and once created it is never unmounted, which is the
-  // single-MapLibre-instance rule the old build already held to.
+  // is somewhere to draw.
+  //
+  // ⚠ This used to end "and once created it is never unmounted, which is the
+  // single-MapLibre-instance rule the old build already held to." That stopped
+  // being true when the wordmark became a reset: pressing it clears `origin`,
+  // this flips back to true, and MapView is torn down. The rule it was
+  // protecting still holds — there is never more than one map — but it holds
+  // because the teardown at `MapView.jsx:275-288` is correct and because
+  // creation is deferred a tick past StrictMode's double-mount, not because the
+  // unmount cannot happen. A comment asserting an invariant the code no longer
+  // has is worse than no comment: the next person reads it and stops checking.
   const firstRun = !state.origin && state.phase !== 'locating' && !hasRoutes
+
+  /**
+   * The logo and the wordmark start the app over.
+   *
+   * Three of these four lines are things a reducer cannot do, and each one is a
+   * failure somebody would otherwise have to reproduce on a phone.
+   *
+   * Without the abort, pressing the logo while three routes are streaming
+   * leaves the reset visibly undone a second later: the in-flight SSE keeps
+   * dispatching `route` events into the cleared state and the rail repopulates
+   * from a search that no longer exists.
+   *
+   * Without the `clearTimeout`, `announce`'s 350ms debounce delivers the
+   * *previous* sentence after the reset has happened — "Three routes ready" to
+   * a screen with nothing on it.
+   *
+   * `highlight` is local state and outside the reducer entirely, so it survives
+   * a reset that clears everything else and leaves the map emphasising a
+   * stretch of a route that is gone.
+   *
+   * **Never `location.reload()`**, for three reasons and one of them is
+   * reachable: it re-reads the current URL, so a permalinked page reloads
+   * straight back into the same search it was asked to clear; it discards an
+   * offline-saved route the user may be relying on; and it costs a full network
+   * round trip in exactly the situation — no signal — where this app is meant
+   * to keep working.
+   *
+   * The address bar clears itself. `origin` going null makes the `writeUrl`
+   * effect emit a bare path, and `permalink.js` early-returns when the URL is
+   * already bare, so no history entry is written either way. It uses
+   * `replaceState` and never `pushState`, which means **a reset is not undoable
+   * with the back button** — consistent with that module's contract, and worth
+   * knowing before pressing it.
+   */
+  const onReset = useCallback(() => {
+    abortRef.current?.abort()
+    clearTimeout(announceTimer.current)
+    setHighlight(null)
+    dispatch({ type: 'reset' })
+    announceNow('Cleared. Start a new walk.')
+  }, [announceNow])
 
   // The About disclosure lives at the foot of a panel that scrolls, so the
   // topbar button has to open it *and* bring it into view. Opening alone would
@@ -632,7 +704,13 @@ export default function App() {
         {announcement.text}
       </p>
 
-      <Topbar ref={topbarRef} theme={state.theme} onTheme={onTheme} onAbout={onAbout} />
+      <Topbar
+        ref={topbarRef}
+        theme={state.theme}
+        onTheme={onTheme}
+        onAbout={onAbout}
+        onReset={onReset}
+      />
 
       <Ribbon routes={state.routes} />
 

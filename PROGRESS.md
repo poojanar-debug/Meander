@@ -4149,3 +4149,89 @@ have left the app describing one thing by two names, which is the defect the
 rename existed to close.
 
 Two test assertions on that copy changed with it, and say so in place.
+
+## §13.7 — A logo, and pressing it starts over
+
+There was a mark already, and nothing in the app had ever shown it: five
+generated PNGs in `frontend/public/`, drawn by `scripts/make-icons.mjs` from two
+stylesheet tokens, used as a favicon, an apple-touch-icon and three manifest
+icons and nowhere else. The topbar was the word "Meander" and a tagline.
+
+**The PNGs cannot be reused in the page, and the measurement says why.** Their
+ground is `--brand`, which against the dark topbar's `--raised` is **1.58:1** —
+the predicted figure, reproduced exactly. Drawing the path alone in
+`currentColor` inherits `.topbar__wordmark`'s `color: var(--brand)` and gives
+**10.55:1 in light and 8.45:1 in dark**, against a 3:1 threshold for a graphical
+object. No hex enters any JSX file, which matters because `check_palette.sh`
+only scans stylesheets: a hard-coded colour in a component would sail past it
+and break exactly one theme.
+
+Two artefacts, one shape. The curve moved to `src/lib/mark.js` — geometry and
+nothing else, no colours — and both renderers import it: the icon generator
+walks the polyline pixel by pixel, and the topbar emits the same points as an
+SVG path. `scripts/tokens.mjs` says in its own header that nothing under `src/`
+may import it; this import goes the other way and is safe only because there is
+no colour in the module, which a test asserts. **Verified: `npm run icons`
+regenerates all five PNGs to byte-identical sizes** (386 / 1970 / 2113 / 5916 /
+3616), so extracting the geometry changed no pixel.
+
+A button, not a link, for two reasons. The action clears state rather than
+navigating, so `role="button"` is what a screen-reader user needs to hear. And
+`gate.mjs`'s 44 x 44 sweep exempts an `<a>` that sits beside sibling text under
+the WCAG 2.5.8 in-a-sentence rule — which is exactly the shape a logo link in
+`.topbar__brand` would take, so a link would have gone unmeasured. It carries no
+`aria-expanded`: the gate clicks every element with one, once per pass, and a
+logo carrying it would reset the app mid-sweep.
+
+### The reset, verified in a real browser
+
+Loaded from a permalink at 1200x900, theme toggled away from the default first:
+
+```
+BEFORE  url /?from=51.507400,-0.127800&fromName=Test+start&min=35&obj=fastest,scenic,accessible
+        routes 2   firstRun false   map true    history.length 3
+AFTER   url /
+        routes 0   firstRun true    map false   history.length 3
+        announced "Cleared. Start a new walk."
+        theme light -> light
+```
+
+Four things that had to be true, and are. The address bar clears itself, because
+`origin` going null makes the `writeUrl` effect emit a bare path. **History does
+not grow**: `permalink.js` uses `replaceState` and never `pushState`, so a reset
+is not undoable with the back button — consistent with that module's contract
+and worth stating. Theme survives, being a persisted display preference the user
+set deliberately. And the announcement is delivered.
+
+That run also proved Part 6's deprecated alias end to end without being designed
+to: the link was requested with `obj=fastest,nature,accessible` and the app
+rewrote the address bar to `obj=fastest,scenic,accessible`. An old link is
+understood and quietly upgrades itself.
+
+**`map: false` afterwards is the reason a comment had to change.** `App.jsx`
+said the map "once created is never unmounted, which is the
+single-MapLibre-instance rule". A reset clears `origin`, `firstRun` flips back
+to true, and `MapView` is torn down. The rule it protected still holds — there
+is never more than one map — but it holds because the teardown is correct and
+creation is deferred past StrictMode's double-mount, not because the unmount
+cannot happen. A comment asserting an invariant the code no longer has is worse
+than no comment: the next reader stops checking.
+
+Three of the handler's four lines are things a reducer cannot do, and each is a
+failure someone would otherwise have to reproduce on a phone: without the abort,
+an in-flight SSE keeps dispatching into the cleared state and the rail
+repopulates a second later; without the `clearTimeout`, the 350ms debounce
+delivers the *previous* sentence to an empty screen; and `highlight` is local
+state outside the reducer, so it would survive and leave the map emphasising a
+stretch of a route that is gone.
+
+`location.reload()` is not used and a test forbids it — it re-reads the current
+URL, so a permalinked page would reload straight back into the search it was
+asked to clear.
+
+`docs/DESIGN-HANDOFF.md` §4.1 had three rows that were false or silent. The
+height row predated the safe-area work and still said `56 px`; it is
+`min-height: var(--topbar-h)` and the reason it must not be `height` is now
+written there. The wordmark row now describes the button. The profile button
+row says it is deliberately not built, which `Topbar.jsx` had explained and the
+spec had not.
