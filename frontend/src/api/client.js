@@ -152,7 +152,22 @@ async function realFetchRoutes(req, { signal, onProgress, onRoute }) {
 
   const contentType = res.headers.get('content-type') ?? ''
   if (!contentType.includes('text/event-stream') || !res.body) {
-    const json = await res.json()
+    // Guarded, which it was not. `res.json()` on a truncated or non-JSON body
+    // and `json.routes.forEach` on a payload without a `routes` array both
+    // threw raw — a SyntaxError or a TypeError, neither an ApiError — so they
+    // reached the banner as the browser's untranslated string. The streaming
+    // branch below has had this treatment since it was written; two transports
+    // for one endpoint have to fail the same way.
+    let json
+    try {
+      json = await res.json()
+      if (!Array.isArray(json?.routes)) throw new TypeError('no routes array')
+    } catch (err) {
+      if (err?.name === 'AbortError') throw err
+      const replay = await replayFromStore(req, onRoute)
+      if (replay) return replay
+      throw new ApiError('The server sent a reply this app could not read.')
+    }
     json.routes.forEach((route) => onRoute(mark(route)))
     const payload = markPayload(json)
     await keep(req, payload, { stamp, signal })
@@ -165,6 +180,29 @@ async function realFetchRoutes(req, { signal, onProgress, onRoute }) {
   let final = null
   let delivered = 0
 
+  /** One SSE frame. Extracted so the tail flush below runs the same code. */
+  const parse = (part) => {
+    const line = part.split('\n').find((l) => l.startsWith('data:'))
+    if (!line) return
+    let evt
+    try {
+      evt = JSON.parse(line.slice(5))
+    } catch {
+      // A truncated frame is not fatal; the next read completes it.
+      return
+    }
+    if (evt.type === 'progress') onProgress(evt)
+    else if (evt.type === 'route') {
+      delivered += 1
+      onRoute(mark(evt.route))
+    } else if (evt.type === 'done') final = markPayload(evt.payload)
+    else if (evt.type === 'error') {
+      throw new ApiError(evt.message ?? 'The server stopped part-way through.', {
+        kind: evt.kind ?? 'stream',
+      })
+    }
+  }
+
   // The loop is guarded, and the guard is not decoration. The `fetch` above
   // covers being offline when the request is *issued*; this covers the link
   // dying after the headers arrived and before the body finished — a walk into
@@ -176,31 +214,20 @@ async function realFetchRoutes(req, { signal, onProgress, onRoute }) {
   try {
     for (;;) {
       const { value, done } = await reader.read()
-      if (done) break
+      if (done) {
+        // Flush the tail before leaving. The loop used to break the moment
+        // `read()` reported done, discarding whatever was still in `buffer` —
+        // so a final frame that arrived without its trailing `\n\n` was
+        // dropped, and a `done` event delivered that way became a stream with
+        // no result at all.
+        buffer += decoder.decode()
+        if (buffer.trim()) parse(buffer)
+        break
+      }
       buffer += decoder.decode(value, { stream: true })
       const parts = buffer.split('\n\n')
       buffer = parts.pop() ?? ''
-      for (const part of parts) {
-        const line = part.split('\n').find((l) => l.startsWith('data:'))
-        if (!line) continue
-        let evt
-        try {
-          evt = JSON.parse(line.slice(5))
-        } catch {
-          // A truncated frame is not fatal; the next read completes it.
-          continue
-        }
-        if (evt.type === 'progress') onProgress(evt)
-        else if (evt.type === 'route') {
-          delivered += 1
-          onRoute(mark(evt.route))
-        } else if (evt.type === 'done') final = markPayload(evt.payload)
-        else if (evt.type === 'error') {
-          throw new ApiError(evt.message ?? 'The server stopped part-way through.', {
-            kind: evt.kind ?? 'stream',
-          })
-        }
-      }
+      for (const part of parts) parse(part)
     }
   } catch (err) {
     if (err?.name === 'AbortError') throw err
@@ -216,6 +243,23 @@ async function realFetchRoutes(req, { signal, onProgress, onRoute }) {
       if (replay) return replay
     }
     throw new ApiError('The connection dropped part-way through. Check your connection and try again.')
+  }
+
+  // ⚠ **A stream that ends without a `done` frame is a failure, not a result.**
+  // This used to `return final` unconditionally, so a body that closed cleanly
+  // with no `done` returned null — and `App.jsx` dispatches that as `settled`,
+  // which sets `phase: 'success'`. With zero routes arrived the results region
+  // is empty: no banner, no error, no announcement, while the trip bar, the
+  // departure strip and About all still render. The page looks like it is
+  // working and simply has nothing in it.
+  //
+  // This is the client half of the failure `main.py` describes and fixed only
+  // on the server. The tail is flushed above before this is decided, so a
+  // final frame without its delimiter is not mistaken for a missing one.
+  if (final == null) {
+    const replay = await replayFromStore(req, onRoute)
+    if (replay) return replay
+    throw new ApiError('The server stopped before it finished. Please try again.')
   }
 
   await keep(req, final, { stamp, signal })

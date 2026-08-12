@@ -42,7 +42,7 @@
    * threshold but not the 4.5:1 text threshold. Mirrored in lib/dash.js,
    * which is what the map reads. */
   --route-fastest: #c2703d;
-  --route-nature: #2f7d53;
+  --route-scenic: #2f7d53;
   --route-accessible: #5b6ecf;
   --route-quiet: #8a5cb4;
   --route-shade: #1e7a78;
@@ -84,7 +84,7 @@
   --warn-rule: #6b3a24;
 
   --route-fastest: #e8a46f;
-  --route-nature: #6fc38e;
+  --route-scenic: #6fc38e;
   --route-accessible: #95a4f0;
   --route-quiet: #c2a0e8;
   --route-shade: #63c4be;
@@ -147,6 +147,18 @@
 
   /* Every interactive target must be at least this in both dimensions. */
   --target: 44px;
+  /* The height of the sticky topbar, declared once.
+   *
+   * `56px` appeared as a literal in exactly one rule and was referenced by
+   * nothing, so the two offsets that depend on it — `scroll-padding-top` below,
+   * and the follow layer's top inset — had no way to say so. Nothing measures
+   * the header at runtime and nothing needs to: it is `min-height` plus the top
+   * inset, and both are declared here.
+   *
+   * Read through `var(--safe-top)` and never `env()` directly, so the four-call
+   * budget `styles.safe-area.test.js` pins stays at four and the probe at the
+   * end of this file can still substitute real device insets. */
+  --topbar-h: calc(56px + var(--safe-top));
 
   /* Device geometry, theme-invariant for the same reason --target is.
    *
@@ -274,11 +286,40 @@ h3 {
   min-height: 0;
 }
 
+/* The panel no longer scrolls. `.panel__scroll` below does.
+ *
+ * The trip bar used to be a `position: sticky` first flex child of the
+ * scrollport, which meant the pinned block was whatever the trip bar happened
+ * to be tall at that moment — and it is not one height, it is five. Measured in
+ * Chromium 150 at 1200x900, against an 808px scrollport:
+ *
+ *     closed                    133px   16.5% of the scrollport
+ *     "From" open               306px   37.9%
+ *     "To" open                 299px   37.0%
+ *     "To" + suggestions      318.5px   39.4%  (up to ~559 with a full list)
+ *     "Compare" open            391px   48.4%
+ *     "Time & travel" open    801.5px   99.2%
+ *
+ * That last row is the whole argument. Opening the drawer that holds the dial,
+ * the mode select and the units control pins **99.2% of the desktop
+ * scrollport**, and none of it can be scrolled away, because a sticky element
+ * at `top: 0` is by definition the thing that does not move. A 668px swing in
+ * the height of an unscrollable region is not a value to compensate for with a
+ * `scroll-padding-top`; it is an arrangement to stop using.
+ *
+ * Taking the bar out of the scrollport inverts it: an open drawer now
+ * *shortens* the scrolling area instead of freezing it.
+ *
+ * `overflow-y: hidden` and not the `overflow` shorthand, and both axes are
+ * restated in the mobile override. See that override for why. */
 .panel {
   display: flex;
   flex-direction: column;
-  gap: var(--s4);
-  overflow-y: auto;
+  /* Two children now — the bar and the scroller — and the seam between them is
+     a border rather than a gap. See .tripbar. */
+  gap: 0;
+  overflow-y: hidden;
+  overflow-x: hidden;
   min-width: 0;
   min-height: 0;
   padding: var(--s4);
@@ -335,7 +376,7 @@ h3 {
      the bar grow under large Dynamic Type. .topbar is flex:none in a 100dvh
      column, so this is what sizes it; .layout shrinks by the same amount, which
      is right — the strip under the status bar was never usable map. */
-  min-height: calc(56px + var(--safe-top));
+  min-height: var(--topbar-h);
   flex: none;
   /* Padding, never margin: the background must keep painting edge-to-edge under
      the status bar. */
@@ -360,6 +401,48 @@ h3 {
   font-size: 1.375rem;
   letter-spacing: -0.01em;
   color: var(--brand);
+}
+
+/* The wordmark is a button now: pressing it starts a new walk.
+   No background and no border, deliberately — one would read as a third pill
+   beside the theme toggle and About on the right, and this is a wordmark that
+   happens to be pressable rather than a control that happens to say Meander.
+   `color: inherit` and `font: inherit` are what keep it looking like the h1 it
+   is inside; a UA-styled button here would undo the display face and the
+   letter-spacing above. */
+.topbar__home {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s2);
+  /* The 44px floor, met by the control rather than by its text. */
+  min-height: var(--target);
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  letter-spacing: inherit;
+  cursor: pointer;
+}
+.topbar__home:hover .topbar__logo {
+  color: var(--accent);
+}
+
+/* Sized in em so it tracks the wordmark: ~24px beside 22px of text, and it
+   grows with Dynamic Type instead of staying at whatever px it was born.
+   `flex: none` so a narrow bar squeezes the word and never the mark. */
+.topbar__logo {
+  flex: none;
+  color: var(--brand);
+}
+
+/* 320px is the narrowest width the gate tests, and the bar has to hold the
+   wordmark, the theme pill and About there. The mark is the one thing on it
+   that carries no information the wordmark does not. */
+@media (max-width: 379px) {
+  .topbar__logo {
+    display: none;
+  }
 }
 
 .topbar__tagline {
@@ -488,16 +571,78 @@ h3 {
 
 /* -------------------------------------------------------------- trip bar */
 
+/* Not sticky any more, and it does not need to be: it is a sibling above the
+   scroller rather than the first thing inside it, so it stays in front by
+   construction. `z-index: 20` went with the sticky — below 900px `.tripbar` was
+   `position: static`, which made that z-index inert anyway, so whatever painted
+   over it did so on source order and not on stacking order. */
 .tripbar {
-  position: sticky;
-  top: 0;
-  z-index: 20;
-  flex: none;
+  /* Shrinkable, and capped, and that is a consequence of taking it out of the
+     scrollport rather than an afterthought.
+   *
+   * The bar is 138px closed and 806.5px with the "Time & travel" drawer open —
+   * the dial, the mode select and the units control. As a `flex: none` sibling
+   * above a scroller, that height is taken out of the scroller first: on a
+   * 900px window the scrolling area collapses to 16px, and on anything shorter
+   * the bar itself would be clipped by `.panel`'s `overflow-y: hidden` and the
+   * units control would become unreachable. Trading a frozen scrollport for an
+   * unreachable control is not a fix.
+   *
+   * So the bar may shrink, it may not take more than 55% of the panel, and the
+   * drawer inside it scrolls rather than the segments — see `.tripbar .drawer`.
+   * Below 900px `.panel` is content-sized, so this percentage resolves against
+   * an indefinite height and computes to `none`: the bar is uncapped there,
+   * which is correct, because the document scrolls and nothing is frozen. */
+  flex: 0 1 auto;
+  min-height: 0;
+  max-height: 55%;
   display: flex;
   flex-direction: column;
   gap: var(--s2);
-  padding-bottom: var(--s2);
+  /* One separation, with an edge in it, where there used to be two without.
+     `.panel`'s 16px flex gap and this 8px padding both sat between the bar and
+     `#results` — 24px of dead paper — while `.tripbar`'s background is
+     `var(--paper)`, byte-identical to `.panel`'s (both computed
+     `rgb(246, 243, 236)`), and the rule body carried no border-bottom and no
+     box-shadow at all. So a route row scrolling behind the bar was scissored
+     against a same-coloured field with no edge, which is why the scroll read as
+     broken rather than as pinned. `.topbar` has always had this border. */
+  padding-bottom: var(--s3);
+  border-bottom: 1px solid var(--rule);
   background: var(--paper);
+}
+
+/* The segments never scroll away; the open drawer does.
+   Scoped to `.tripbar` so the rule cannot reach a drawer used anywhere else. */
+.tripbar__grid {
+  flex: none;
+}
+.tripbar .drawer {
+  min-height: 0;
+  overflow-y: auto;
+}
+
+/* The scrolling half of the panel. */
+.panel__scroll {
+  /* `flex-basis: 0`, not `auto`, and the difference is visible. With `auto` the
+     scroller's flex base size is its whole content height, which over-subscribes
+     the column by thousands of pixels — so the shrink is shared with the trip
+     bar and the bar is squeezed below its own content. Measured with `auto`:
+     the bar rendered 63.05px against 138px of content, with the segment labels
+     clipped. With basis 0 the scroller asks for nothing and grows into what the
+     bar leaves, which is the arrangement intended. */
+  flex: 1 1 0;
+  /* Without this an overflowing flex item refuses to shrink below its content
+     and the scrollbar never appears — the classic flexbox scroll failure. */
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  display: flex;
+  flex-direction: column;
+  gap: var(--s4);
+  /* Breathing room under the rule above, in place of the flex gap `.panel` used
+     to contribute. */
+  padding-top: var(--s4);
 }
 
 /* minmax(0, 1fr) for the same reason the stage column needs it: a plain `1fr`
@@ -999,6 +1144,37 @@ fieldset.chips legend {
   display: flex;
   flex-direction: column;
   gap: 6px;
+}
+
+/* Back to the walker, and only offered once the camera has been taken away
+   from them.
+   Top-centre, on the same row as the Stop button at the leading edge and the
+   zoom cluster at the trailing one, so the three never collide. The sheet is
+   bottom-anchored and its height varies with the instruction, so anything
+   positioned from the bottom edge would sometimes land on top of it. */
+.map__recentre {
+  position: absolute;
+  z-index: 31;
+  top: var(--s3);
+  inset-inline-start: 50%;
+  transform: translateX(-50%);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: var(--target);
+  padding: var(--s2) var(--s4);
+  border: 1px solid var(--rule-strong);
+  border-radius: var(--r-pill);
+  background: var(--raised);
+  color: var(--ink);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+  box-shadow: var(--shadow-2);
+}
+.map__recentre:hover {
+  background: var(--sunken);
+  border-color: var(--accent);
 }
 .map__ctrl {
   display: grid;
@@ -1672,17 +1848,44 @@ fieldset.chips legend {
     order: -1;
     height: max(230px, 36vh);
   }
+  /* Both axes, both elements, and all four in longhand. This is the trap
+     written out in CSS Overflow 3: when one axis is not `visible` the other
+     computes to `auto`, so an override that names only `overflow-y` leaves the
+     element a scroll container on the axis nobody mentioned. `.panel` already
+     demonstrated it — with `overflow-y: auto` and no `overflow-x`, the computed
+     `overflow-x` on desktop is `auto`. Below 900px the document scrolls as one
+     and neither of these may be a scroller on either axis. */
   .panel {
     overflow-y: visible;
+    overflow-x: visible;
     border-inline-end: 0;
   }
-  /* The panel no longer scrolls independently here, so a sticky trip bar would
-     stick to the top of the *document* and cover the map. */
-  .tripbar {
-    position: static;
+  .panel__scroll {
+    overflow-y: visible;
+    overflow-x: visible;
+    /* `flex: 1 1 0` is right in a column of definite height and wrong in one of
+       indefinite height, which is what `.panel` is here — `.app` is
+       `height: auto` below this width. A basis of 0 in an auto-height container
+       asks the browser to size the container from an item that has declared it
+       wants nothing. Nothing flexes on this side of the breakpoint: the
+       document scrolls and both children take their content height. */
+    flex: none;
   }
-  .route-list {
-    grid-template-columns: 1fr;
+
+  /* The skip link is the first focusable element in the app and it points at
+     `#results`, which has no rule of its own. Below 900px the *document* is the
+     scroller, so pressing Tab then Enter on load put `#results` at y = 0 —
+     underneath an opaque bar 56px tall, or up to 115px with the safe-area inset
+     on an iPhone 15 Pro. Measured before this line existed: `#results` landed
+     at y = -0.2 with the topbar's bottom edge at 56.
+     `grep -rn "scroll-margin\|scroll-padding" frontend/` returned zero matches.
+
+     Here rather than in `:root` because this is a property of the mobile scroll
+     arrangement, and it belongs beside the other decision that arrangement
+     makes. Above 900px `.panel__scroll` is the scroller and it already starts
+     below the topbar, so there is nothing for the document to compensate for. */
+  html {
+    scroll-padding-top: var(--topbar-h);
   }
   /* The rail is the legend at this width, and the map is only 36vh — a card
      sitting in the corner of it would cover a third of the route. */
@@ -1845,8 +2048,12 @@ fieldset.chips legend {
 
 /* ---------------------------------------------------------------- follow */
 
-/* Sits over the stage, not over the whole app: the sheet is not a modal and
-   the map underneath stays pannable and reachable (§6.7). */
+/* Fills the stage. Above 900px the stage is a column beside a panel that stays
+   usable, so this is an overlay; below it the stage itself goes full-screen
+   while following (see the end of this file) and this fills the viewport.
+   Either way the map is *inside* the layer rather than behind it, which is what
+   lets the focus trap contain the sheet without taking the map away — §6.7
+   amended rather than contradicted. */
 .follow {
   position: absolute;
   inset: 0;
@@ -1856,10 +2063,11 @@ fieldset.chips legend {
   align-items: flex-start;
   gap: var(--s2);
   padding: var(--s3);
-  /* Bottom is width-scoped and lives in the safe-area section at the end of
-     this file — below 900px the stage is a band at the top of the document and
-     the home indicator is nowhere near it. */
   padding-inline-end: calc(var(--s3) + var(--safe-right));
+  /* Unconditional now. Above 900px the stage reaches the bottom of the
+     viewport; below it the layer is full-screen and reaches it too. There is no
+     longer a width at which the sheet is nowhere near the home indicator. */
+  padding-bottom: calc(var(--s3) + var(--safe-bottom));
   pointer-events: none;
 }
 .follow > * {
@@ -1906,14 +2114,58 @@ fieldset.chips legend {
   justify-content: space-between;
   gap: var(--s3);
 }
+/* Two children, and the split is the whole point. The assertive region holds
+   the barrier's identity and no number; the counting-down distance sits beside
+   it in an ordinary element. With the number inside the alert, one 200 m
+   approach interrupted 21 times in metric and 54 in imperial. */
+.follow__alert-say {
+  margin: 0;
+}
+.follow__alert-dist {
+  margin: 4px 0 0;
+  font-weight: 400;
+}
 
+/* Not an alert. A rejected fix can come and go with the signal, and an
+   assertive announcement per flicker is worse than the silence it replaces. */
+.follow__signal {
+  align-self: stretch;
+  margin: 0;
+  padding: var(--s2) var(--s3);
+  background: var(--raised);
+  border: 1px solid var(--rule-strong);
+  border-radius: var(--r-md);
+  color: var(--ink-2);
+  font-size: var(--t-small);
+  box-shadow: var(--shadow-1);
+}
+
+/* Sized by its content, with a ceiling and a scrollbar, never by a floor.
+ *
+ * `min-height: 30vh` failed in both directions at once. Upward: 12 + 44 + 8 +
+ * 30vh exceeds the `max(230px, 36vh)` band for every viewport height between
+ * 553px and 1067px, so the sheet hung past the stage on every phone in portrait
+ * — measured +23.98px on an iPhone SE, +13.36px at 390x844, +2.56px on an iPad.
+ * Downward: an explicit min-height overrides `min-height: auto`, which is the
+ * thing that stops a flex item shrinking below its own content, so at 844x390
+ * the sheet was given 154px to hold 170px of text and clipped the rest with no
+ * way to reach it.
+ *
+ * `min-height: 0` and `overflow-y: auto` together are the fix for the second
+ * half: the sheet may shrink, and when it does the text scrolls instead of
+ * disappearing. `max-height: 100%` keeps it inside the layer's content box.
+ * The element carries `tabindex="0"` in the JSX so that a scrollable region is
+ * keyboard-reachable — `scrollable-region-focusable` is a wcag2a rule the gate
+ * runs, and in the ordinary state every child of this sheet is a paragraph. */
 .sheet {
   margin-top: auto;
   align-self: stretch;
   display: flex;
   flex-direction: column;
   gap: 6px;
-  min-height: 30vh;
+  min-height: 0;
+  max-height: 100%;
+  overflow-y: auto;
   padding: var(--s5);
   background: var(--raised);
   border: 1px solid var(--rule);
@@ -1924,6 +2176,53 @@ fieldset.chips legend {
   margin: 0;
   font-family: var(--font-display);
   font-size: var(--t-h3);
+}
+
+/* The banner: glyph, distance, street. The three things a turn instruction is
+   made of, in the order the eye wants them. */
+.sheet__banner {
+  display: flex;
+  align-items: center;
+  gap: var(--s3);
+}
+.sheet__glyph {
+  flex: none;
+  font-size: 2.25rem;
+  color: var(--accent);
+}
+.sheet__banner-body {
+  min-width: 0;
+}
+.sheet__instruction {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: var(--t-h3);
+  line-height: 1.15;
+}
+/* The step you are inside, demoted to a line of prose under the turn ahead.
+   This is the text that used to be the largest thing on the screen, naming the
+   turn already taken. */
+.sheet__now {
+  margin: 0;
+  font-size: var(--t-small);
+  color: var(--ink-2);
+}
+.sheet__progress {
+  margin: 2px 0;
+}
+.sheet__arrival {
+  display: flex;
+  align-items: center;
+  gap: var(--s3);
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: var(--t-h2);
+  color: var(--accent);
+}
+.sheet__finish {
+  align-self: stretch;
+  justify-content: center;
+  margin-top: var(--s2);
 }
 .sheet__metric {
   margin: 0;
@@ -2108,11 +2407,14 @@ fieldset.chips legend {
 
 /* ------------------------------------------------------------- safe area */
 
-/* These three rules are at the END of the file, not in the responsive block
-   above, and that is not tidiness. `.follow` is declared after that block, so
+/* The rules from here to the end of the file are at the END of it, not in the
+   responsive block above, and that is not tidiness. `.follow`, `.sheet` and
+   `.map__recentre` are all declared after that block, so
    `@media (max-width: 899px) { .follow { … } }` placed up there would LOSE to
-   it — equal specificity, later source wins, media queries contribute none.
-   It would fail silently and look fine on every desktop. */
+   them — equal specificity, later source wins, media queries contribute none.
+   It would fail silently and look fine on every desktop. The full-screen follow
+   block below is the largest thing that would break that way, which is why it
+   is here rather than beside the other `max-width: 899px` rules. */
 
 /* Below 900px the panel is the only column, so its trailing edge is the
    viewport's. Above it, the stage is. */
@@ -2122,13 +2424,66 @@ fieldset.chips legend {
   }
 }
 
-/* Above 900px the stage reaches the bottom of the viewport, so the follow sheet
-   must clear the home indicator. Below it the stage is a 230px band at the TOP
-   of the document and the indicator is nowhere near it — 34px there would eat an
-   eighth of the band for nothing. */
-@media (min-width: 900px) {
-  .follow {
-    padding-bottom: calc(var(--s3) + var(--safe-bottom));
+/* -------------------------------------------------- follow, full screen */
+
+/* Below 900px, while following and only while following, the stage leaves the
+   document and becomes the viewport.
+ *
+ * The old arrangement put the sheet inside a `max(230px, 36vh)` band at the top
+ * of a document that kept scrolling underneath it, which fails three ways at
+ * once. The sheet does not fit the band on any phone in portrait. The map above
+ * it gets a 64px strip on every viewport, because 12 + 44 + 8 are three fixed
+ * pixel values that do not scale. And "Start this route" is at the far end of a
+ * panel below that band, so opening follow mode meant a 1338px scroll jump at
+ * 390x844.
+ *
+ * The class is on `.stage` rather than on `.follow`, and that is the load-
+ * bearing part: the MAP is inside the stage, so it comes full-screen too. The
+ * focus trap can then contain the whole layer without making the map
+ * unreachable, which is what §6.7 asks for and what a trap around the sheet
+ * alone would have reversed. MapLibre is never unmounted and the
+ * single-instance rule holds.
+ *
+ * `.stage` is NOT resized outside this state: gate check 5 asserts
+ * `stage.bottom <= panel.top + 2` at 390x844 on an ordinary load, and that stays
+ * true because an ordinary load never carries this class.
+ *
+ * z-index 45 sits above `.topbar` at 40 — a full-screen layer that renders
+ * under the topbar is not full-screen — and below `.skip-link` at 100, which
+ * must stay reachable. */
+@media (max-width: 899px) {
+  .stage--following {
+    position: fixed;
+    inset: 0;
+    z-index: 45;
+    /* The responsive block sets `height: max(230px, 36vh)`. Left alone it would
+       hold the fixed layer to a band at the top of the screen. */
+    height: auto;
+    order: 0;
+  }
+  /* dvh, not vh. `.app` has used dvh since the safe-area work; these two had
+     been left on plain vh, which on iOS measures the viewport with the URL bar
+     retracted and so overstates the height by about 60px exactly when the bar
+     is showing. */
+  .stage--following .follow {
+    max-height: 100dvh;
+    /* The layer now starts at the top of the screen rather than below the
+       topbar, so it owns the top inset for the first time. Scoped here and not
+       made unconditional: above 900px the stage still sits below `.topbar`,
+       which already consumes `--safe-top`, and adding it again there would
+       indent the sheet by a notch that is not in front of it. */
+    padding-top: calc(var(--s3) + var(--safe-top));
+  }
+  /* The controls were unreachable in follow mode: z-index 5 against the
+     overlay's 30, with `document.elementFromPoint` at their own centre
+     returning a span from inside the sheet. Raised above the overlay, and given
+     the top inset for the same reason the layer needs it. */
+  .stage--following .map__controls {
+    top: calc(var(--s2) + var(--safe-top));
+    z-index: 35;
+  }
+  .stage--following .map__recentre {
+    top: calc(var(--s3) + var(--safe-top));
   }
 }
 

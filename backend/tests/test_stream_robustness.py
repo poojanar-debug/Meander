@@ -59,17 +59,37 @@ def working_routes(monkeypatch: pytest.MonkeyPatch):
 # ---------------------------------------------------------------------------
 
 
-def test_a_database_error_mid_stream_becomes_an_error_event(
+def test_a_cache_write_failure_does_not_destroy_the_answer(
     api_client, working_routes, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The exact failure that used to truncate the stream silently."""
+    """**Changed behaviour, and this is the change.**
+
+    This test used to assert that a failing `put_route` produced an `internal`
+    error event, under the name
+    `test_a_database_error_mid_stream_becomes_an_error_event`. That was the
+    behaviour, and the behaviour was wrong.
+
+    The write happened *before* `yield _sse(event)`, inside the try whose
+    `except Exception` emits the error frame. So a cache failure destroyed an
+    answer that had already been computed and paid for in GraphHopper calls:
+    the client received the `route` frames, then an error, and never the `done`
+    frame it needs to settle. `client.js` treats a stream that ends without
+    `done` as a resolved null, so the screen went empty.
+
+    Disk-full is the named failure mode of the cache growth this project has
+    already had to fix once, which makes this reachable rather than theoretical.
+
+    A cache is a cost control. Failing to write one is not a reason to withhold
+    the answer it was meant to speed up. The `done` frame now goes out first and
+    the write is wrapped; the failure is logged and the caller is unaffected.
+    """
 
     class Exploding:
         def get_route(self, key):
             return None
 
         def put_route(self, *a, **k):
-            raise sqlite3.OperationalError("database is locked")
+            raise sqlite3.OperationalError("database or disk is full")
 
         def segment_count(self):
             return 0
@@ -77,10 +97,39 @@ def test_a_database_error_mid_stream_becomes_an_error_event(
     monkeypatch.setattr(main_mod, "get_cache", lambda: Exploding())
 
     events = _events(api_client.post("/api/routes", json=BODY, headers=SSE))
-    assert events[-1]["type"] == "error"
-    assert events[-1]["kind"] == "internal"
-    # And it does not leak the internal detail to the caller.
-    assert "sqlite" not in events[-1]["message"].lower()
+
+    assert events[-1]["type"] == "done", "the answer was thrown away by a cache write"
+    assert events[-1]["payload"]["routes"], "the done frame carries no routes"
+    assert not any(e["type"] == "error" for e in events)
+
+
+def test_a_cache_write_failure_does_not_destroy_the_answer_on_json_either(
+    api_client, working_routes, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The same defect, the other transport.
+
+    `main.py`'s JSON path awaited `put_route` unguarded at the end of the
+    handler, so the same `sqlite3.OperationalError` came out as a 500 with the
+    whole answer discarded. Two transports for one endpoint have to fail the
+    same way, and here they have to *not* fail the same way.
+    """
+
+    class Exploding:
+        def get_route(self, key):
+            return None
+
+        def put_route(self, *a, **k):
+            raise sqlite3.OperationalError("database or disk is full")
+
+        def segment_count(self):
+            return 0
+
+    monkeypatch.setattr(main_mod, "get_cache", lambda: Exploding())
+
+    response = api_client.post("/api/routes", json=BODY)
+
+    assert response.status_code == 200, response.text
+    assert response.json()["routes"]
 
 
 def test_an_unexpected_error_still_ends_the_stream_properly(

@@ -17,8 +17,9 @@ import {
   fmtDur,
   restStopSentence,
 } from './format.js'
+import { METRIC_24, formatElevation } from './units.js'
 
-const SCORE_LABEL = { nature: 'Nature', air: 'Air', shade: 'Shade' }
+const SCORE_LABEL = { scenic: 'Scenic', air: 'Air', shade: 'Shade' }
 
 const esc = (value) =>
   String(value ?? '')
@@ -39,9 +40,9 @@ const esc = (value) =>
  * nobody measured. Delegating also picks up the server's own wording when it
  * sends one, so the file and the screen now say the same thing by construction.
  */
-export function provenanceNote(route) {
+export function provenanceNote(route, units = METRIC_24) {
   const parts = [
-    `Meander ${route.label} route: ${fmtDur(route.duration_min)}, ${fmtDist(route.distance_m)}.`,
+    `Meander ${route.label} route: ${fmtDur(route.duration_min)}, ${fmtDist(route.distance_m, units)}.`,
   ]
 
   if (route.synthetic_upstream) {
@@ -60,13 +61,13 @@ export function provenanceNote(route) {
   // Three answers, not two. "Not checked" and "none found" are different facts,
   // and a file that conflates them is worse than one that says nothing.
   if (route.enrichment_pending) {
-    parts.push('Rest stops were still being checked when this was exported — the list may be incomplete.')
+    parts.push('Rest stops were still being checked when this was exported. The list may be incomplete.')
   } else if (route.rest_stops == null) {
-    parts.push('Rest stops were not checked for this route — that is not the same as there being none.')
+    parts.push('Rest stops were not checked for this route. That is not the same as there being none.')
   } else if (route.rest_stops.length === 0) {
     parts.push('No rest stops found along this route.')
   } else {
-    parts.push(restStopSentence(route.rest_stops))
+    parts.push(restStopSentence(route.rest_stops, units))
   }
 
   // A consumer who sees no mention of shade will assume something. A file that
@@ -92,7 +93,14 @@ export function provenanceNote(route) {
     // literal would be a second source of truth that could drift from the
     // verdict it is supposed to explain.
     const against = limit == null ? '' : ` against a ${limit}% limit`
-    parts.push(`Climbs ${Math.round(up)} m, descends ${Math.round(down)} m, steepest ${max}%${against}.`)
+    // Through formatElevation, not `Math.round(up)` + " m". This line was the
+    // last hard-coded metric unit in the file, so a user in miles got a GPX and
+    // a printed sheet whose climb was in metres while every other number on
+    // them was in feet.
+    parts.push(
+      `Climbs ${formatElevation(up, units)}, descends ${formatElevation(down, units)}, ` +
+        `steepest ${max}%${against}.`,
+    )
   }
 
   if (route.status !== 'ok') {
@@ -129,9 +137,9 @@ export function exportStamp(route, now = new Date()) {
  * correspond one-to-one with the track points. Interpolating would invent
  * per-vertex heights that nothing measured.
  */
-export function toGpx(route, { origin, dest } = {}, now = new Date()) {
+export function toGpx(route, { origin, dest } = {}, now = new Date(), units = METRIC_24) {
   const { isoTime } = exportStamp(route, now)
-  const note = esc(provenanceNote(route))
+  const note = esc(provenanceNote(route, units))
   const geometry = route.geometry ?? []
 
   const waypoints = []
@@ -183,8 +191,8 @@ ${points}
  * single barrier point in some other tool should still be told how well this
  * route was verified.
  */
-export function toGeoJson(route) {
-  const note = provenanceNote(route)
+export function toGeoJson(route, units = METRIC_24) {
+  const note = provenanceNote(route, units)
   const shared = {
     route: route.id,
     label: route.label,
@@ -301,13 +309,13 @@ export function download(filename, contents, mime) {
   setTimeout(() => URL.revokeObjectURL(url), 1000)
 }
 
-export function downloadGpx(route, places) {
+export function downloadGpx(route, places, units = METRIC_24) {
   const now = new Date()
   const { filename } = exportStamp(route, now)
-  download(`${filename}.gpx`, toGpx(route, places, now), 'application/gpx+xml')
+  download(`${filename}.gpx`, toGpx(route, places, now, units), 'application/gpx+xml')
 }
 
-export function downloadGeoJson(route) {
+export function downloadGeoJson(route, units = METRIC_24) {
   const { filename } = exportStamp(route)
-  download(`${filename}.geojson`, toGeoJson(route), 'application/geo+json')
+  download(`${filename}.geojson`, toGeoJson(route, units), 'application/geo+json')
 }

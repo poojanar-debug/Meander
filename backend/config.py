@@ -29,7 +29,7 @@ FixtureMode = Literal["replay", "record", "live"]
 # Endpoints. Kept here so fixtures.py can map a hostname back to a service name
 # and apply that service's live-call budget.
 # Overridable so the app can be pointed at a self-hosted GraphHopper. The
-# hosted free tier cannot run custom models (see BLOCKED.md #0), so the nature
+# hosted free tier cannot run custom models (see BLOCKED.md #0), so the scenic
 # and accessible presets only work against a server you run yourself:
 #
 #   MEANDER_GRAPHHOPPER_URL=http://localhost:8989/route
@@ -68,7 +68,7 @@ def graphhopper_is_self_hosted() -> bool:
        be used with CH". Only the *fastest* round trip is affected — the other
        two presets carry a custom model and get ``ch.disable`` regardless — and
        a fastest failure is re-raised, so the whole request dies.
-    4. ``route_nature()`` searches all six loop candidates and picks on merit
+    4. ``route_scenic()`` searches all six loop candidates and picks on merit
        when unmetered, but only the first two with an early break when it thinks
        it is paying per call. So this flag changes **which route the user gets**,
        not merely how the server is operated.
@@ -284,11 +284,22 @@ class Settings:
     # was missing.
     #
     # The cost, stated plainly: an empty bucket now says Retry-After: 61 rather
-    # than 21, and refills fully in 12 minutes rather than 4. The same bucket
-    # serves /api/geocode, whose type-ahead is debounced 300 ms
-    # (PlaceInput.jsx:5) and is *not* refunded on a cache hit the way a route is
-    # (main.py:1141), so a long session of place searches will reach the limiter
-    # sooner than before.
+    # than 21, and refills fully in 12 minutes rather than 4.
+    #
+    # That cost used to be paid by place search too, and it was worse than this
+    # note admitted. Measured: a 20-character name typed at 40 wpm costs a mean
+    # of 8.6 geocode requests at a 300 ms debounce, so **two place names come to
+    # 17.1 requests against a capacity of 12** — the bucket is empty before the
+    # first route request is made, and that request is then refused with the
+    # routing copy shown under the place box. It is the ordinary case, not a
+    # pathological one, and it was reproduced accidentally on this machine while
+    # measuring something else: one browser pass over seven viewports drove
+    # `rate_limited_total` from 21 to 27 and left three of the seven with no
+    # routes at all.
+    #
+    # Place search now has a bucket of its own, below. This one is left exactly
+    # as it was, because this is the one protecting the routing quota and the
+    # machine, and nothing measured here says it is wrong for routes.
     per_ip_refill_per_min: float = 1.0
     # 120 was sized against the *hosted* GraphHopper's 500-credit day. The router
     # is self-hosted now and that quota is gone, but the ceiling is not
@@ -305,6 +316,37 @@ class Settings:
     # order of magnitude above anything a demonstration link will see.
     global_daily_route_ceiling: int = 2000
     route_cache_ttl_s: int = 6 * 60 * 60
+
+    # Place search, on a bucket of its own.
+    #
+    # **Sized against measurement, not taste.** The worst single-name case seen
+    # is 19 requests — a 20-character name typed at exactly the debounce
+    # interval, where every keystroke fires — and the largest burst the repo has
+    # actually recorded is the 12-query cluster in fixtures/nominatim/. 40 holds
+    # both, with room for a second name in the same breath.
+    #
+    # 20/min rather than the route bucket's 1.0 because the failure being
+    # avoided is a type-ahead that stops answering mid-word: a drained bucket
+    # refills in two minutes instead of twelve. It is still well inside
+    # Nominatim's usage policy, which is one request per second enforced by
+    # banning the offending IP — and the IP it would ban is this service's
+    # egress address, so it is every user of the deployment who loses place
+    # search, not the one client. 20/min is 0.33 req/s per address, a third of
+    # the policy, before the client LRU and the server cache below take their
+    # share.
+    #
+    # Deliberately NOT counted against the daily route ceiling: `served_today`
+    # is the one enforced "routes served today" number and a place search is not
+    # a route. It never was — /api/geocode already passed
+    # counts_against_ceiling=False — and the second limiter must not quietly
+    # change that.
+    geocode_bucket_capacity: int = 40
+    geocode_refill_per_min: float = 20.0
+    # Seven days, deliberately not the route cache's six hours. A route payload
+    # embeds weather, daylight and air quality and goes stale as they do; a
+    # name-to-coordinate mapping embeds none of them. Places do move in OSM, so
+    # this is not infinite.
+    geocode_cache_ttl_s: int = 7 * 24 * 60 * 60
 
     log_level: str = "INFO"
 
@@ -415,6 +457,9 @@ def load_settings() -> Settings:
         per_ip_refill_per_min=_env_float("MEANDER_RATE_REFILL_PER_MIN", 1.0),
         global_daily_route_ceiling=_env_int("MEANDER_DAILY_ROUTE_CEILING", 2000),
         route_cache_ttl_s=_env_int("MEANDER_ROUTE_CACHE_TTL_S", 6 * 60 * 60),
+        geocode_bucket_capacity=_env_int("MEANDER_GEOCODE_RATE_CAPACITY", 40),
+        geocode_refill_per_min=_env_float("MEANDER_GEOCODE_RATE_REFILL_PER_MIN", 20.0),
+        geocode_cache_ttl_s=_env_int("MEANDER_GEOCODE_CACHE_TTL_S", 7 * 24 * 60 * 60),
         log_level=os.environ.get("MEANDER_LOG_LEVEL", "INFO").upper(),
     )
 
@@ -486,6 +531,23 @@ TEST_LOCATIONS: tuple[TestLocation, ...] = (
         4.864119,
         "Flat, exceptionally well tagged for surface and smoothness.",
         ("park", "green", "well-tagged"),
+    ),
+    TestLocation(
+        "ella-sri-lanka",
+        "Ella, Sri Lanka",
+        6.875280,
+        81.038330,
+        # The location that started Part 4. The demo region set cut Sri Lanka to
+        # a 1x1 degree box around Colombo, which left Ella 76 km east of the
+        # edge and answered a Sri Lankan user with "Meander does not cover that
+        # area yet" for their own country.
+        #
+        # It earns its place beyond that: at **1,041 m** it is the first test
+        # location that is not at sea level, and it is in steep terrain, which
+        # is exactly where a ~90 m SRTM grid is least trustworthy. Every other
+        # location here exercises the elevation path at approximately zero.
+        "1,041 m in steep hill country. The only test location not at sea level.",
+        ("rural", "elevation", "hills"),
     ),
 )
 

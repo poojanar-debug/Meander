@@ -42,6 +42,27 @@ does not expose it at any price tier.
 The cost is that coverage is now finite: only places inside the imported extracts can be routed.
 `scripts/graphhopper.sh regions` prints what is built in.
 
+**The API can now tell "never imported" from "no path near that exact spot" (2026-08-12).**
+`unroutable_point_message` used to name both causes and let the reader decide, because /info
+reports only the union of the imported regions — a rectangle that, for a set spanning Sri Lanka to
+Britain, contains Paris, Berlin and most of Europe. The docstring recorded that establishing the
+truth needed per-region boxes, "which GraphHopper does not expose; `scripts/graphhopper.sh
+regions` has them, on the router's disk, in a different container from the API."
+
+That was right about the obstacle and wrong that it was blocking. `setup` now writes
+`graphhopper/regions.manifest.json`, one box per region, and the API image COPYs that one small
+file. Paris gets "this area is not one of the parts"; a point in the middle of the Serpentine gets
+"this area is on the map, but no path was found close enough to that exact spot". A build whose
+graph predates the manifest has no file and still gets the hedged sentence, which was never
+dishonest — only unhelpful.
+
+⚠ The boxes are the *cut* boxes, and osmium's complete-ways extraction keeps ways crossing the
+boundary, so the imported extent slightly overruns them: the cut union is
+`(-0.65, 6.43, 80.35, 52.86)` while the router reported
+`(-1.449894, 6.379104, 80.389202, 54.991951)`. That asymmetry is why the manifest is used only to
+explain a failure the router has already returned, and never as a pre-flight test — refusing a
+request because a point falls outside a cut box would refuse points that route.
+
 The original finding, kept because the capability matrix is still the reference for anyone
 deploying against the hosted API instead:
 

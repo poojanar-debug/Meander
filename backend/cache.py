@@ -78,6 +78,15 @@ SEGMENT_GRID_DECIMALS = 4
 # with distinct answers inside the 6-hour TTL.
 ROUTE_CACHE_MAX_ROWS = 500
 
+# The same reasoning, different arithmetic. A geocode payload is a handful of
+# names and coordinate pairs — measured at about 400 bytes for a five-result
+# answer, two orders of magnitude below a route — so 5,000 rows is roughly 2 MB
+# and holds every distinct query a demonstration deployment will ever see inside
+# the 7-day TTL. The ceiling is here because an unbounded table on a machine
+# whose database is baked into the image is how the last cache growth defect
+# happened, not because this one is expected to reach it.
+GEOCODE_CACHE_MAX_ROWS = 5000
+
 # Often enough that a burst cannot run away, rarely enough that the common path
 # is still a single INSERT. At the ceiling above this is roughly one sweep per
 # 10% of the table.
@@ -112,6 +121,26 @@ CREATE TABLE IF NOT EXISTS route_cache (
     expires_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_route_cache_expires ON route_cache(expires_at);
+
+-- Deliberately shaped exactly like route_cache, so purge_expired_routes'
+-- sibling, the eviction and the reclaim can be the same code rather than a
+-- second copy of it that drifts.
+--
+-- No SCHEMA_VERSION bump, and that is a decision rather than an oversight.
+-- `_init_schema` runs this script on every open before it looks at the version,
+-- so an existing version-4 file gains the table the first time this build opens
+-- it, and a version-4 file that already has the table is read correctly by a
+-- build that has never heard of it — the older code simply never selects from
+-- it. The version guards against a file this code cannot read; both directions
+-- here are readable, so bumping it would refuse files for no reason and throw
+-- away 146 measured segment scores to do it.
+CREATE TABLE IF NOT EXISTS geocode_cache (
+    query_key  TEXT PRIMARY KEY,
+    payload    TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    expires_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_geocode_cache_expires ON geocode_cache(expires_at);
 
 """
 
@@ -424,6 +453,69 @@ class Cache:
             )
         self._maybe_sweep()
 
+    # ---- place-search cache ---------------------------------------------
+
+    def get_geocode(self, query_key: str) -> list[dict[str, Any]] | None:
+        """A previous answer for this normalised query, or None.
+
+        Same unreadable-row handling as `get_route`, for the same reason: a row
+        whose expiry cannot be parsed is a miss and is deleted, rather than
+        raising `TypeError` out of every request for that key until somebody
+        removes it by hand.
+        """
+        row = self.conn.execute(
+            "SELECT payload, expires_at FROM geocode_cache WHERE query_key = ?", (query_key,)
+        ).fetchone()
+        if row is None:
+            return None
+        try:
+            stale = datetime.fromisoformat(row["expires_at"]) <= _now()
+        except (ValueError, TypeError):
+            log.warning("geocode_cache_unreadable_expiry")
+            self._delete_geocode(query_key)
+            return None
+        if stale:
+            self._delete_geocode(query_key)
+            return None
+        try:
+            payload = json.loads(row["payload"])
+        except json.JSONDecodeError:
+            log.warning("geocode_cache_corrupt")
+            return None
+        return payload if isinstance(payload, list) else None
+
+    def _delete_geocode(self, query_key: str) -> None:
+        with self.conn as conn:
+            conn.execute("DELETE FROM geocode_cache WHERE query_key = ?", (query_key,))
+
+    def put_geocode(self, query_key: str, payload: list[dict[str, Any]], ttl_s: int) -> None:
+        now = _now()
+        with self.conn as conn:
+            conn.execute(
+                """
+                INSERT INTO geocode_cache (query_key, payload, created_at, expires_at)
+                VALUES (?,?,?,?)
+                ON CONFLICT(query_key) DO UPDATE SET
+                    payload=excluded.payload,
+                    created_at=excluded.created_at,
+                    expires_at=excluded.expires_at
+                """,
+                (
+                    query_key,
+                    json.dumps(payload, separators=(",", ":")),
+                    _iso(now),
+                    _iso(now + timedelta(seconds=ttl_s)),
+                ),
+            )
+        self._maybe_sweep()
+
+    def geocode_cache_size(self) -> int:
+        """Rows that are actually still cached, expired ones excluded."""
+        row = self.conn.execute(
+            "SELECT COUNT(*) AS n FROM geocode_cache WHERE expires_at > ?", (_iso(_now()),)
+        ).fetchone()
+        return int(row["n"]) if row else 0
+
     def _maybe_sweep(self) -> None:
         """Sweep every SWEEP_EVERY_N_WRITES writes.
 
@@ -466,6 +558,12 @@ class Cache:
         """
         removed = self.purge_expired_routes()
         removed += self._evict_over_ceiling()
+        # The geocode table is swept by the same pass rather than by a second
+        # timer. It shares the file, so it shares the VACUUM that reclaims it,
+        # and a table with its own sweep schedule is a table that gets forgotten
+        # when somebody changes the other one.
+        removed += self.purge_expired_geocodes()
+        removed += self._evict_geocodes_over_ceiling()
         if not removed:
             return 0
 
@@ -541,6 +639,39 @@ class Cache:
             )
             return cur.rowcount or 0
 
+    def purge_expired_geocodes(self) -> int:
+        """`purge_expired_routes` for the other table, with the same shape test.
+
+        The `NOT LIKE '%+00:00'` clause is not defensive padding: SQLite has no
+        date type, so the comparison is lexicographic and is only correct while
+        every value is the same shape. A row written without an offset sorts
+        against a string two characters longer and compares wrong in *both*
+        directions — it can survive its own expiry, and it is the same row that
+        raises TypeError out of the getter.
+        """
+        with self.conn as conn:
+            cur = conn.execute(
+                "DELETE FROM geocode_cache WHERE expires_at <= ? OR expires_at NOT LIKE '%+00:00'",
+                (_iso(_now()),),
+            )
+            return cur.rowcount or 0
+
+    def _evict_geocodes_over_ceiling(self) -> int:
+        """Oldest-first eviction down to GEOCODE_CACHE_MAX_ROWS."""
+        with self.conn as conn:
+            over = conn.execute(
+                "SELECT COUNT(*) AS n FROM geocode_cache"
+            ).fetchone()["n"] - GEOCODE_CACHE_MAX_ROWS
+            if over <= 0:
+                return 0
+            cur = conn.execute(
+                "DELETE FROM geocode_cache WHERE query_key IN ("
+                "  SELECT query_key FROM geocode_cache ORDER BY created_at ASC LIMIT ?"
+                ")",
+                (over,),
+            )
+            return cur.rowcount or 0
+
     def route_cache_size(self) -> int:
         """Rows that are actually still cached.
 
@@ -559,6 +690,7 @@ class Cache:
             "segments_scored": self.segment_count(),
             "segments_clip": self.clip_segment_count(),
             "routes_cached": self.route_cache_size(),
+            "geocodes_cached": self.geocode_cache_size(),
             # Read from the file, not the constant. Reporting the constant made
             # /api/health assert a migration that never ran — it could only ever
             # agree with itself.

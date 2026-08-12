@@ -29,9 +29,9 @@ const About = forwardRef(function About({ cache }, ref) {
 
         <p>
           Nothing about where you go is kept unless you ask. No cookies, no analytics, no location
-          history — your coordinates answer this one request and are then discarded. Three things
+          history; your coordinates answer this one request and are then discarded. Three things
           are kept here: whether you chose light or dark, whether you read kilometres or miles, and
-          the app itself, so it opens without a connection. That last one is the program — the same
+          the app itself, so it opens without a connection. That last one is the program: the same
           for everyone, and it says nothing about you.
         </p>
 
@@ -86,7 +86,7 @@ const About = forwardRef(function About({ cache }, ref) {
             at a time. */}
         <p>
           There is one exception, and only if you ask for it. If you report a barrier, that report
-          is published — the point you picked and the words you wrote become a public note on the
+          is published: the point you picked and the words you wrote become a public note on the
           OpenStreetMap development server, and it stays there. The form says so above the send
           button. Nothing else you do here leaves the browser.
         </p>

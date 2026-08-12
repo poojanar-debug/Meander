@@ -170,7 +170,7 @@ are lowercase, conventional-prefixed, and say *why* rather than *what*:
 
 ```
 fix(map): jump rather than fly when the page is hidden
-fix(nature): honour the duration cap, and never label a route green when it is not
+fix(scenic): honour the duration cap, and never label a route green when it is not
 merge: the launch backend under the redesign frontend
 fix(coverage): stop telling Paris to move the start a little
 ```

@@ -324,20 +324,63 @@ export function nextRestStop(restStops, alongM) {
 }
 
 /**
- * Barriers within `radiusM` of the position.
+ * Where an arbitrary point falls on the line, searching the whole of it.
  *
- * **This runs for every route, including one the user chose to follow after
- * being told it was blocked.** Someone who decided to try anyway is exactly the
- * person who most needs telling that the steps are 200 m ahead. Suppressing the
- * warning because they had already been warned once would be the app deciding
- * it had discharged its duty.
+ * `locateOnRoute` is for the walker and is deliberately anchored and windowed.
+ * This is for fixed points that have no history to anchor against — a barrier
+ * node, a reported obstruction — so it takes the globally nearest segment, and
+ * it projects perpendicularly onto that segment rather than snapping to the
+ * nearest vertex. Those are different answers: route geometry routinely carries
+ * vertices hundreds of metres apart, so a point standing exactly on the line
+ * can be a long way from every vertex on it.
  */
-export function barriersWithin(blockers, position, radiusM = 200) {
-  if (!blockers?.length) return []
+export function projectPointOnRoute(point, geometry, cumulative) {
+  if (!geometry || geometry.length < 2) return null
+  const cum = cumulative ?? cumulativeDistances(geometry)
+  const refLat = point[1]
+  return nearestIn(toMetres(point, refLat), geometry, cum, refLat, -Infinity, Infinity)
+}
+
+/**
+ * How far behind the walker a barrier may still be and count as "ahead".
+ *
+ * Not zero. A barrier you are standing at projects to a distance a metre or two
+ * either side of your own match depending on GPS noise, and a strict test makes
+ * the warning flicker off exactly as you reach the thing it is warning you
+ * about.
+ */
+const BARRIER_BEHIND_TOLERANCE_M = 15
+
+/**
+ * Barriers ahead of the walker on the line, nearest first.
+ *
+ * **Replaces a plain haversine radius, which had no idea which way anyone was
+ * facing.** `barriersWithin` — deleted with this change — returned everything
+ * inside a circle, so for the whole 200 m *after* passing a gate the sheet went
+ * on saying it was "150 m ahead": the one number in this app that a user acts
+ * on physically, pointing backwards. Projecting each barrier onto the route and
+ * comparing its distance along the line to the walker's own is what makes
+ * "ahead" mean ahead.
+ *
+ * The distance returned is along the route rather than straight-line, for the
+ * same reason: you cannot walk the chord.
+ *
+ * **This still runs for a route the app has already called blocked.** Someone
+ * who read "three steps at the canal crossing" and chose to try anyway is
+ * exactly the person who most needs telling when those steps are two hundred
+ * metres off. Suppressing it because they had been warned once would be the app
+ * deciding it had discharged its duty.
+ */
+export function barriersAheadOnRoute(blockers, geometry, cumulative, alongM, radiusM = 200) {
+  if (!blockers?.length || !geometry || geometry.length < 2) return []
+  const cum = cumulative ?? cumulativeDistances(geometry)
   return blockers
-    .map((b) => ({ blocker: b, distanceM: haversineM(position, [b.lon, b.lat]) }))
-    .filter((x) => x.distanceM <= radiusM)
-    .sort((a, b) => a.distanceM - b.distanceM)
+    .map((blocker) => {
+      const at = projectPointOnRoute([blocker.lon, blocker.lat], geometry, cum)
+      return at ? { blocker, atM: at.alongM, aheadM: at.alongM - alongM, offsetM: at.offRouteM } : null
+    })
+    .filter((x) => x && x.aheadM >= -BARRIER_BEHIND_TOLERANCE_M && x.aheadM <= radiusM)
+    .sort((a, b) => a.aheadM - b.aheadM)
 }
 
 /**

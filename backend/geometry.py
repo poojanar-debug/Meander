@@ -182,7 +182,7 @@ def from_lonlat_pairs(pairs: Iterable[Sequence[float]]) -> list[LatLon]:
 #
 # The spec's full weighting is
 #
-#     segment_nature = 0.45*clip + 0.20*naturalness + 0.20*curviness + 0.15*elev_variance
+#     segment_scenic = 0.45*clip + 0.20*naturalness + 0.20*curviness + 0.15*elev_variance
 #
 # With no CLIP term the remaining three are renormalised to sum to 1, rather
 # than scoring out of 0.55 and making every geometry-only route look worse than
@@ -352,7 +352,7 @@ def elevation_variance(elevations: Sequence[float]) -> float | None:
 
 
 class RouteGeometryScores(NamedTuple):
-    nature: float
+    scenic: float
     air: float | None
     curviness: float
     elevation_variance: float | None
@@ -397,10 +397,10 @@ def score_geometry(
         terms.append((WEIGHT_ELEVATION, elevation))
 
     weight_total = sum(w for w, _ in terms)
-    nature = sum(w * v for w, v in terms) / weight_total if weight_total > 0 else 0.0
+    scenic = sum(w * v for w, v in terms) / weight_total if weight_total > 0 else 0.0
 
     return RouteGeometryScores(
-        nature=round(float(np.clip(nature, 0.0, 1.0)), 4),
+        scenic=round(float(np.clip(scenic, 0.0, 1.0)), 4),
         air=round(air.score, 4) if air.score is not None else None,
         curviness=round(curve, 4),
         elevation_variance=round(elevation, 4) if elevation is not None else None,

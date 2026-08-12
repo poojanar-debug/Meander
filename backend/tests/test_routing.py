@@ -17,16 +17,16 @@ from backend.models import (
     effective_mode,
 )
 from backend.routing import (
-    NATURE_DURATION_CAP,
+    SCENIC_DURATION_CAP,
     NoRouteFound,
     accessible_custom_model,
     build_request_body,
     from_post_point,
     loop_returned_to_origin,
-    nature_custom_model,
     route_accessible,
     route_fastest,
-    route_nature,
+    route_scenic,
+    scenic_custom_model,
     to_get_point,
     to_post_point,
 )
@@ -89,7 +89,7 @@ def test_converter_survives_a_southern_latitude() -> None:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("preset", ["nature", "accessible"])
+@pytest.mark.parametrize("preset", ["scenic", "accessible"])
 def test_a_custom_model_always_travels_with_flexible_mode(preset: str) -> None:
     """A custom model without ch.disable is rejected, and older GraphHopper
     versions discarded it silently — returning the fastest route under every
@@ -117,8 +117,8 @@ def test_a_round_trip_does_not_request_flexible_mode() -> None:
     assert "ch.disable" not in body
 
 
-def test_nature_body_carries_a_custom_model() -> None:
-    body = build_request_body(COLOMBO, VIHARA, 25, "foot", "nature")
+def test_scenic_body_carries_a_custom_model() -> None:
+    body = build_request_body(COLOMBO, VIHARA, 25, "foot", "scenic")
     assert "custom_model" in body
     assert body["custom_model"]["distance_influence"] == 20
 
@@ -188,14 +188,14 @@ def test_accessible_model_does_not_exclude_untagged_ways() -> None:
     assert "MISSING" not in zeroed
 
 
-def test_nature_model_penalises_arterial_roads() -> None:
-    rules = nature_custom_model(20)["priority"]
+def test_scenic_model_penalises_arterial_roads() -> None:
+    rules = scenic_custom_model(20)["priority"]
     motorway = next(r for r in rules if "MOTORWAY" in r["if"])
     assert float(motorway["multiply_by"]) < 0.2
 
 
-def test_nature_distance_influence_is_configurable() -> None:
-    assert nature_custom_model(90)["distance_influence"] == 90
+def test_scenic_distance_influence_is_configurable() -> None:
+    assert scenic_custom_model(90)["distance_influence"] == 90
 
 
 # ---------------------------------------------------------------------------
@@ -266,25 +266,25 @@ def test_the_two_ladders_agree_at_the_rung_they_share() -> None:
 )
 async def test_three_presets_produce_measurably_different_routes(origin, dest, minutes, mode) -> None:
     fastest = await route_fastest(origin, dest, minutes, mode)
-    nature = await route_nature(origin, dest, minutes, mode, fastest)
+    scenic = await route_scenic(origin, dest, minutes, mode, fastest)
     accessible = await route_accessible(origin, dest, minutes, mode)
 
     geometries = {
         tuple((round(p.lat, 5), round(p.lon, 5)) for p in r.points)
-        for r in (fastest, nature, accessible)
+        for r in (fastest, scenic, accessible)
     }
     assert len(geometries) == 3, "presets returned identical geometry — check ch.disable"
 
-    assert nature.distance_m > fastest.distance_m * 1.05
-    assert nature.duration_min > fastest.duration_min
+    assert scenic.distance_m > fastest.distance_m * 1.05
+    assert scenic.duration_min > fastest.duration_min
 
 
 @pytest.mark.asyncio
-async def test_nature_respects_the_duration_cap() -> None:
+async def test_scenic_respects_the_duration_cap() -> None:
     fastest = await route_fastest(COLOMBO, VIHARA, 25, "foot")
-    nature = await route_nature(COLOMBO, VIHARA, 25, "foot", fastest)
+    scenic = await route_scenic(COLOMBO, VIHARA, 25, "foot", fastest)
 
-    assert nature.duration_min <= fastest.duration_min * NATURE_DURATION_CAP
+    assert scenic.duration_min <= fastest.duration_min * SCENIC_DURATION_CAP
 
 
 @pytest.mark.asyncio
@@ -299,10 +299,10 @@ async def test_round_trip_returns_to_the_origin() -> None:
 @pytest.mark.asyncio
 async def test_round_trip_presets_also_differ() -> None:
     fastest = await route_fastest(VONDEL, None, 60, "bike")
-    nature = await route_nature(VONDEL, None, 60, "bike", fastest)
+    scenic = await route_scenic(VONDEL, None, 60, "bike", fastest)
 
-    assert fastest.points != nature.points
-    assert loop_returned_to_origin(nature, VONDEL)
+    assert fastest.points != scenic.points
+    assert loop_returned_to_origin(scenic, VONDEL)
 
 
 @pytest.mark.asyncio
@@ -457,7 +457,7 @@ def test_path_details_can_be_overridden(monkeypatch) -> None:
 
 
 # ---------------------------------------------------------------------------
-# the nature duration cap
+# the scenic duration cap
 # ---------------------------------------------------------------------------
 
 
@@ -481,55 +481,55 @@ def test_budget_fit_of_a_zero_budget_is_not_a_division_by_zero() -> None:
 def test_loop_distance_scale_shrinks_the_round_trip_target() -> None:
     """The only lever that moves a round trip. distance_influence does not:
     measured in Colombo, values from 20 to 400 all returned the same loop."""
-    full = build_request_body(COLOMBO, None, 30, "foot", "nature")
-    half = build_request_body(COLOMBO, None, 30, "foot", "nature", 20, 0.5)
+    full = build_request_body(COLOMBO, None, 30, "foot", "scenic")
+    half = build_request_body(COLOMBO, None, 30, "foot", "scenic", 20, 0.5)
 
     assert half["round_trip.distance"] == pytest.approx(full["round_trip.distance"] / 2, abs=1)
 
 
 def test_loop_distance_scale_does_not_apply_to_point_to_point() -> None:
-    body = build_request_body(COLOMBO, VIHARA, 30, "foot", "nature", 20, 0.5)
+    body = build_request_body(COLOMBO, VIHARA, 30, "foot", "scenic", 20, 0.5)
     assert "round_trip.distance" not in body
 
 
 def test_the_loop_candidate_set_spans_a_useful_range() -> None:
     """A single ladder cannot work when the router responds discontinuously, so
     the candidates have to actually sample the space."""
-    from backend.routing import NATURE_LOOP_CANDIDATES
+    from backend.routing import SCENIC_LOOP_CANDIDATES
 
-    scales = [scale for _, scale in NATURE_LOOP_CANDIDATES]
+    scales = [scale for _, scale in SCENIC_LOOP_CANDIDATES]
     assert max(scales) == 1.0
     assert min(scales) <= 0.4
     assert len(set(scales)) >= 4
 
 
 @pytest.mark.asyncio
-async def test_nature_stays_inside_the_cap_when_a_candidate_fits() -> None:
+async def test_scenic_stays_inside_the_cap_when_a_candidate_fits() -> None:
     fastest = await route_fastest(COLOMBO, VIHARA, 25, "foot")
-    nature = await route_nature(COLOMBO, VIHARA, 25, "foot", fastest)
+    scenic = await route_scenic(COLOMBO, VIHARA, 25, "foot", fastest)
 
-    assert nature.duration_min <= fastest.duration_min * NATURE_DURATION_CAP
-    assert nature.preset_note is None
+    assert scenic.duration_min <= fastest.duration_min * SCENIC_DURATION_CAP
+    assert scenic.preset_note is None
 
 
 @pytest.mark.asyncio
-async def test_nature_is_greener_than_fastest_or_says_why_not() -> None:
-    """A nature route no greener than the plain one is a label with nothing
+async def test_scenic_is_greener_than_fastest_or_says_why_not() -> None:
+    """A scenic route no greener than the plain one is a label with nothing
     behind it. It is allowed to happen — some places have no greener way — but
     it is never allowed to happen silently."""
     from backend.geometry import score_geometry
 
     fastest = await route_fastest(COLOMBO, VIHARA, 25, "foot")
-    nature = await route_nature(COLOMBO, VIHARA, 25, "foot", fastest)
+    scenic = await route_scenic(COLOMBO, VIHARA, 25, "foot", fastest)
 
     def green(r):
-        return score_geometry(r.points, r.elevations or None, r.details).nature
+        return score_geometry(r.points, r.elevations or None, r.details).scenic
 
-    assert green(nature) > green(fastest) or nature.preset_note is not None
+    assert green(scenic) > green(fastest) or scenic.preset_note is not None
 
 
 @pytest.mark.asyncio
-async def test_nature_without_a_baseline_applies_no_cap() -> None:
+async def test_scenic_without_a_baseline_applies_no_cap() -> None:
     """Called with no fastest route there is nothing to be capped against."""
-    nature = await route_nature(COLOMBO, VIHARA, 25, "foot", None)
-    assert nature.duration_min > 0
+    scenic = await route_scenic(COLOMBO, VIHARA, 25, "foot", None)
+    assert scenic.duration_min > 0

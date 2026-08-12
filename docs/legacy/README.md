@@ -51,7 +51,7 @@ rather than documenting it better.
 **Somewhere to put the router.** The decisive one. Render's free tier cannot
 hold a routing graph — the demo set is 485 MB and needs a 3 GB heap — so the
 Render deployment could only ever point at the hosted GraphHopper API, which
-cannot execute a custom model, which means `nature` and `accessible` come back
+cannot execute a custom model, which means `scenic` and `accessible` come back
 blocked. Two of the three presets do not work. See
 [ADR 2](../adr/0002-self-host-graphhopper.md).
 
@@ -74,6 +74,6 @@ of `DEPLOY.md` at tag `launch-p3`:
 git show launch-p3:DEPLOY.md
 ```
 
-Expect `nature` and `accessible` to report `status: "blocked"` with a
+Expect `scenic` and `accessible` to report `status: "blocked"` with a
 `status_note` saying the routing backend refused the custom model. That is the
 app being honest, not a defect.

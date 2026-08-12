@@ -307,7 +307,10 @@ describe('fmtClock', () => {
 describe('daylightSentence', () => {
   it('reads as a 24-hour range by default', () => {
     const times = sunTimes(new Date('2026-03-20T12:00:00Z'), 51.5074, -0.1278)
-    expect(daylightSentence(times, METRIC_24)).toMatch(/^Daylight today: 0\d:\d\d – 1\d:\d\d\.$/)
+    // The separator was an en dash — the only user-visible one in the app, and
+    // the one place a dash is correct typography, being a range. `to` reads
+    // better aloud anyway, and the ask was for no dashes.
+    expect(daylightSentence(times, METRIC_24)).toMatch(/^Daylight today: 0\d:\d\d to 1\d:\d\d\.$/)
   })
 
   it('carries two meridiem markers when a 12-hour clock was chosen', () => {

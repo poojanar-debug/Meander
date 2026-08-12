@@ -15,7 +15,7 @@ const FULL = {
   dest: { lat: 51.507489, lon: -0.162207, name: 'Hyde Park' },
   minutes: 65,
   mode: 'bike',
-  objectives: ['nature', 'accessible'],
+  objectives: ['scenic', 'accessible'],
   departAt: null,
 }
 
@@ -33,7 +33,7 @@ describe('encode / decode round trip', () => {
     expect(back.dest).toEqual(FULL.dest)
     expect(back.minutes).toBeUndefined()
     expect(back.mode).toBe('bike')
-    expect(back.objectives).toEqual(['nature', 'accessible'])
+    expect(back.objectives).toEqual(['scenic', 'accessible'])
   })
 
   it('carries the dial for a loop, where it is the whole request', () => {
@@ -165,14 +165,14 @@ describe('hostile input: somebody else wrote this link', () => {
 
   it('drops an unknown mode or objective instead of passing it through', () => {
     expect(decodeState('?from=6.9,79.8&mode=teleport').mode).toBeUndefined()
-    expect(decodeState('?from=6.9,79.8&obj=nature,rm -rf,air').objectives).toEqual([
-      'nature',
+    expect(decodeState('?from=6.9,79.8&obj=scenic,rm -rf,air').objectives).toEqual([
+      'scenic',
       'air',
     ])
   })
 
   it('deduplicates objectives and caps them at three', () => {
-    const objectives = decodeState('?from=6.9,79.8&obj=nature,nature,air,shade,quiet,fastest')
+    const objectives = decodeState('?from=6.9,79.8&obj=scenic,scenic,air,shade,quiet,fastest')
       .objectives
     expect(objectives).toHaveLength(3)
     expect(new Set(objectives).size).toBe(3)

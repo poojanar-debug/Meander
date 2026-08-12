@@ -41,7 +41,7 @@ export default function StatusBanner({ phase, progress, error, routes, onRetry, 
       <div className="banner">
         <p className="banner__text">
           {progress?.text ?? 'Working out your routes'}
-          {routes.length > 0 && ` — ${routes.length} ready so far`}
+          {routes.length > 0 && `, ${routes.length} ready so far`}
         </p>
         <div
           className="banner__progress"

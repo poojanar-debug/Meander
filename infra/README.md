@@ -201,7 +201,7 @@ Run the command; the expectation says what it should print.
 | 6 | the API reached the router | `curl -s $SITE/api/health \| jq .routing` | `self_hosted: true`, `self_hosted_source: "env"`, `smoothness` in `path_details` |
 | 7 | the smoothness constraint can fire | `curl -s $SITE/api/health \| jq '.routing.path_details'` | contains `"smoothness"` — without it the accessible preset silently stops excluding impassable surfaces |
 | 8 | pre-warmed CLIP scores shipped | `curl -s $SITE/api/health \| jq .cache` | `segments_scored: 146` |
-| 9 | a real route works end to end | `curl -s -X POST $SITE/api/routes -H 'content-type: application/json' -d '{"origin":{"lat":51.507489,"lon":-0.162207},"minutes":35,"mode":"auto","objectives":["fastest","nature","accessible"]}' \| jq '.routes[] \| {id,status,scoring_method}'` | three routes, `scoring_method: "clip"` |
+| 9 | a real route works end to end | `curl -s -X POST $SITE/api/routes -H 'content-type: application/json' -d '{"origin":{"lat":51.507489,"lon":-0.162207},"minutes":35,"mode":"auto","objectives":["fastest","scenic","accessible"]}' \| jq '.routes[] \| {id,status,scoring_method}'` | three routes, `scoring_method: "clip"` |
 | 10 | the rate limiter sees real client IPs | 60 requests from one address | 429 after the bucket empties — **and** two different addresses must not share a bucket |
 | 11 | the bucket is not publicly readable | `curl -sI https://meander-web-$ACCOUNT.s3.$REGION.amazonaws.com/index.html` | `403` |
 | 12 | the SPA serves deep links | `curl -sI $SITE/some/deep/link` | `200` and `content-type: text/html` |

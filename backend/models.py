@@ -15,7 +15,23 @@ from .geometry import LatLon, haversine_m
 
 Mode = Literal["auto", "foot", "bike", "car"]
 EffectiveMode = Literal["foot", "bike", "car"]
-RouteId = Literal["fastest", "nature", "accessible", "quiet", "shade", "air"]
+RouteId = Literal["fastest", "scenic", "accessible", "quiet", "shade", "air"]
+
+# `scenic` was called `nature` until 2026-08-12. The rename fixed a construct
+# mismatch the codebase had already written down — `scoring.py`'s active prompt
+# pair is "a beautiful place" / "an ugly place", which measures visual appeal,
+# of which greenery is one source and landmarks, beaches and architecture are
+# others.
+#
+# **Accepted on the way in, never emitted.** `objectives` travels in the URL, so
+# a strict rename would break every link anyone has shared: `writeUrl` puts the
+# ids in the query string and `decodeState` reads them back on load. A shared
+# permalink is a promise, and one that 422s a year later is a broken one.
+#
+# One direction only. Nothing in this codebase writes `nature` to the wire, no
+# response carries it, and `Scores` has no such field — so an alias here cannot
+# leak the old name back into anything that stores or renders it.
+DEPRECATED_OBJECTIVE_ALIASES: dict[str, str] = {"nature": "scenic"}
 ScoringMethod = Literal["clip", "geometry_only", "placeholder"]
 RouteStatus = Literal["ok", "blocked"]
 
@@ -23,11 +39,11 @@ MIN_MINUTES = 20
 MAX_MINUTES = 360
 
 # The three the spec requires. The frontend may request up to three of six.
-DEFAULT_OBJECTIVES: tuple[RouteId, ...] = ("fastest", "nature", "accessible")
+DEFAULT_OBJECTIVES: tuple[RouteId, ...] = ("fastest", "scenic", "accessible")
 
 ROUTE_LABELS: dict[str, str] = {
     "fastest": "Fastest",
-    "nature": "Nature",
+    "scenic": "Scenic",
     "accessible": "Accessible",
     "quiet": "Quiet",
     "shade": "Shade",
@@ -54,6 +70,22 @@ class RouteRequest(BaseModel):
     mode: Mode = "auto"
     depart_at: datetime | None = None
     objectives: list[RouteId] | None = None
+
+    @field_validator("objectives", mode="before")
+    @classmethod
+    def _accept_deprecated_names(cls, v: list[str] | None) -> list[str] | None:
+        """Map retired objective ids to their current names, before validation.
+
+        `mode="before"` is load-bearing: `objectives` is typed `list[RouteId]`,
+        a Literal that no longer contains "nature", so an after-validator would
+        never run — the request would already have been rejected with a 422.
+        Every permalink shared before the rename carries `nature` in its query
+        string.
+        """
+        if not isinstance(v, list):
+            return v
+        return [DEPRECATED_OBJECTIVE_ALIASES.get(item, item) if isinstance(item, str) else item
+                for item in v]
 
     @field_validator("objectives")
     @classmethod
@@ -104,7 +136,7 @@ class Scores(BaseModel):
     null as "not measured".
     """
 
-    nature: float | None = None
+    scenic: float | None = None
     air: float | None = None
     shade: float | None = None
 

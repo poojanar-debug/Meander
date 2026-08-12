@@ -1,13 +1,14 @@
 import { describe, expect, it } from 'vitest'
 
 import {
-  barriersWithin,
+  barriersAheadOnRoute,
   cumulativeDistances,
   haversineM,
   locateOnRoute,
   metresToNextTurn,
   nextRestStop,
   pointAtDistance,
+  projectPointOnRoute,
   stepAt,
   trackOffRoute,
 } from './follow.js'
@@ -220,26 +221,78 @@ describe('nextRestStop', () => {
   })
 })
 
-describe('barriersWithin', () => {
+describe('projectPointOnRoute', () => {
+  it('projects perpendicularly rather than snapping to the nearest vertex', () => {
+    // Standing exactly on the line, halfway along a segment whose endpoints are
+    // 111 m apart. The nearest VERTEX is 55.6 m away; the nearest point on the
+    // LINE is zero away, and only one of those two answers is the distance from
+    // the line.
+    const at = projectPointOnRoute([0.0005, 0], LINE)
+    expect(at.offRouteM).toBeCloseTo(0, 5)
+    expect(at.alongM).toBeCloseTo(55.60, 1)
+    expect(at.index).toBe(0)
+  })
+
+  it('measures perpendicular offset for a point beside the line', () => {
+    const at = projectPointOnRoute([0.0005, 0.0001], LINE)
+    expect(at.offRouteM).toBeCloseTo(11.13, 1)
+  })
+
+  it('returns null for geometry with no shape', () => {
+    expect(projectPointOnRoute([0, 0], [])).toBeNull()
+    expect(projectPointOnRoute([0, 0], [[0, 0]])).toBeNull()
+  })
+})
+
+describe('barriersAheadOnRoute', () => {
+  // Replaces the suite for `barriersWithin`, which this change deleted. That
+  // function took a plain haversine radius with no projection and no direction
+  // test, so a barrier the walker had already passed stayed inside the circle
+  // for another 200 m and the sheet went on calling it "ahead". The old suite
+  // could not have caught that: it only ever asked the question from a standing
+  // start, where behind and ahead are the same thing.
+  const cum = cumulativeDistances(LINE)
   const blockers = [
-    { type: 'steps', lat: 0, lon: 0.001, description: 'Three steps' },
-    { type: 'kerb', lat: 0, lon: 0.02, description: 'High kerb' },
+    { type: 'steps', lat: 0, lon: 0.0005, description: 'Three steps' }, // 55.6 m along
+    { type: 'kerb', lat: 0, lon: 0.0025, description: 'High kerb' }, // 278.0 m along
   ]
 
-  it('finds only the barriers inside the radius, nearest first', () => {
-    const found = barriersWithin(blockers, [0, 0], 200)
+  it('reports distance along the route, not the straight line', () => {
+    const found = barriersAheadOnRoute(blockers, LINE, cum, 0, 200)
     expect(found).toHaveLength(1)
     expect(found[0].blocker.type).toBe('steps')
-    expect(found[0].distanceM).toBeCloseTo(111.32, 0)
+    expect(found[0].aheadM).toBeCloseTo(55.60, 1)
   })
 
-  it('finds nothing when everything is far away', () => {
-    expect(barriersWithin(blockers, [1, 1], 200)).toEqual([])
+  it('drops a barrier once it is behind the walker', () => {
+    // Standing at 120 m, so the steps at 55.6 m are 64 m BEHIND. A radius test
+    // still has them well inside 200 m; this one does not.
+    const found = barriersAheadOnRoute(blockers, LINE, cum, 120, 200)
+    expect(found.map((f) => f.blocker.type)).toEqual(['kerb'])
+    expect(found[0].aheadM).toBeCloseTo(158.0, 0)
   })
 
-  it('handles a route with no barriers', () => {
-    expect(barriersWithin([], [0, 0])).toEqual([])
-    expect(barriersWithin(undefined, [0, 0])).toEqual([])
+  it('keeps a barrier a few metres behind, so the warning does not flicker', () => {
+    // A barrier you are standing at projects either side of your own match
+    // depending on GPS noise. Losing it at that exact moment is the one moment
+    // it matters.
+    const found = barriersAheadOnRoute(blockers, LINE, cum, 60, 200)
+    expect(found.map((f) => f.blocker.type)).toContain('steps')
+    expect(barriersAheadOnRoute(blockers, LINE, cum, 80, 200).map((f) => f.blocker.type)).not.toContain(
+      'steps',
+    )
+  })
+
+  it('drops a barrier still further ahead than the radius', () => {
+    expect(barriersAheadOnRoute(blockers, LINE, cum, 0, 100).map((f) => f.blocker.type)).toEqual([
+      'steps',
+    ])
+  })
+
+  it('handles a route with no barriers and geometry with no shape', () => {
+    expect(barriersAheadOnRoute([], LINE, cum, 0)).toEqual([])
+    expect(barriersAheadOnRoute(undefined, LINE, cum, 0)).toEqual([])
+    expect(barriersAheadOnRoute(blockers, [], undefined, 0)).toEqual([])
   })
 })
 

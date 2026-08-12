@@ -1,7 +1,0 @@
-Placeholder so `COPY graphhopper/graph-dist/` in graphhopper/Dockerfile has
-something to copy when GRAPH_SOURCE=none — a COPY of a missing path fails the
-build outright.
-
-scripts/publish_graph.sh --local fills this with a completed graph-cache/.
-Its contents are gitignored: a routing graph is hundreds of megabytes and is
-reproducible from scripts/graphhopper.sh.

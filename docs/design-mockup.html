@@ -29,7 +29,7 @@
   --target:44px;
 
   /* --- route identity (graphics only, never text on paper) ---------------- */
-  --route-fastest:#C2703D; --route-nature:#2F7D53; --route-accessible:#5B6ECF;
+  --route-fastest:#C2703D; --route-scenic:#2F7D53; --route-accessible:#5B6ECF;
   --route-quiet:#8A5CB4;   --route-shade:#1E7A78;  --route-air:#B0455F;
 }
 
@@ -58,7 +58,7 @@
   --warn-ink:#F5B49B; --warn-ground:#2A1811; --warn-rule:#6B3A24;
   --ok-ink:#8FD3A9;
   --shadow-1:0 1px 2px rgb(0 0 0 / 40%); --shadow-2:0 8px 28px rgb(0 0 0 / 50%);
-  --route-fastest:#E8A46F; --route-nature:#6FC38E; --route-accessible:#95A4F0;
+  --route-fastest:#E8A46F; --route-scenic:#6FC38E; --route-accessible:#95A4F0;
   --route-quiet:#C2A0E8;  --route-shade:#63C4BE;  --route-air:#EE8AA0;
   --map-land:#16221B; --map-park:#1D3527; --map-water:#152A33; --map-road:#24332B;
 }
@@ -460,7 +460,7 @@ input[type=range]{width:100%;height:var(--target);margin:0;accent-color:var(--br
             <legend class="label" style="padding:0;margin-bottom:8px">Which routes should Meander work out?</legend>
             <div class="chips">
               <button class="chip" type="button" aria-pressed="true"><span class="chip__swatch" style="background:var(--route-fastest)"></span>Fastest<svg class="chip__check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><path d="m5 13 4 4L19 7"/></svg></button>
-              <button class="chip" type="button" aria-pressed="true"><span class="chip__swatch" style="background:repeating-linear-gradient(90deg,var(--route-nature) 0 9px,transparent 9px 15px)"></span>Nature<svg class="chip__check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><path d="m5 13 4 4L19 7"/></svg></button>
+              <button class="chip" type="button" aria-pressed="true"><span class="chip__swatch" style="background:repeating-linear-gradient(90deg,var(--route-scenic) 0 9px,transparent 9px 15px)"></span>Scenic<svg class="chip__check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><path d="m5 13 4 4L19 7"/></svg></button>
               <button class="chip" type="button" aria-pressed="true"><span class="chip__swatch" style="background:repeating-linear-gradient(90deg,var(--route-accessible) 0 3px,transparent 3px 9px)"></span>Accessible<svg class="chip__check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><path d="m5 13 4 4L19 7"/></svg></button>
               <button class="chip" type="button" aria-pressed="false"><span class="chip__swatch" style="background:repeating-linear-gradient(90deg,var(--route-quiet) 0 18px,transparent 18px 27px)"></span>Quiet<svg class="chip__check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><path d="m5 13 4 4L19 7"/></svg></button>
               <button class="chip" type="button" aria-pressed="false"><span class="chip__swatch" style="background:repeating-linear-gradient(90deg,var(--route-shade) 0 15px,transparent 15px 21px)"></span>Shade<svg class="chip__check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><path d="m5 13 4 4L19 7"/></svg></button>
@@ -479,19 +479,19 @@ input[type=range]{width:100%;height:var(--target);margin:0;accent-color:var(--br
         </div>
 
         <ul class="routes">
-          <!-- NATURE (selected, recommended) -->
+          <!-- SCENIC (selected, recommended) -->
           <li>
             <button class="route" type="button" aria-pressed="true">
-              <span class="route__edge" style="background:var(--route-nature)"></span>
+              <span class="route__edge" style="background:var(--route-scenic)"></span>
               <span class="route__top">
-                <span class="route__name">Nature</span>
+                <span class="route__name">Scenic</span>
                 <span class="badge badge--best">
                   <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><path d="m5 13 4 4L19 7"/></svg>Showing
                 </span>
                 <span class="route__dur tabular">26<span style="font-size:.9375rem;font-family:var(--font-body);color:var(--ink-2)"> min</span></span>
               </span>
               <span class="route__sub">
-                <span class="route__pattern"><span class="route__line" style="background:repeating-linear-gradient(90deg,var(--route-nature) 0 9px,transparent 9px 15px)"></span>dashed</span>
+                <span class="route__pattern"><span class="route__line" style="background:repeating-linear-gradient(90deg,var(--route-scenic) 0 9px,transparent 9px 15px)"></span>dashed</span>
                 <span>·</span><span>2.1 km</span><span>·</span><span>3 rest stops</span>
               </span>
               <span class="route__scores">
@@ -559,10 +559,10 @@ input[type=range]{width:100%;height:var(--target);margin:0;accent-color:var(--br
         </ul>
 
         <!-- selected route detail -->
-        <section class="detail" aria-label="Nature route detail">
+        <section class="detail" aria-label="Scenic route detail">
           <div class="detail__head">
-            <span class="route__line" style="width:32px;height:4px;background:repeating-linear-gradient(90deg,var(--route-nature) 0 9px,transparent 9px 15px)"></span>
-            <h3 class="detail__title">Nature</h3>
+            <span class="route__line" style="width:32px;height:4px;background:repeating-linear-gradient(90deg,var(--route-scenic) 0 9px,transparent 9px 15px)"></span>
+            <h3 class="detail__title">Scenic</h3>
             <span style="flex:1"></span>
             <span class="results__meta tabular">26 min · 2.1 km</span>
           </div>
@@ -621,7 +621,7 @@ input[type=range]{width:100%;height:var(--target);margin:0;accent-color:var(--br
 
     <!-- ========================================================== stage -->
     <div class="stage">
-      <div class="map" role="img" aria-label="Map of three routes from Viharamahadevi Park. The Nature route is selected.">
+      <div class="map" role="img" aria-label="Map of three routes from Viharamahadevi Park. The Scenic route is selected.">
         <svg viewBox="0 0 1000 800" preserveAspectRatio="xMidYMid slice">
           <rect width="1000" height="800" fill="var(--map-land)"/>
           <!-- water -->
@@ -656,13 +656,13 @@ input[type=range]{width:100%;height:var(--target);margin:0;accent-color:var(--br
           <path d="M250 640 C 300 520 380 470 470 430 C 560 388 560 300 620 250 C 668 210 725 220 760 230" fill="none"
                 stroke="var(--raised)" stroke-width="13" stroke-linecap="round"/>
           <path d="M250 640 C 300 520 380 470 470 430 C 560 388 560 300 620 250 C 668 210 725 220 760 230" fill="none"
-                stroke="var(--route-nature)" stroke-width="7" stroke-dasharray="20 11" stroke-linecap="round"/>
+                stroke="var(--route-scenic)" stroke-width="7" stroke-dasharray="20 11" stroke-linecap="round"/>
 
           <!-- rest stops on selected route -->
           <g>
-            <circle cx="358" cy="481" r="9" fill="var(--raised)" stroke="var(--route-nature)" stroke-width="3"/>
-            <circle cx="540" cy="352" r="9" fill="var(--raised)" stroke="var(--route-nature)" stroke-width="3"/>
-            <circle cx="668" cy="228" r="9" fill="var(--raised)" stroke="var(--route-nature)" stroke-width="3"/>
+            <circle cx="358" cy="481" r="9" fill="var(--raised)" stroke="var(--route-scenic)" stroke-width="3"/>
+            <circle cx="540" cy="352" r="9" fill="var(--raised)" stroke="var(--route-scenic)" stroke-width="3"/>
+            <circle cx="668" cy="228" r="9" fill="var(--raised)" stroke="var(--route-scenic)" stroke-width="3"/>
           </g>
           <!-- barrier marker on the blocked route -->
           <g transform="translate(452,447)">
@@ -688,7 +688,7 @@ input[type=range]{width:100%;height:var(--target);margin:0;accent-color:var(--br
       </div>
 
       <div class="legend">
-        <div class="legend__row"><span class="legend__line" style="background:repeating-linear-gradient(90deg,var(--route-nature) 0 9px,transparent 9px 15px)"></span><strong>Nature</strong> · dashed</div>
+        <div class="legend__row"><span class="legend__line" style="background:repeating-linear-gradient(90deg,var(--route-scenic) 0 9px,transparent 9px 15px)"></span><strong>Scenic</strong> · dashed</div>
         <div class="legend__row"><span class="legend__line" style="background:var(--route-fastest)"></span>Fastest · solid</div>
         <div class="legend__row"><span class="legend__line" style="background:repeating-linear-gradient(90deg,var(--route-accessible) 0 3px,transparent 3px 9px)"></span>Accessible · dotted</div>
       </div>

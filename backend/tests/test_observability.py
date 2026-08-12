@@ -148,7 +148,7 @@ def test_the_filter_still_defaults_to_redacting() -> None:
 
 
 def test_unbanned_fields_are_untouched() -> None:
-    record = _record(objective="nature", duration_ms=12.5)
+    record = _record(objective="scenic", duration_ms=12.5)
     PrivacyFilter().filter(record)
-    assert record.objective == "nature"
+    assert record.objective == "scenic"
     assert record.duration_ms == 12.5

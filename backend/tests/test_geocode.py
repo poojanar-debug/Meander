@@ -74,3 +74,84 @@ async def test_searching_for_a_demo_location_lands_on_its_fixture() -> None:
         location = TEST_LOCATIONS_BY_SLUG[slug]
         first = (await geocode_search(location.name))[0]
         assert (first.lat, first.lon) == (location.lat, location.lon), slug
+
+
+# ---------------------------------------------------------------------------
+# The cache, and the bucket it exists to protect
+# ---------------------------------------------------------------------------
+
+
+def test_a_repeated_search_is_served_without_asking_upstream(api_client, monkeypatch) -> None:
+    """The second identical query must not reach Nominatim.
+
+    Backspacing and re-typing is the case this cache actually serves. It is not
+    a normalisation win: case-folding the 12 distinct queries in the recorded
+    burst in `fixtures/nominatim/` still gives 12 distinct keys, so only one of
+    them would have been saved by normalising alone. What is saved is a user who
+    deletes three characters and puts them back, which asks the same question
+    twice by construction.
+    """
+    first = api_client.get("/api/geocode", params={"q": "Vondelpark, Amsterdam"})
+    assert first.status_code == 200
+
+    calls = []
+
+    async def refuse(query: str):
+        calls.append(query)
+        raise AssertionError("a cached query reached the upstream search")
+
+    monkeypatch.setattr("backend.routing.geocode_search", refuse)
+    second = api_client.get("/api/geocode", params={"q": "  VONDELPARK,   amsterdam "})
+
+    assert second.status_code == 200
+    assert second.json() == first.json()
+    assert calls == []
+
+
+def test_a_cache_hit_costs_no_token(api_client, monkeypatch) -> None:
+    """A hit that spends no upstream call must not spend a bucket token either,
+    or the limiter charges the user for its own cache. `/api/routes` has always
+    refunded on a cache hit; place search did not, which is one of the reasons a
+    long session of typing reached the limiter sooner than a session of routing.
+    """
+    from backend import main
+    from backend.ratelimit import RateLimiter
+
+    monkeypatch.setattr(
+        main, "geocode_limiter", RateLimiter(capacity=3, refill_per_min=0.0, daily_ceiling=100)
+    )
+    assert api_client.get("/api/geocode", params={"q": "Hyde Park, London"}).status_code == 200
+
+    # Two tokens left, and thirty repeats of a cached query must not touch them.
+    for _ in range(30):
+        assert api_client.get("/api/geocode", params={"q": "hyde park, london"}).status_code == 200
+
+    # Still room for two genuinely new queries before the bucket says no.
+    assert api_client.get("/api/geocode", params={"q": "Vondelpark, Amsterdam"}).status_code == 200
+
+
+def test_place_search_does_not_spend_the_route_bucket(api_client, monkeypatch) -> None:
+    """The measurement behind the second limiter, asserted.
+
+    A 20-character name costs a mean of 8.6 geocode requests at a 300 ms
+    debounce, so two names come to 17.1 against a per-IP capacity of 12. With one
+    shared bucket the route request that followed the typing was refused, using
+    routing copy, under the place box. Forty place searches must now leave the
+    route bucket untouched.
+    """
+    from backend import main
+    from backend.ratelimit import RateLimiter
+
+    monkeypatch.setattr(
+        main, "limiter", RateLimiter(capacity=12, refill_per_min=0.0, daily_ceiling=2000)
+    )
+    monkeypatch.setattr(
+        main, "geocode_limiter", RateLimiter(capacity=40, refill_per_min=0.0, daily_ceiling=2000)
+    )
+
+    for i in range(40):
+        api_client.get("/api/geocode", params={"q": f"nowhere-{i}-not-recorded"})
+
+    # The route bucket still holds every one of its twelve tokens.
+    decision = main.limiter.check("test-client")
+    assert decision.allowed

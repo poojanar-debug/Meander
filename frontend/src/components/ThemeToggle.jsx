@@ -6,7 +6,7 @@
  * status display, and people click it expecting to be told rather than to
  * change something.
  *
- * The visible word is a prefix of the accessible name ("Dark theme — switch
+ * The visible word is a prefix of the accessible name ("Dark theme, switch
  * from light") rather than being replaced by an aria-label, so speech-input
  * users can say what they can see (WCAG 2.5.3). The glyph is decorative: the
  * word carries the meaning on its own.
@@ -25,7 +25,7 @@ export default function ThemeToggle({ theme, onToggle }) {
         {next === 'dark' ? '◓' : '◒'}
       </span>
       <span>{next === 'dark' ? 'Dark' : 'Light'}</span>
-      <span className="visually-hidden"> theme — switch from {theme}</span>
+      <span className="visually-hidden"> theme, switch from {theme}</span>
     </button>
   )
 }

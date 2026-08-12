@@ -4,6 +4,7 @@ import { THEME_KEY } from './theme.js'
 import {
   METRIC_24,
   UNITS_KEY,
+  UNKNOWN,
   clearStoredUnits,
   detectUnits,
   fmtClockIn,
@@ -24,7 +25,12 @@ describe('formatDistance — metric', () => {
   // The pre-port fmtDist, frozen. If this and formatDistance ever disagree, a
   // metric user's output changed, which this port promised would not happen.
   const reference = (metres) => {
-    if (metres == null || Number.isNaN(metres)) return '—'
+    // Moved with the implementation. ⚠ This branch is never executed — the loop
+    // below runs `for (let m = 0; m <= 200000; m += 1)` and never passes null —
+    // so leaving it stale would not have turned the suite red. It is updated
+    // deliberately rather than left for the runner to catch, because a frozen
+    // oracle that disagrees with the thing it freezes is worse than no oracle.
+    if (metres == null || Number.isNaN(metres)) return UNKNOWN
     if (metres < 1000) return `${Math.round(metres / 10) * 10} m`
     return `${(metres / 1000).toFixed(metres < 10000 ? 1 : 0)} km`
   }
@@ -95,10 +101,18 @@ describe('an unknown distance is never zero', () => {
   it.each([
     ['metric', METRIC_24],
     ['imperial', IMPERIAL],
-  ])('renders null, undefined and NaN as an em dash in %s', (_name, units) => {
+    // **Changed glyph, unchanged rule.** The placeholder was an em dash and is
+    // now `UNKNOWN` — an ASCII hyphen — because the em dash is the character the
+    // app is removing. The name of this test moved with it: "as an em dash"
+    // became a lie the moment the glyph changed, and a test whose name describes
+    // the previous behaviour is how the next reader learns the wrong thing.
+    //
+    // What is asserted below is the part that matters and did not move: an
+    // unknown distance is never rendered as a zero.
+  ])('renders null, undefined and NaN as the unknown placeholder in %s', (_name, units) => {
     for (const value of [null, undefined, Number.NaN]) {
-      expect(formatDistance(value, units)).toBe('—')
-      expect(formatElevation(value, units)).toBe('—')
+      expect(formatDistance(value, units)).toBe(UNKNOWN)
+      expect(formatElevation(value, units)).toBe(UNKNOWN)
       expect(formatDistance(value, units)).not.toBe('0 m')
       expect(formatDistance(value, units)).not.toBe('0 ft')
       expect(formatElevation(value, units)).not.toBe('0 m')

@@ -2969,6 +2969,9 @@ deployment machine, which is worth more than it sounds — the layout gate had
 never been run anywhere but CI, and it is the one this repo already caught
 grading nothing at all.
 
+(The gate is 39 checks as of the phone pass: ten that enter follow mode, and
+four over the panel's scroll arrangement. See §13 and §13.2.)
+
 **Installing Chromium put a printer daemon on the box.** The snap pulls in
 `cups`, which starts `cupsd` and `cups-browsed` listening on `0.0.0.0:631`. It
 is not reachable — `cupsd` is a host process, so INPUT rule 7 rejects it on any
@@ -3586,3 +3589,822 @@ Pre-existing, noticed here because it kept appearing in `git status`, not fixed.
 
 **Live API calls this phase:** about a dozen route requests across four gate
 runs, most served from the route cache. No run was rate-limited.
+
+# The phone pass · 2026-08-12
+
+Nine parts, on branch `phone-pass`, from `e6ed697`. Everything below was
+measured on the Oracle A1 VM with the real stack up: self-hosted GraphHopper,
+the real API on `127.0.0.1:8000`, and Chromium 150.0.7871.128 from snap at
+`/snap/bin/chromium`.
+
+## §13 — Follow mode had never been looked at by anything
+
+The brief's first instruction was to point the gate at follow mode *before*
+changing any follow-mode code, on the grounds that a number nobody has
+reproduced is not a measurement. That turned out to matter twice.
+
+**Nothing had ever entered this screen.** `gate.mjs` reaches the app's
+collapsibles two ways — `document.querySelectorAll('details')` and
+`[aria-expanded]` — and "Start this route" is neither, so the gate had never
+seen `.follow`. The 16 vitest files contain 331 `it()`/`test()` call sites and
+render no components at all: no jsdom, no testing-library, no browser-mode
+vitest. Two suites read `FollowMode.jsx` as *source text*
+(`units-callsites.test.js`, and `follow.test.js` covers the geometry module), so
+the file was not unpinned — but its DOM had never existed anywhere outside a
+real user's phone.
+
+The gate is now 35 checks. The ten new ones load 390x844, scroll to the Start
+button the way a thumb has to, click it, wait for `.follow`, and then re-run the
+overflow check, the 44 x 44 sweep and axe in both themes, plus the live-region
+count. `.follow` and `.sheet` are in a manifest of their own rather than the
+top-level one: the gate's stated rule is that a selector matching zero elements
+is a failure and not a skip, so listing them up there would fail every load that
+does not enter follow mode.
+
+**What the new pass found, at `e6ed697`, in a real browser.** The a11y baseline
+is clean — axe reports nothing in either theme and every target clears 44 x 44,
+which is worth knowing because it means what follows is a layout defect and not
+an accessibility one. The layout check fails:
+
+```
+FAIL  [follow] the sheet fits inside the follow layer
+      [sheet overhangs by 25.36px, layer past viewport by -431.17px, map strip 64px]
+```
+
+Per device, the spill past `.stage`'s border box:
+
+| device | viewport | predicted | measured |
+|---|---|---|---|
+| iPhone SE | 375x667 | +24.0 | **+23.98** |
+| iPhone 13 mini | 375x812 | +15.3 | **+15.28** |
+| iPhone 14/15 | 390x844 | +13.4 | **+13.36** |
+| Pixel 7 | 412x915 | +9.1 | **+9.11** |
+| iPad portrait | 768x1024 | +2.6 | **+2.56** |
+
+The map strip above the sheet is **64px on every viewport**, exactly as
+predicted, because `padding-top` 12 + exit 44 + gap 8 are three fixed pixel
+values and none of them scale with the screen.
+
+**Two things the arithmetic got wrong, and one it got right for the wrong
+reason.**
+
+1. The spill past `.follow`'s *content box* at 390x844 is **25.36px**, not
+   13.36px. 13.36 is the spill past the *stage's border box*. The two differ by
+   `.follow`'s 12px `padding-bottom`, and the per-device table above is the
+   border-box number.
+2. **The sheet does reach the trip bar on a 390x844 phone.** The prediction of
+   2.6px of clearance assumed `.panel` has 16px of top padding. It does above
+   420px; at 390px `styles.css:1715` overrides it to `var(--s3)` = **12px**.
+   Measured: `.panel.top` 412.83, `.seg.top` 424.83, `.sheet.bottom` 426.19 —
+   the sheet overlaps the first segment by **1.36px**.
+3. The landscape squeeze reproduces: at 844x390 the sheet box is 154.0px against
+   170px of content, `scrollHeight > clientHeight`, so the text clips. The
+   predicted content height of 208.3px is wrong but the failure is real, and it
+   is the `min-height: 30vh` overriding `min-height: auto` that permits it.
+   iPhone SE *portrait* does **not** clip (box 200.09 against 198 of content).
+
+**The scroll jump is real and much larger than described.** Scrolling to "Start
+this route" the way a thumb must, then clicking, the document teleports:
+
+| device | scrollY before | after |
+|---|---|---|
+| iPhone 14/15 | 1338 | 0 |
+| iPhone SE | 1736 | 0 |
+| Pixel 7 | 1570 | 0 |
+
+That is `exitRef.current?.focus()` with no `preventScroll`. The further
+prediction — that the Stop button lands *under* the 56px topbar — does not
+reproduce, and it cannot: `.stage` is `order: -1`, so it is the first thing in
+the document, the scroll clamps at 0, and the button sits at y=121. The jump is
+the defect; the burial is not.
+
+**The map controls really are buried.** `document.elementFromPoint` at
+`.map__controls`' own centre returns a `<span>` from inside `.follow`.
+`.follow` is z-index 30 over `.map__controls` at 5, so the recentre and zoom
+controls sit underneath the overlay whose whole design justification is that the
+map underneath stays reachable.
+
+**A limiter finding fell out of this for free.** The first measurement pass ran
+against the real API rather than the mock, drove `rate_limited_total` from 21 to
+27 in a single run over seven viewports, and left **three of the seven with no
+routes at all**. Capacity 12, refill 1.0/min, one bucket shared with geocode.
+That is Part 2's thesis reproducing itself on the machine, unprompted.
+
+## §13.1 — Follow mode goes full-screen, and §6.7 is amended rather than broken
+
+**The decision, written down because it changes a spec.** DESIGN-HANDOFF §6.7
+says the sheet is deliberately not a modal, because the map underneath must stay
+pannable. Full-screen changes what "underneath" means, and the two available
+readings are not equivalent:
+
+- Sheet full-screen, map left behind it. A focus trap is then correct for the
+  sheet and makes the map unreachable, which reverses §6.7 outright.
+- **Map inside the full-screen layer.** The trap contains both, so the map stays
+  reachable while the rest of the app is properly out of the way.
+
+The second was taken. Mechanically it means the class goes on `.stage`, not on
+`.follow`: the stage already contains `MapView` *and* the overlay, so promoting
+the stage takes the map with it. MapLibre is never unmounted, the
+single-instance rule holds, and no route layer is rebuilt. §6.7's requirement is
+met by a different arrangement of the same parts: **underneath becomes inside.**
+
+`.stage` is not resized in any other state, so gate check 5
+(`stage.bottom <= panel.top + 2` at 390x844) still measures an ordinary load and
+still passes.
+
+Above 900px nothing changes. The stage there is a column beside a panel that
+stays legitimately usable, and trapping focus would take the rest of the app
+away for no reason. The breakpoint is one constant, `MOBILE_LAYOUT` in
+`lib/media.js`, read by both the stylesheet's media query and the JavaScript
+decision — a second literal `899` is how a layer becomes modal on one side of a
+breakpoint while the layout stays two-column on the other.
+
+### Measured after, in the same browser as before
+
+| device | map strip before | after | sheet spill before | after |
+|---|---|---|---|---|
+| iPhone SE 375x667 | 64px | **395.7px** | +23.98px | **0** |
+| iPhone 13 mini 375x812 | 64px | **540.7px** | +15.28px | **0** |
+| iPhone 14/15 390x844 | 64px | **592.2px** | +13.36px | **0** |
+| Pixel 7 412x915 | 64px | **703.0px** | +9.11px | **0** |
+| landscape 844x390 | 64px | **156.2px** | clipped its own text | **0, not clipped** |
+| iPad portrait 768x1024 | 64px | **790.2px** | +2.56px | **0** |
+
+The layer sits exactly on the viewport on every one of them
+(`fb.bottom - innerHeight` is 0.00), and the sheet is no longer clipped in
+landscape — `min-height: 0` lets flex shrink it and `overflow-y: auto` scrolls
+what does not fit, instead of an explicit `min-height` overriding
+`min-height: auto` and hiding the remainder.
+
+### A simulated walk along the route's own geometry
+
+Driven through a scripted `watchPosition` at 390x844, 61 vertices of the
+`fastest` route:
+
+```
+   0%  to-turn 0.4 mi  banner "Chatham Street"            now "Continue onto Galle Road"
+  50%  to-turn Now     banner "York Street"               now "Turn right onto Chatham Street"
+  75%  to-turn Now     banner "Main Street"               now "Keep left onto York Street"
+  90%  to-turn 0.2 mi  banner "Arrive at your destination" now "Bear right onto Main Street"
+ 100%  progress 100%
+```
+
+The banner names the turn **ahead** and the demoted line names the step you are
+inside. Before this, the step you were inside was the largest thing on the
+screen — GraphHopper names a manoeuvre at the *start* of its interval, so that
+was always the turn already taken, and `steps[stepIndex + 1]` was never rendered
+at all. `Step.sign` had been on the wire since the first day there were steps and
+`grep -rn '\.sign\b' frontend/src` returned zero lines; it is now the glyph.
+
+The camera holds **z16.89**, which is 0.400 m/px at 51.5 N — computed from a
+target metres-per-pixel rather than pinned to z17, because the same zoom is
+0.59 m/px in Colombo and this app routes in both.
+
+**Arrival, and the sentence it replaces.** Sixty metres past the final vertex the
+sheet reads "You have arrived." and `offRoute` stays false through eighteen
+seconds of holding still — comfortably past the fifteen-second sustain that used
+to turn walking to the door into "You've left the route."
+
+**The accuracy gate.** A fix reporting 2 km of accuracy, in the Gulf of Guinea,
+leaves progress untouched and raises the visible "Poor signal" strip. Before,
+`FollowMode.jsx:79` kept longitude and latitude and discarded accuracy, heading,
+speed and timestamp, so nothing could reject it.
+
+### The privacy trace
+
+Recorded with CDP `Network.enable` over a full session against the **real** API
+(not the mock): forty-one fixes along the line, a poor fix, an off-route
+excursion, arrival, and Stop.
+
+```
+Requests before follow mode opened : 70
+Requests during the follow session : 3
+   GET Fetch https://tiles.openfreemap.org/fonts/Noto%20Sans%20Italic/0-255.pbf
+   GET Fetch https://tiles.openfreemap.org/fonts/Noto%20Sans%20Regular/0-255.pbf
+   GET Fetch https://tiles.openfreemap.org/fonts/Noto%20Sans%20Bold/0-255.pbf
+Distinct coordinate needles searched: 81
+CLEAN: no request carried a live coordinate.
+```
+
+Every latitude and longitude the watch reported was searched for, at four
+decimal places (~11 m), in every request URL and body. Nothing matched, and no
+`/api` request was made at all.
+
+**The camera following the walker discloses nothing to the tile host either, and
+that was checked rather than assumed.** OpenFreeMap's vector source declares
+`maxzoom: 14`, so every zoom past 14 is served by overzooming tiles the client
+already holds — and the whole-route view had already fetched exactly those z14
+tiles. Hence three requests in the session and none of them a tile.
+
+## §13.2 — The trip bar comes out of the scrollport
+
+The ask was that the location and destination stay in front while the rest
+scrolls, and that some gaps be closed. Both halves were real, and the first one
+was worse than it looked.
+
+**Re-measured in Chromium 150 before touching anything**, because the figures in
+the brief were arithmetic on declared tokens and two passes over the same CSS
+had disagreed by 29px. Against an 808px desktop scrollport at 1200x900:
+
+| state | pinned height | share of the scrollport |
+|---|---|---|
+| closed | **133px** | 16.5% |
+| "To" open | 299px | 37.0% |
+| "To" + suggestions | 318.5px | 39.4% (up to ~559 with a full list) |
+| "From" open | 306px | 37.9% |
+| "Compare" open | 391px | 48.4% |
+| **"Time & travel" open** | **801.5px** | **99.2%** |
+
+The predicted 125px closed is 133 measured; the predicted 291px for the
+destination drawer is 299. The last row is new and is the whole argument:
+opening the drawer that holds the dial, the mode select and the units control
+pinned **99.2% of the desktop scrollport**, leaving 6.5px of scrollable results,
+and none of it could be scrolled away because a sticky element at `top: 0` is by
+definition the thing that does not move. A 668px swing in the height of an
+unscrollable region is not something to compensate for with a
+`scroll-padding-top`.
+
+At 320px the bar is **266px** closed, exactly as predicted — though it is
+`static` there, so it does not pin.
+
+**After.** `.tripbar` is a non-scrolling sibling above a new `.panel__scroll`.
+An open drawer now shortens the scrolling area instead of freezing it: with
+"Time & travel" open the bar is 426.5px and about 349px of results remain
+scrollable, against 6.5px before.
+
+Two things had to be got right on the way, and neither was in the plan.
+
+**The bar has to be bounded, or the fix trades a frozen scrollport for an
+unreachable control.** As a `flex: none` sibling its 806.5px would come out of
+the scroller first, and on any window shorter than about 810px the bar itself
+would be clipped by `.panel`'s `overflow-y: hidden` — the units control simply
+gone. So the bar is `flex: 0 1 auto` with `max-height: 55%`, the segments are
+`flex: none`, and the open drawer scrolls inside it. Below 900px `.panel` is
+content-sized, so that percentage resolves against an indefinite height and
+computes to `none`, which is right: the document scrolls there and nothing is
+frozen.
+
+**`flex-basis` on the scroller had to be 0, not `auto`.** With `auto` the
+scroller's flex base size is its entire content height, the column is
+over-subscribed by thousands of pixels, and the shrink is shared with the bar —
+measured, the bar rendered **63.05px against 138px of content**, with the
+segment labels clipped. Below 900px the same declaration is wrong the other way,
+because `.panel` there has no definite height, so the mobile override sets
+`flex: none`.
+
+**The seams.** `.panel`'s 16px flex gap and `.tripbar`'s 8px `padding-bottom`
+both sat between the bar and `#results` — 24px of dead paper — while the bar's
+background is `var(--paper)`, byte-identical to the panel's (both computed
+`rgb(246, 243, 236)`), with no `border-bottom` and no `box-shadow` in the rule
+at all. One separation now, with a 1px `var(--rule)` edge in it, exactly as
+`.topbar` has always had.
+
+**The skip link.** `grep -rn "scroll-margin\|scroll-padding" frontend/` returned
+zero matches. Measured before: pressing Tab then Enter on load put `#results` at
+**y = -0.2** on mobile with the topbar's bottom edge at 56, so the top 56px of
+the results region was behind an opaque bar. `html { scroll-padding-top:
+var(--topbar-h) }` fixes it; measured after, the same keystroke lands the region
+at 56.
+
+One correction to what was predicted: on the happy path the `<h2>` reading
+"Three ways back" sits 88px into `#results`, so **the heading itself was not
+buried** — what was buried was the top of the region, which in the `error`,
+`idle`, `locating` and `loading` states is the `StatusBanner`. And on desktop it
+never happened at all: `.panel` was its own scrollport starting below the
+topbar, so scrolling inside it could not hide anything behind the bar. The
+alternative reading in the brief is the correct one.
+
+`--topbar-h` is now a token in the theme-invariant block, read through
+`var(--safe-top)` rather than `env()` so the four-call budget stays at four.
+
+## §13.3 — The gate could grade the previous build
+
+Found while doing the above, and it is the more serious finding of the two.
+
+`gate.mjs` launches Chrome with a fixed `--user-data-dir`, so the profile
+survives between runs, and `sw.js` precaches the app shell and serves it
+**cache-first without revalidating**. A gate run therefore graded whatever build
+was current the last time that profile was used.
+
+It was observed rather than reasoned about: a run straight after the panel
+restructure reported `.panel__scroll` matching **zero elements** while `grep`
+found the class in the served bundle and `curl` confirmed the preview was
+serving the new asset hash. The manifest caught it — a selector matching nothing
+is a failure here, which is the whole design of this gate — but only by
+accident, and every check after it would have been grading the wrong build
+silently.
+
+The same trap then cost one wrong measurement in a throwaway script: a trip bar
+read as 57.72px against 138px of content, from a stale shell.
+
+The gate now unregisters every service worker and empties every cache before its
+first load. Verified the way this repo verifies things: prime the profile with a
+green build, then ship a build the gate must reject, and confirm it rejects it
+on that same profile. It does.
+
+`live-gate.mjs` gained four checks over the same structure, at 390x844 against
+the deployed build. It had no reference to `.panel`, `.tripbar` or sticky
+positioning at all — 26 checks about a deployed site, none of them about the
+shape of the thing serving them.
+
+## §13.4 — Sri Lanka whole, and a router bbox nobody had read
+
+Searching Ella returned "Meander does not cover that area yet". The cause is
+three lines: `demo_regions()` downloads the whole Sri Lanka extract and then
+cuts it to a 1x1 degree box around Colombo. Ella is at 6.87528 N, **81.03833 E**
+— its latitude is inside the box, its longitude is 0.68833 degrees, **76.1 km**,
+east of the edge at 80.35.
+
+**The router's own bbox, read before anything was touched:**
+
+```
+[-1.449894, 6.379104, 80.389202, 54.991951]
+```
+
+`Coverage.describe()` renders that as **"roughly 6°N to 55°N, 1°W to 80°E"**,
+which is the sentence in the report, character for character. The predicted
+figure was 53°N, derived from the union of the three cut boxes
+`(-0.65, 6.43, 80.35, 52.86)` — and that derivation is wrong for a findable
+reason: osmium's complete-ways extraction keeps ways that cross a cut boundary,
+so the imported extent overruns the cut. **The measured bbox is the one that
+reproduces what the user saw.**
+
+`test_coverage.py`'s `DEMO_BBOX` was `[-8.584844, 5.919332, 81.877776,
+62.007902]` under a comment claiming it was "as the real self-hosted graph
+reports". It was the **`countries`** set's union — 81.877776 is Sri Lanka's whole
+eastern extent, 62.0 is northern Britain — and it is used by eleven references
+across ten tests. Under it, Ella is *inside* the box, which is the exact
+opposite of the behaviour those tests describe. Replaced with the measured
+value; Paris stays inside on both axes, so the pre-flight test survives.
+
+### The rebuild
+
+`graphhopper/regions.custom`, all three lines, because `regions_for_set()` is a
+plain case statement and `custom` **replaces** the set rather than extending
+`demo` — a file holding only the Sri Lanka line would silently drop Greater
+London and Noord-Holland, taking out three of the five `TEST_LOCATIONS`, all
+three of `verify_selfhosted.py`'s in-graph assertions and the gate's origin.
+
+The whole extract was already on disk and verified (143.7 MB, dated 2026-08-09)
+against the 45.7 MB cut, so `download_extracts()` reused it — checked rather
+than assumed, as was its age. `build_graph()` opens with
+`rm -rf "$DATA_DIR/graph-cache"`, so the working graph was copied aside first
+and kept until the new one was serving.
+
+| | before | after |
+|---|---|---|
+| merged extract | 355.7 MB | 453.6 MB |
+| graph | 486 MB | **623 MB** |
+| import | — | **339 s** with an 8g heap |
+| serve heap | `GH_HEAP: 3g` | unchanged, and it fits |
+| `/info` bbox | `[-1.449894, 6.379104, 80.389202, 54.991951]` | `[-1.449894, 5.919332, 81.877776, 54.991951]` |
+
+623 MB against the ~700 MB projected, inside the existing `GH_HEAP: 3g` and
+`mem_limit: 5g` pins. **`countries` stays ruled out**: PROGRESS §800 records it
+as 6.6 GB of graph and §1404 puts its serve heap at 20 GB, against 11,927 MB of
+host RAM. Neither the 24g import nor the 20g serve fits, and that is arithmetic
+rather than an opinion.
+
+**The outage was 123 seconds**, from staging the graph to both containers
+healthy again. The graph is baked into the router image with no volume, so the
+recreate is the outage; the API was recreated with `--force-recreate` in the
+same command because `coverage.py` caches `/info` for an hour in a process
+global with no reset hook, and without a genuine restart Ella would have kept
+failing for up to an hour after the router was right.
+
+### Real routes, through the deployed API
+
+```
+Ella   (6.875280, 81.038330)  fastest  5892 m   97.7 min  ascent 512.8 m  start 1017 m
+                              nature   6699 m  117.0 min  ascent 571.9 m
+                              accessible blocked, 2 blockers
+Kandy  (7.290572, 80.633728)  fastest  5672 m   92.9 min  ascent 383.3 m  start  501 m
+                              nature   2460 m   43.8 min  ascent 146.6 m
+```
+
+Both score `geometry_only` rather than `clip`, correctly: the 146 pre-warmed
+CLIP segments are Colombo, London and Amsterdam, and nothing has scored the hill
+country. Colombo Fort still returns `clip`, so the change did not break scoring
+where scoring exists.
+
+`verify_selfhosted.py` passes at all three in-graph locations with three
+distinct geometries and `smoothness` present. Edinburgh is still skipped, which
+is right — it is in Scotland, and `custom` does not import Britain.
+
+Ella joins `TEST_LOCATIONS`. At **1,041 m** it is the first location in the set
+that is not at sea level, in steep terrain, which is exactly where a ~90 m SRTM
+grid is least trustworthy — every other location exercises the elevation path at
+approximately zero.
+
+## §13.5 — Route accuracy: two parameters, and one of them is a trap
+
+Both measured against the rebuilt graph, before-and-after geometry for the same
+request, twelve probes deliberately placed beside motorways, flyovers, tunnels,
+bridges and ferry landings.
+
+### `snap_prevention` is silently ignored, and the correct key is plural
+
+The first run reported no effect at all: 0 of 11 probes moved. That was not the
+answer, it was a bug in the experiment — and it is the finding.
+
+**`snap_prevention` in a POST body does nothing.** Proof, in three parts: a
+bogus value (`not_a_real_road_class`) returns HTTP 200 with a byte-identical
+route, so nothing is parsing it; the same set passed as **GET query parameters**
+changes the answer (snap 66.0 m -> 88.1 m, route 3779 m -> 3642 m); and on the
+car profile at the Amsterdam A10 the start snaps to `road_class: motorway` and
+`snap_prevention` does not move it by a metre, which is precisely the case the
+parameter exists for.
+
+The POST body spells it **`snap_preventions`**, plural. With that key the POST
+reproduces the GET result exactly.
+
+**Had this been added as written, it would have been a no-op that looked like a
+fix** — and an expensive one, because anything added to `_base_body` changes the
+signature every committed fixture is keyed on and would have required
+re-recording all ~90 in the same commit.
+
+With the correct key, on the foot profile: **1 of 11 probes moved.** Only
+Waterloo Bridge, where the start moved 29.7 m *off* the bridge. Every other
+probe was unchanged, and the reason is structural — the foot custom model
+already excludes motorway and trunk, so those two members of the set can never
+bite. Only bridge, tunnel and ferry can.
+
+**Recommendation: do not send it.** The one thing it changes on a walking app is
+to push a walker who is standing on a bridge footway 29.7 m off the bridge, and
+a footway on Waterloo Bridge is a perfectly good place to begin a walk. The
+usual set is written for car profiles. If it is ever wanted, `["ferry"]` alone
+is the defensible subset, and it costs a full fixture re-record to find out.
+
+### `way_point_max_distance` is not worth its payload
+
+| | default | `way_point_max_distance: 0` |
+|---|---|---|
+| geometry points, 11 routes | 1,236 | 1,591 (x1.29) |
+| payload | 76,581 B | 86,102 B (x1.12, +9,521 B) |
+| route length | — | **identical, 0.0 m difference on every probe** |
+| **worst deviation of the simplified line from the full one** | — | **0.49 m** |
+
+That last number is the answer. The concern was that every downstream metre in
+this app is measured off the simplified line — the barrier corridor, the
+cumulative distances, the follow-mode projection. The simplification displaces
+the line by at most **half a metre**, against a 10 m barrier corridor and a 40 m
+off-route threshold. 12% more payload on an SSE path with no outbound cap, for
+0.49 m, is not a trade worth making, and it too would cost a fixture re-record.
+
+**Contraction hierarchies stay off** (`graphhopper/config.yml:27-58`): custom
+models require flexible mode. Recorded here so the next reader does not try.
+
+**Alternative routes** remain a proposal. `algorithm: alternative_route` would
+give genuinely different corridors rather than three custom-model variations on
+one, and it interacts with the `scenic` candidate ladder that currently
+re-posts the same request at different `distance_influence` values. Not landed:
+it changes the shape of the answer rather than its accuracy, and it is another
+fixture re-record.
+
+## §13.6 — `nature` becomes `scenic`, and the codebase already agreed
+
+The ask was that the term not be confined to greenery, because a route's beauty
+can be a landmark, a beach, architecture or water. **The codebase had written
+that down already and called it a defect.** `scoring.py`'s comment block
+recorded, as one of two reasons to be sceptical of the scores:
+
+> "beautiful"/"ugly" measures **aesthetic appeal, not greenery**, and this score
+> is presented as a nature score. It correlates here, but a photogenic stone
+> street would score well without a tree in it. That is a construct mismatch,
+> not a bug.
+
+So the rename **closes** a documented construct mismatch rather than opening
+one, and that block is rewritten to say so.
+
+`ACTIVE_PROMPT_VARIANT` stays `v2_plain` — ("A photo of a beautiful place", "A
+photo of an ugly place"), no nature word in either half. The nature-worded
+variant `v3_nature` stays too, under its own key, because it is disqualified for
+inverting on the Colombo pair and the recorded table has to keep naming it.
+Changing the active variant would make all 146 committed segment scores
+invisible in one step — `scoring.py` reads with `variant=ACTIVE_PROMPT_VARIANT`
+and `cache.py` appends `AND prompt_variant = ?` — and drop every route to
+`geometry_only`, losing the 0.45-weight CLIP term.
+
+### The census, reproduced before touching anything
+
+| | measured here | in the brief |
+|---|---|---|
+| case-insensitive `nature` | 933 | 930 |
+| inside `signature` | **388** | 387 |
+| files matching `(?<![A-Za-z])nature` | **53** | 53 |
+| preceded by an underscore | **88** | 89 |
+| word-boundary matches in `fixtures/` | **0** | 0 |
+
+The underscore count is the one that matters. `\bnature` does not match
+`route_nature` or `_nature_...`, so a `\b` rename silently misses 88 sites and
+one whole test file. The rename ran on `(?<![A-Za-z])nature`, which catches
+them, and `signature` is untouched at 388 — a bare `s/nature/scenic/g` would
+have produced `sigscenic` in the fixture cache key and detonated the entire
+fixture layer.
+
+`fixtures/` needed no change and got none; `git status fixtures/` is empty.
+`naturalness` — a genuinely different, OSM-tag-derived sub-term at
+`WEIGHT_NATURALNESS = 0.20` — is intact at 24 occurrences, and `geometry.py`
+carries both names in one NamedTuple, which is why that file was read rather
+than pattern-matched.
+
+Three things the pattern would have got wrong, protected by hand:
+
+- **`v3_nature`** is a prompt-variant key naming a measured, disqualified
+  variant. Renamed by the sweep, restored afterwards.
+- **`README.md:17`**, "Time in nature is now prescribed clinically", is the
+  English word and the reason the project exists. Restored.
+- **`graphhopper/config.yml`**'s four occurrences are all comments. Checked
+  specifically, because a profile the router resolves by string would have meant
+  a graph rebuild; the profiles are `foot`, `bike` and `car`.
+
+### Old links still work
+
+`objectives` travels in the URL, so a strict rename would 422 every link anyone
+had shared. `nature` is accepted on the way in and **never emitted**, on both
+sides:
+
+- `models.py` — a `mode="before"` field validator, which is load-bearing:
+  `objectives` is typed `list[RouteId]`, a Literal that no longer contains
+  "nature", so an after-validator would never run because the request would
+  already have been rejected.
+- `permalink.js` — mapped during decode, never during encode, so a link opened
+  and re-shared quietly upgrades itself.
+
+Pinned by three tests: an old link routes and comes back as `scenic`; the old
+name appears nowhere in the response, checked against the whole serialised
+payload; and an unknown objective is still rejected, because `mode="before"`
+runs ahead of the Literal and is the one place a bad id could slip through.
+
+### The vocabulary problem underneath
+
+The real one is not `nature`, it is **`green`**: 263 occurrences outside
+`fixtures/`. Four of them reach a user, and those four changed with the term:
+three `preset_note` sentences in `routing.py` and one line of `FirstRun`. The
+internal vocabulary — `greenness()`, `SCENIC_GREENNESS_WEIGHT`,
+`test_greenness_regression.py` — is deliberately untouched: it names a
+measurable property of a route and is read by people who can see the code that
+computes it. Renaming the term and leaving the copy calling it greenery would
+have left the app describing one thing by two names, which is the defect the
+rename existed to close.
+
+Two test assertions on that copy changed with it, and say so in place.
+
+## §13.7 — A logo, and pressing it starts over
+
+There was a mark already, and nothing in the app had ever shown it: five
+generated PNGs in `frontend/public/`, drawn by `scripts/make-icons.mjs` from two
+stylesheet tokens, used as a favicon, an apple-touch-icon and three manifest
+icons and nowhere else. The topbar was the word "Meander" and a tagline.
+
+**The PNGs cannot be reused in the page, and the measurement says why.** Their
+ground is `--brand`, which against the dark topbar's `--raised` is **1.58:1** —
+the predicted figure, reproduced exactly. Drawing the path alone in
+`currentColor` inherits `.topbar__wordmark`'s `color: var(--brand)` and gives
+**10.55:1 in light and 8.45:1 in dark**, against a 3:1 threshold for a graphical
+object. No hex enters any JSX file, which matters because `check_palette.sh`
+only scans stylesheets: a hard-coded colour in a component would sail past it
+and break exactly one theme.
+
+Two artefacts, one shape. The curve moved to `src/lib/mark.js` — geometry and
+nothing else, no colours — and both renderers import it: the icon generator
+walks the polyline pixel by pixel, and the topbar emits the same points as an
+SVG path. `scripts/tokens.mjs` says in its own header that nothing under `src/`
+may import it; this import goes the other way and is safe only because there is
+no colour in the module, which a test asserts. **Verified: `npm run icons`
+regenerates all five PNGs to byte-identical sizes** (386 / 1970 / 2113 / 5916 /
+3616), so extracting the geometry changed no pixel.
+
+A button, not a link, for two reasons. The action clears state rather than
+navigating, so `role="button"` is what a screen-reader user needs to hear. And
+`gate.mjs`'s 44 x 44 sweep exempts an `<a>` that sits beside sibling text under
+the WCAG 2.5.8 in-a-sentence rule — which is exactly the shape a logo link in
+`.topbar__brand` would take, so a link would have gone unmeasured. It carries no
+`aria-expanded`: the gate clicks every element with one, once per pass, and a
+logo carrying it would reset the app mid-sweep.
+
+### The reset, verified in a real browser
+
+Loaded from a permalink at 1200x900, theme toggled away from the default first:
+
+```
+BEFORE  url /?from=51.507400,-0.127800&fromName=Test+start&min=35&obj=fastest,scenic,accessible
+        routes 2   firstRun false   map true    history.length 3
+AFTER   url /
+        routes 0   firstRun true    map false   history.length 3
+        announced "Cleared. Start a new walk."
+        theme light -> light
+```
+
+Four things that had to be true, and are. The address bar clears itself, because
+`origin` going null makes the `writeUrl` effect emit a bare path. **History does
+not grow**: `permalink.js` uses `replaceState` and never `pushState`, so a reset
+is not undoable with the back button — consistent with that module's contract
+and worth stating. Theme survives, being a persisted display preference the user
+set deliberately. And the announcement is delivered.
+
+That run also proved Part 6's deprecated alias end to end without being designed
+to: the link was requested with `obj=fastest,nature,accessible` and the app
+rewrote the address bar to `obj=fastest,scenic,accessible`. An old link is
+understood and quietly upgrades itself.
+
+**`map: false` afterwards is the reason a comment had to change.** `App.jsx`
+said the map "once created is never unmounted, which is the
+single-MapLibre-instance rule". A reset clears `origin`, `firstRun` flips back
+to true, and `MapView` is torn down. The rule it protected still holds — there
+is never more than one map — but it holds because the teardown is correct and
+creation is deferred past StrictMode's double-mount, not because the unmount
+cannot happen. A comment asserting an invariant the code no longer has is worse
+than no comment: the next reader stops checking.
+
+Three of the handler's four lines are things a reducer cannot do, and each is a
+failure someone would otherwise have to reproduce on a phone: without the abort,
+an in-flight SSE keeps dispatching into the cleared state and the rail
+repopulates a second later; without the `clearTimeout`, the 350ms debounce
+delivers the *previous* sentence to an empty screen; and `highlight` is local
+state outside the reducer, so it would survive and leave the map emphasising a
+stretch of a route that is gone.
+
+`location.reload()` is not used and a test forbids it — it re-reads the current
+URL, so a permalinked page would reload straight back into the search it was
+asked to clear.
+
+`docs/DESIGN-HANDOFF.md` §4.1 had three rows that were false or silent. The
+height row predated the safe-area work and still said `56 px`; it is
+`min-height: var(--topbar-h)` and the reason it must not be `height` is now
+written there. The wordmark row now describes the button. The profile button
+row says it is deliberately not built, which `Topbar.jsx` had explained and the
+spec had not.
+
+## §13.8 — No em dash in text a user reads
+
+The ask was to remove em dashes from the website. **"The website" is text a user
+reads in the UI**, not the 3,605 dashes in the repository: the top six files are
+all prose documentation and hold 59.7% of them between them, and comments here
+explain *why* at the point of the trade-off, in full sentences, which is the
+house voice and is staying.
+
+Measured on this tree before and after: **em 3821 -> 3765 and en 60 -> 55**, so
+**56 em dashes and 5 en dashes went**, against the 55 em + 1 en the census
+predicted for the user-visible subset. The extras are `frontend/a11y.html`'s
+`<title>`, which the census had not listed, and the glyphs inside the tests and
+comments that quoted the copy being changed.
+
+`styles.css` needed nothing: all 42 of its em dashes are inside `/* */`
+comments and none is in a declaration.
+
+### The one decision
+
+Five formatters returned a bare `—` for "value unknown", and the rule that
+enforces is load-bearing and stated at `units.js`: **an unknown distance must
+never render as `0 m`.** A route whose elevation profile is missing has not been
+measured as flat.
+
+Four of the five render into `.tabular` numeric slots — `RouteRow`'s distance
+line, three `ElevationProfile` axis labels in one row, `RouteDetail`,
+`FollowMode`, `StepList`, `ReportBarrier` — where seven glyphs where there was
+one is a horizontal-overflow risk the gate checks at 320px. Those four share one
+exported `UNKNOWN = '-'`. The fifth, `fmtPct`, is prose rather than a number in
+a column and says **"Unknown"**, which is better to hear.
+
+The accepted cost is written down beside the constant: a hyphen is thinner than
+an em dash and can read as a minus sign in a column of numbers. It is tolerable
+here because every one of those slots carries a unit beside it, so `- m` cannot
+be mistaken for a negative distance the way a bare `-` could. The gate is green
+at 320px and 390px either way.
+
+### What the census got wrong, and it matters
+
+The inventory classified four `test_accessibility.py` assertions as **soft
+couplings** that would survive the change, because they assert `"do not rely on
+it"` — a substring starting immediately after the dash. They did not survive.
+The proposed replacement was a full stop, which capitalises the next word:
+`"Most of it is unverified. Do not rely on it."` The lowercase substring stopped
+matching and three tests went red. They now compare case-insensitively, so the
+assertion pins the claim rather than the punctuation in front of it.
+
+Everything else the census predicted held: `icons.test.js` forces
+`index.html`'s `<title>` and the manifest's `name` to be byte-identical and
+would have failed on one without the other; `units.test.js`'s frozen
+`reference()` oracle carries the glyph in a branch **the loop never executes**,
+so leaving it stale would not have turned the suite red; and `sun.test.js:310`
+pins the en dash inside a regex.
+
+Three comments that quoted the old copy moved with it — `sun.js` twice on
+`"Daylight today: 16:44 – 05:08"`, and `ThemeToggle.jsx` on its own accessible
+name. This repo treats a stale comment as a defect.
+
+### The CSP hash does not move, and the worker's does
+
+`index.html` has exactly one inline `<script>`, 588 bytes, with no dash in it.
+Recomputed after the change: `sha256-rXb3GrH6fQu5rzdJqUPl87syYzPxM2UTz++hiaG3xVo=`,
+byte-identical to `public/_headers`. The service worker's `VERSION` **does**
+move, `d93c6e1650d9` -> `e4eb2f2130fe`, which is correct — it hashes contents,
+`index.html` changed, and every installed client re-fetches the shell once.
+
+### It cannot come back
+
+Two guards, one per language, and both were checked against a deliberately
+reintroduced dash before being believed.
+
+`frontend/src/lib/no-em-dash.test.js` scans 51 shipped surfaces with comments
+blanked. ⚠ Its tokeniser has to recognise **regex literals**, and that is not
+decoration: without it, `export.js`'s `.replace(/"/g, '&quot;')` opens a
+double-quoted string on the `"` inside the pattern, the scanner never closes it,
+and every block comment after that point is reported as live code. That happened,
+on four lines, before the heuristic was added.
+
+`backend/tests/test_no_em_dash.py` walks the `ast` of the nine modules that can
+put a sentence in front of a user, skipping module, class and function
+docstrings. It also asserts that the two **bracketing pairs** stayed brackets:
+`coverage.py` and `routing.py` each opened a clause with one dash and closed it
+with another, and `Coverage.describe()` returns "roughly 6°N to 55°N, 1°W to
+80°E" — a string with a comma in it — straight into the middle of one. Commas
+there would have produced a sentence with four of them and no structure.
+
+## §13.9 — Part 9: what two audit passes found
+
+Every finding was reproduced before it was fixed. Two did not reproduce as
+stated and are recorded as such rather than fixed quietly.
+
+### 9a — the serious one, reproduced exactly
+
+`enrich.py` compared `BARRIER_CORRIDOR_M` against the distance to the nearest
+**vertex** while its own docstring justifies the number as a **perpendicular**
+offset. Measured over all 86 committed GraphHopper fixtures — 11,331 segments,
+344.5 km, median segment 14.8 m, p90 69.7 m, longest 499.5 m — **56.3% of route
+length is more than 10 m from any vertex**, which is the predicted figure to the
+decimal.
+
+| | route length from which a barrier standing ON the line is accepted |
+|---|---|
+| nearest-vertex | 43.7% (150.6 km of 344.5 km) |
+| perpendicular | **100%** |
+
+Against the three committed Overpass barrier fixtures, **29 of 258** route x
+fixture pairings gain or lose a barrier. That is a barrier-set delta rather than
+a verdict delta, so the blast radius is modest and the fix is careful rather
+than urgent.
+
+The node's own lat/lon and its along-route distance now travel in the span,
+because the Finding used to take its position from the span's start vertex —
+which *was* the matched vertex under nearest-vertex matching, so the pin landed
+near the gate by accident. And `test_enrich.py`'s `_line(LONDON, 400)` put a
+vertex every **10.00 m**, the corridor width to the centimetre, so the two
+measurements agreed at every point and the bug could not be expressed. That is
+why it shipped.
+
+### 9c — withdrawn, and left alone
+
+The brief's own second pass withdrew it, and it was left alone. `sentence()`'s
+two-branch behaviour is what commit `5ce2bc0` deliberately built.
+
+### 9g — the cache-key collision, reproduced
+
+At 51.5N a 3 dp cell is 111.3 x 69.3 m with a 131.1 m diagonal, and a *pair* of
+rounded points can be displaced by up to **262.3 m**. Found by search: a
+2561.2 m straight line resolving to **foot** and a 2629.0 m one resolving to
+**bike** both produced cache key `a9fe930aacb574781b1bee7b`. One request got the
+other's travel mode. The resolved mode, `path_details()` and `fixture_mode` are
+all in the key now, and `_departure_bucket` falls back to the current hour —
+a null `depart_at` means *now*, and now was not in the key at all.
+
+### 9h — reproduced against the running API
+
+With `Origin:` set: **413 present, 422 present, 429 present**. The 500 is
+produced by `ServerErrorMiddleware`, which sits outside every user middleware,
+so it never reached CORS. Fixed by reusing the `_too_large` pattern, factored
+into one `_reflected_cors` helper both handlers share.
+
+### 9n — one item fixed by not fixing it
+
+`ACCEPTED_BARRIERS` contains `"NONE"`, which is also in `UNKNOWN_VALUES` and is
+checked first, so the membership is genuinely dead. Removing it is one line —
+and it rewrites the Overpass query from
+`^(entrance|gate|kissing_gate|no|none|stile|turnstile)$` to
+`^(entrance|gate|kissing_gate|no|stile|turnstile)$`, which **orphans all three
+committed barrier fixtures**: the offline suite's entire barrier corpus, for a
+membership that changes no answer. Verified by re-signing them against the
+current code, not assumed.
+
+Left in place with the cost written beside it. The fix is that one line plus
+re-recording three fixtures against a live Overpass, in a commit that does only
+that — and re-recording fixtures on this VM is exactly what the brief forbids,
+because `.env` points at a self-hosted router and the generator would key them
+*with* `smoothness` while the offline suite asks without it.
+
+### Everything else
+
+9b (a check reported without running), 9d (routes found then rejected, reported
+as none found), 9e (a truncated answer cached for six hours), 9f (a cache write
+destroying a computed answer, on both transports), 9i (a `done`-less stream
+displayed as a finished result, plus the unflushed tail and the unguarded JSON
+branch), 9j (fresh routes inheriting a cache stamp), 9k (a live region silent on
+a repeated sentence), 9l (exports always metric), 9m (a consent sweep that never
+ran on the first-run screen), and the 9n list: stale objectives sorting to the
+top, a silent fourth chip, `RouteDetail` keeping child state across routes,
+MapView's leaked delegated listeners, `route_heading` returning 0.0 for a loop,
+the elevation grid dropping a mean 10.33 m tail, five counters incremented and
+never published, `fixture_inventory` calling invented data measured,
+`ResponseTooLarge` caught nowhere, one dead selector and two dead class names,
+and distances under 5 m rendering as "0 m".

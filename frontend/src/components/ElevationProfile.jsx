@@ -40,7 +40,7 @@ export default function ElevationProfile({ profile, units }) {
   if (!profile?.elevations_m?.length) {
     return (
       <p className="field__hint">
-        Climb was not measured for this route — that is not the same as it being level.
+        Climb was not measured for this route. That is not the same as it being level.
       </p>
     )
   }
@@ -73,7 +73,7 @@ export default function ElevationProfile({ profile, units }) {
     `${formatElevation(profile.descent_m, units)}. Steepest gradient ` +
     `${profile.max_gradient_pct}%` +
     (hasSteep
-      ? `, which is over the ${limit}% limit this app treats as impassable — ` +
+      ? `, which is over the ${limit}% limit this app treats as impassable; ` +
         `${steep.length} stretch${steep.length === 1 ? '' : 'es'} marked.`
       : `, within the ${limit}% limit.`)
 

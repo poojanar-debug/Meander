@@ -134,11 +134,11 @@ ORIGIN = LatLon(51.5074, -0.1278)
 def test_fastest_round_trip_disables_ch_when_self_hosted(router_at) -> None:
     """The failure this prevents is subtle enough to be worth naming.
 
-    nature and accessible always carry a custom model and therefore always get
+    scenic and accessible always carry a custom model and therefore always get
     ch.disable, so they keep working either way. It is the *fastest* round trip
     that a CH-prepared server rejects with "algorithm=round_trip cannot be used
     with CH" — and a fastest failure is re-raised, so the whole request dies.
-    A test asserting "nature loops fail" would pass for entirely the wrong
+    A test asserting "scenic loops fail" would pass for entirely the wrong
     reason.
     """
     router_at(REAL_HOSTNAME_URL, "1")
@@ -162,7 +162,7 @@ def test_point_to_point_fastest_never_needs_flexible_mode(router_at) -> None:
 
 
 # ---------------------------------------------------------------------------
-# consequence 4 — how hard route_nature searches, i.e. which route you get
+# consequence 4 — how hard route_scenic searches, i.e. which route you get
 # ---------------------------------------------------------------------------
 
 
@@ -181,26 +181,26 @@ def _stub_route(preset: str, minutes: float) -> routing.RawRoute:
     ("flag", "expected_requests"),
     [
         # Unmetered: search every candidate and pick the best on merit.
-        ("1", len(routing.NATURE_LOOP_CANDIDATES)),
+        ("1", len(routing.SCENIC_LOOP_CANDIDATES)),
         # Metered: take the first acceptable one and stop.
         ("0", 1),
     ],
 )
-async def test_nature_search_depth_follows_the_flag(
+async def test_scenic_search_depth_follows_the_flag(
     router_at, monkeypatch: pytest.MonkeyPatch, flag: str, expected_requests: int
 ) -> None:
     """This flag is not merely operational — it changes which route ships."""
     router_at(REAL_HOSTNAME_URL, flag)
 
     # Greenness is stubbed rather than computed, so the test measures how hard
-    # route_nature is willing to search and nothing else. The baseline is dull
+    # route_scenic is willing to search and nothing else. The baseline is dull
     # and every candidate beats it, so each one clears both bars and the metered
     # path can legitimately stop at the first.
     from backend import geometry as geometry_mod
 
     def fake_score(points, elevations=None, details=None, clip_score=None):
         dull = len(points) == 9  # only the fastest stub is built with 9 points
-        return type("S", (), {"nature": 0.1 if dull else 0.9, "air": None})()
+        return type("S", (), {"scenic": 0.1 if dull else 0.9, "air": None})()
 
     monkeypatch.setattr(geometry_mod, "score_geometry", fake_score)
 
@@ -215,5 +215,5 @@ async def test_nature_search_depth_follows_the_flag(
     fastest = _stub_route("fastest", 40.0)
     fastest.points = [LatLon(51.5074, -0.1278 + i * 0.002) for i in range(9)]
 
-    await routing.route_nature(ORIGIN, None, 30, "foot", fastest)
+    await routing.route_scenic(ORIGIN, None, 30, "foot", fastest)
     assert len(calls) == expected_requests

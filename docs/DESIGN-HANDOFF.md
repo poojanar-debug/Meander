@@ -115,7 +115,7 @@ the 3 : 1 graphical-object threshold but not the 4.5 : 1 text threshold.
 | id | light | dark | dash | pattern name |
 |---|---|---|---|---|
 | `fastest` | `#C2703D` | `#E8A46F` | `[1,0]` | solid |
-| `nature` | `#2F7D53` | `#6FC38E` | `[3,2]` | dashed |
+| `scenic` | `#2F7D53` | `#6FC38E` | `[3,2]` | dashed |
 | `accessible` | `#5B6ECF` | `#95A4F0` | `[1,2]` | dotted |
 | `quiet` | `#8A5CB4` | `#C2A0E8` | `[6,3]` | long dash |
 | `shade` | `#1E7A78` | `#63C4BE` | `[5,2,1,2]` | dash-dot |
@@ -123,7 +123,7 @@ the 3 : 1 graphical-object threshold but not the 4.5 : 1 text threshold.
 
 All six clear 3 : 1 against `--paper` and `--raised` in both themes.
 
-**Score meters use `--accent` only.** Nature / Clean air / Shade are distinguished by their labels,
+**Score meters use `--accent` only.** Scenic / Clean air / Shade are distinguished by their labels,
 not by hue. This removes the current collision where blue means both "the Fastest route" and "the
 clean-air score".
 
@@ -219,10 +219,10 @@ lower two-thirds of the screen.
 
 | Element | Spec |
 |---|---|
-| Height | 56 px, `--raised`, 1 px `--rule` bottom border, `position:sticky; top:0; z-index:40` |
-| Wordmark | `--font-display` 1.375rem, `--brand`. Tagline "routes that are worth the walk" in `--font-body` 0.75rem `--ink-2`, hidden < 900px |
+| Height | `min-height: var(--topbar-h)` = `calc(56px + var(--safe-top))`, `--raised`, 1 px `--rule` bottom border, `position:sticky; top:0; z-index:40`. **Not `height`** — under the global `border-box`, a fixed height plus the safe-area `padding-top` eats the inset out of the content box and clips the 44px icon button, which is a 44x44 failure introduced by the fix that was meant to be safe. Pinned by `styles.safe-area.test.js`. |
+| Wordmark | `--font-display` 1.375rem, `--brand`, **and a button**: the mark and the word together are the reset control, labelled ", start a new walk" for assistive technology. A button and not a link, because the action clears state rather than navigating — and because `gate.mjs` exempts an `<a>` beside sibling text from the 44x44 sweep, so a link here would go unmeasured. The mark is inline SVG in `currentColor` (10.55:1 light, 8.45:1 dark against `--raised`), hidden below 380px; the five generated PNGs cannot be reused, their `--brand` ground being 1.58:1 against the dark bar. Tagline "routes that are worth the walk" in `--font-body` 0.75rem `--ink-2`, hidden < 900px |
 | Theme toggle | Pill button, 36 px min-height, label is the theme you will *get* ("Dark" in light mode). Persist to `localStorage['meander:theme']`; default to `prefers-color-scheme` |
-| Profile button | Icon button 44 × 44. Opens the accessibility-profile sheet (§6.5). Shows a small `--accent` dot when a profile is active |
+| Profile button | Icon button 44 × 44. Opens the accessibility-profile sheet (§6.5). Shows a small `--accent` dot when a profile is active. **Not built**, and deliberately: §6.5 is deferred, and a control that opens nothing reads as broken rather than as unbuilt. When §6.5 is promoted it belongs between the theme toggle and About. |
 | About | Icon button 44 × 44, scrolls the panel to the `<details>` and opens it |
 
 ### 4.2 `Ribbon` — demo-data warning
@@ -299,7 +299,7 @@ Replaces `RouteList` + `RouteCard`. A `<ul>` of `<li><button class="route" aria-
 Each row is **uniform height** regardless of content. Anatomy top to bottom:
 
 ```
-▌  Nature                      [Showing]        26 min
+▌  Scenic                      [Showing]        26 min
    ▬ ▬  dashed  ·  2.1 km  ·  3 rest stops
    Green  79%   Air  71%   Shade  58%
    ▬▬▬▬▬▬▬▬     ▬▬▬▬▬▬▬     ▬▬▬▬▬
@@ -558,7 +558,7 @@ Fields:
 Behaviour:
 
 - The profile applies to **every objective**, not only `accessible`. A profile that blocks steps
-  must block them on the Nature route too.
+  must block them on the Scenic route too.
 - Stored in `localStorage['meander:profile']`. The sheet carries a visible line: *"Stored on this
   device only. Never sent anywhere but the routing request itself."* plus a **Clear profile** button.
 - When a profile is active: the topbar button shows an `--accent` dot, and the results head reads

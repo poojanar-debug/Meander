@@ -5,7 +5,7 @@
 | id | label | what it optimises |
 |---|---|---|
 | `fastest` | Fastest | Shortest time. The control. |
-| `nature` | Nature | Maximum greenery, capped at 1.6× the fastest duration. |
+| `scenic` | Scenic | Maximum greenery, capped at 1.6× the fastest duration. |
 | `accessible` | Accessible | Hard accessibility constraints first, then greenery within them. May return no route at all. |
 
 One dial, 20–360 minutes. No destination means a round trip from where you started.
@@ -52,8 +52,19 @@ only thing being measured.
 **WCAG 2.1 AA, checked rather than asserted.** `frontend/scripts/gate.mjs` runs axe-core against a
 real headless Chrome in both themes and reports no wcag2a/wcag2aa violations, alongside a 44 x 44
 target sweep, a no-horizontal-scroll check at 320 px and 390 px, and an assertion that every route
-row carries its own text. 25 checks in total, and the gate refuses to run any of them if its
+row carries its own text. 39 checks in total, and the gate refuses to run any of them if its
 selector manifest does not match — the difference between grading the app and grading nothing.
+
+Ten of those are a second pass that enters follow mode and re-runs the sweep, axe and the overflow
+check there. Follow mode was the one user-facing screen with no automated coverage of any kind: the
+gate reached it through neither of its entry points, and no test in the suite renders a component.
+It had been overflowing its own container on every phone in portrait since it was written.
+
+Four more guard the panel's scroll arrangement, and the gate now clears any service worker left in
+its profile before grading. It had none, and `sw.js` serves the shell cache-first without
+revalidating, so a run could silently grade the *previous* build — observed once, on a restructure
+whose new class the manifest reported as matching zero elements while it was present in the served
+bundle.
 
 `.github/workflows/ci.yml` runs it on every push and `make check` includes it. The paragraph that
 used to sit here said axe-core was "still a devDependency and nothing runs it", which was true when
@@ -92,12 +103,12 @@ objectives, nothing cached:
 | | |
 |---|---|
 | wall clock | **14.0 s** |
-| GraphHopper requests issued | **8** — 6 nature candidates, 1 fastest, 1 accessible |
+| GraphHopper requests issued | **8** — 6 scenic candidates, 1 fastest, 1 accessible |
 | fastest | 35.9 min · 2,939 m · 64% of its length checked · 3 findings |
-| nature | 22.4 min · 1,791 m · 88% checked · greener than fastest (0.666 vs 0.646) |
+| scenic | 22.4 min · 1,791 m · 88% checked · greener than fastest (0.666 vs 0.646) |
 | accessible | **blocked** — hard constraints reject it, and it says so |
 
-That is one measurement on one machine against a warm graph, not a benchmark. The nature route
+That is one measurement on one machine against a warm graph, not a benchmark. The scenic route
 came back well under the time budget and carries a `preset_note` saying so, which is the app
 working as intended rather than a defect.
 
@@ -247,7 +258,7 @@ Everything else already works for any location with no key at all: place search
 (Nominatim), rest stops (Overpass), air quality and cloud cover (Open-Meteo),
 and sun position (computed locally).
 
-> **The free GraphHopper tier routes `fastest` only.** The nature and accessible
+> **The free GraphHopper tier routes `fastest` only.** The scenic and accessible
 > presets steer the router with a custom model, and custom models need flexible
 > mode, which free packages do not include — the API answers *"Free packages
 > cannot use flexible mode"*. Those two come back `status: "blocked"` with that
@@ -258,7 +269,7 @@ and sun position (computed locally).
 ### Self-hosting GraphHopper, so all three presets work
 
 The open-source GraphHopper server has no flexible-mode restriction, so running
-one locally is what makes `nature` and `accessible` real routes rather than
+one locally is what makes `scenic` and `accessible` real routes rather than
 blocked ones. It also exposes the `smoothness` tag, which the hosted API does
 not — that is one of the five hard accessibility constraints, and self-hosting
 is the only way it can fire from routing data.
@@ -447,7 +458,7 @@ separates the candidates, and the only non-European pair.
 
 And `v2_plain` is "a photo of a beautiful place" against "a photo of an ugly
 place", which measures **aesthetic appeal, not greenery**, while the number it
-feeds is presented as a nature score. They correlate on this sample. A
+feeds is presented as a scenic score. They correlate on this sample. A
 photogenic stone street would score well without a tree in it.
 
 The naturalness and air-blend weightings are judgements rather than

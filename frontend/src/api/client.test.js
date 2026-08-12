@@ -144,23 +144,35 @@ describe('what reaches the store', () => {
     expect(fake.buckets.has(RESULTS)).toBe(false)
   })
 
-  it('keeps nothing from a stream that never said done', async () => {
+  it('rejects, and keeps nothing, when a stream never said done', async () => {
     // A stream that stopped part-way is not an answer, and replaying one later
     // as though it were would be worse than having nothing to replay.
+    //
+    // **Changed behaviour.** The store assertion is unchanged and still the
+    // point; what is new is the rejection. This used to resolve to `null`, and
+    // `App.jsx` dispatches that as `settled`, which sets `phase: 'success'` —
+    // so with zero routes arrived the results region was empty with no banner,
+    // no error and no announcement, while the trip bar, the departure strip and
+    // About all still rendered. The page looked like it was working and simply
+    // had nothing in it. That is the client half of the failure `main.py`
+    // describes and fixed only on the server.
     await setSaveResults(true)
     const bytes = new TextEncoder().encode(
       `data: ${JSON.stringify({ type: 'route', route: ROUTE })}\n\n`,
     )
     let sent = false
-    await call({
-      ok: true,
-      headers: new Headers({ 'content-type': 'text/event-stream' }),
-      body: {
-        getReader: () => ({
-          read: async () => (sent ? { done: true } : ((sent = true), { done: false, value: bytes })),
-        }),
-      },
-    })
+    await expect(
+      call({
+        ok: true,
+        headers: new Headers({ 'content-type': 'text/event-stream' }),
+        body: {
+          getReader: () => ({
+            read: async () =>
+              sent ? { done: true } : ((sent = true), { done: false, value: bytes }),
+          }),
+        },
+      }),
+    ).rejects.toThrow(/stopped before it finished/i)
     expect(fake.buckets.get(RESULTS)?.has(ENTRY_URL) ?? false).toBe(false)
   })
 

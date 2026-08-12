@@ -81,6 +81,30 @@ REJECTED_BARRIERS = frozenset({"GATE", "STILE", "TURNSTILE", "KISSING_GATE"})
 # Barrier values that mean "there is nothing in the way here". Named rather than
 # inline in assess_barrier() so enrich.py can ask Overpass for exactly the values
 # this module has an opinion about — see BARRIER_VALUES_WITH_A_VERDICT.
+# ⚠ **"NONE" in here is dead, and removing it costs more than leaving it.**
+#
+# It is also in UNKNOWN_VALUES below, and `assess_barrier` checks that set
+# first, so a `barrier=none` tag has always assessed to UNKNOWN and this
+# membership has never once decided anything. Read literally it says "we accept
+# barrier=none as evidence that nothing is in the way", which is a claim this
+# module does not make — UNKNOWN never passes and never fails, while an accepted
+# value is evidence of clearance, and for a tag that merely records somebody
+# writing "none" the UNKNOWN reading is the honest one.
+#
+# It stays because `BARRIER_VALUES_WITH_A_VERDICT` below is derived from this
+# set and builds the Overpass query string, which is what every committed
+# Overpass fixture is keyed on. Verified rather than assumed: removing it
+# rewrites the query from
+#   ^(entrance|gate|kissing_gate|no|none|stile|turnstile)$
+# to
+#   ^(entrance|gate|kissing_gate|no|stile|turnstile)$
+# and **all three committed barrier fixtures become unreachable** — the offline
+# suite's whole barrier corpus, gone, for a membership that changes no answer.
+# The shipped query therefore still fetches `barrier=none`, which costs a few
+# nodes that assess to UNKNOWN and produce no finding.
+#
+# The fix is one line here plus re-recording those three fixtures against a live
+# Overpass, in a commit that does only that.
 ACCEPTED_BARRIERS = frozenset({"NO", "NONE", "ENTRANCE"})
 
 # Every barrier value that changes an answer. Anything outside this set assesses
@@ -171,7 +195,7 @@ class RouteAccessibility:
         if self.coverage < VERY_LOW_CONFIDENCE_THRESHOLD:
             body = (
                 f"{self._subject()} covers only {pct}% of this route. "
-                "Most of it is unverified — do not rely on it."
+                "Most of it is unverified. Do not rely on it."
             )
         elif self.coverage < LOW_CONFIDENCE_THRESHOLD:
             body = (
@@ -247,7 +271,18 @@ def _resample_elevation(
     total = float(cum[-1]) if len(cum) else 0.0
     if total < spacing_m * 2:
         return np.zeros(0), np.zeros(0)
+    # `np.arange` excludes the endpoint, so the last partial span of the route
+    # was never sampled and its climb was invisible to the gradient checks.
+    # Measured across all 86 committed fixtures with elevation: the dropped tail
+    # is **mean 10.33 m, max 19.68 m**, `distances_m` moves on all 86, and
+    # ascent is lost on 11 of them — mean 0.106 m, **max 1.398 m**. Small, real,
+    # and free.
+    #
+    # Appended rather than switched to `linspace`, which would move every
+    # interior sample and change the smoothing window's spacing along with it.
     grid = np.arange(0.0, total, spacing_m)
+    if grid.size == 0 or grid[-1] < total:
+        grid = np.append(grid, total)
     return grid, np.interp(grid, cum, np.asarray(elevations, dtype=float))
 
 
@@ -344,7 +379,21 @@ def _span_verdicts(
     findings: list[Finding] = []
     cum = cumulative_distance_m(points)
 
-    for start, end, value in spans:
+    for span in spans:
+        start, end, value = span[0], span[1], span[2]
+        # A barrier span carries the node's own coordinates as two extra
+        # members; a span from path details does not, because a surface or a
+        # smoothness value belongs to a stretch and has no point of its own.
+        #
+        # ⚠ Without this, the pin moves off the gate. The Finding used to take
+        # its position from `points[lo]`, the span's *start vertex*, and under
+        # the old nearest-vertex matching `lo` was the matched vertex — so the
+        # marker landed within 10 m of the barrier by accident. Projecting onto
+        # segments made `lo` the start of a segment that can be hundreds of
+        # metres back, which would have traded a missed barrier for a misplaced
+        # one. See `enrich.barrier_spans_on_route`.
+        node_at = span[3:5] if len(span) >= 5 else None
+        node_at_m = float(span[5]) if len(span) >= 6 else None
         lo = max(0, min(int(start), len(lengths)))
         hi = max(lo, min(int(end), len(lengths)))
         span_length = float(lengths[lo:hi].sum())
@@ -353,14 +402,20 @@ def _span_verdicts(
         verdict = check(value)
         weighted.append((span_length, verdict))
         if verdict is Verdict.FAIL:
-            at = points[min(lo, len(points) - 1)]
+            at = (
+                LatLon(float(node_at[0]), float(node_at[1]))
+                if node_at is not None
+                else points[min(lo, len(points) - 1)]
+            )
             template = _HUMAN_BLOCKER_TEXT.get(finding_type, "{value}")
             findings.append(
                 Finding(
                     type="steps" if finding_type == "steps" else finding_type,
                     lat=at.lat,
                     lon=at.lon,
-                    at_m=round(float(cum[min(lo, len(cum) - 1)])),
+                    at_m=round(
+                        node_at_m if node_at_m is not None else float(cum[min(lo, len(cum) - 1)])
+                    ),
                     description=template.format(value=str(value).lower().replace("_", " ")),
                 )
             )

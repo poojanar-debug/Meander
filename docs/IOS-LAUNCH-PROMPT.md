@@ -397,7 +397,7 @@ SITE=$(aws cloudformation describe-stacks --stack-name meander-web \
 curl -s $SITE/api/healthz
 curl -s $SITE/api/health | jq '.routing | {self_hosted, self_hosted_source, path_details}'
 curl -N -H 'Accept: text/event-stream' -H 'Content-Type: application/json' \
-  -X POST $SITE/api/routes -d '{"origin":{"lat":…,"lon":…},"minutes":35,"mode":"foot","objectives":["fastest","nature","accessible"]}'
+  -X POST $SITE/api/routes -d '{"origin":{"lat":…,"lon":…},"minutes":35,"mode":"foot","objectives":["fastest","scenic","accessible"]}'
 ```
 
 The streaming check is the one that matters. **If `curl -N` returns one buffered blob at the end

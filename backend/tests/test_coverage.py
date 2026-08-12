@@ -18,8 +18,28 @@ from backend import main as main_mod
 from backend.models import Point, RouteRequest
 from backend.routing import OutsideCoverage
 
-# Sri Lanka + Britain + the Netherlands, as the real self-hosted graph reports.
-DEMO_BBOX = [-8.584844, 5.919332, 81.877776, 62.007902]
+# The `demo` region set, as the real self-hosted graph reports it. Read off the
+# running router rather than derived:
+#
+#   docker compose ... exec api python -c \
+#     "import httpx,json;print(json.dumps(httpx.get('http://graphhopper:8989/info').json()['bbox']))"
+#   [-1.449894, 6.379104, 80.389202, 54.991951]
+#
+# **The previous value was the `countries` set's union, under a comment claiming
+# it was this one.** 81.877776 is Sri Lanka's whole eastern extent and 62.007902
+# is northern Britain; `demo` cuts Sri Lanka to a 1x1 degree box around Colombo
+# and never imports Scotland at all. Eleven references across ten tests were
+# asserting against a graph this deployment has never built — and under it Ella
+# (6.875 N, 81.038 E) is *inside* the box, which is the exact opposite of the
+# behaviour those tests exist to describe.
+#
+# Note this is wider than the three cut boxes themselves, whose union is
+# (-0.65, 6.43, 80.35, 52.86): osmium's complete-ways extraction keeps ways that
+# cross a boundary, so the imported extent overruns the cut. That is why
+# `describe()` renders "6°N to 55°N" here and "6°N to 53°N" from the cut union —
+# and 55 is what the screenshot shows, so this constant is the one that
+# reproduces what a user actually saw.
+DEMO_BBOX = [-1.449894, 6.379104, 80.389202, 54.991951]
 
 
 async def _no_extent(*a, **k):
@@ -236,16 +256,8 @@ async def test_an_unsnappable_point_on_a_finite_graph_does_not_say_move_a_little
     assert "Nothing you did caused this" in said
 
 
-@pytest.mark.asyncio
-async def test_it_does_not_claim_to_know_which_of_the_two_causes_it_is(
-    graph_says, tmp_cache_db, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """Two things produce "Cannot find point" on a finite graph — an area never
-    imported, and an unroutable spot inside one that was — and /info reports
-    only the union, so the API cannot tell them apart. Naming one would be a
-    guess presented as a measurement."""
-    graph_says(DEMO_BBOX)
-
+async def _cannot_find_point_message(monkeypatch, lat: float, lon: float) -> str:
+    """The sentence produced when the router says "Cannot find point"."""
     from backend import routing
 
     async def cannot_find_point(*a, **k):
@@ -253,16 +265,95 @@ async def test_it_does_not_claim_to_know_which_of_the_two_causes_it_is(
 
     monkeypatch.setattr(routing, "_post_route", cannot_find_point)
 
-    req = RouteRequest(origin=Point(lat=48.8566, lon=2.3522), minutes=30)
+    req = RouteRequest(origin=Point(lat=lat, lon=lon), minutes=30)
     with pytest.raises(OutsideCoverage) as caught:
         async for _ in main_mod.route_events(req):
             pass
+    return caught.value.human_message
 
-    said = caught.value.human_message
+
+@pytest.mark.asyncio
+async def test_it_hedges_when_nothing_recorded_the_per_region_boxes(
+    graph_says, tmp_cache_db, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """**Changed behaviour, and this is the half that did not change.**
+
+    Two things produce "Cannot find point" on a finite graph — an area never
+    imported, and an unroutable spot inside one that was — and /info reports
+    only the union of the regions, so with nothing else to go on the API cannot
+    tell them apart. Naming one would be a guess presented as a measurement.
+
+    This test used to be the whole story. It is now the fallback: a graph built
+    before `scripts/graphhopper.sh` wrote a region manifest, or one built by
+    hand, has no boxes to consult and must still hedge rather than guess.
+    """
+    graph_says(DEMO_BBOX)
+    monkeypatch.setattr(coverage, "region_boxes", lambda: None)
+    coverage.reset_region_cache()
+
+    said = await _cannot_find_point_message(monkeypatch, 48.8566, 2.3522)
     assert "either" in said and " or " in said
     # The certain wording belongs to the pre-flight path, where the answer
     # really is certain. Borrowing it here would overstate what is known.
     assert "does not cover that area yet" not in said
+
+
+@pytest.mark.asyncio
+async def test_the_region_manifest_turns_the_hedge_into_an_answer(
+    graph_says, tmp_cache_db, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """**New behaviour.** With per-region boxes, both causes get named exactly.
+
+    Paris is inside the union rectangle and inside none of the boxes, which is
+    the case the hedge existed for: it reaches the router, comes back "Cannot
+    find point", and used to be told "either this area is not included yet, or
+    there is no path close enough". It can now be told which.
+
+    Hyde Park is the mirror. It is inside an imported box, so a failure there
+    really is a spot the router could not snap to, and "try moving the start a
+    little" — the sentence coverage.py exists to prevent everywhere else — is
+    the correct advice.
+    """
+    graph_says(DEMO_BBOX)
+    boxes = (
+        coverage.Coverage(79.16416, 5.621275, 82.64612, 10.07153),  # Sri Lanka
+        coverage.Coverage(-0.65, 51.02, 0.36, 52.03),  # Greater London
+        coverage.Coverage(4.36, 51.86, 5.37, 52.86),  # Noord-Holland
+    )
+    monkeypatch.setattr(coverage, "region_boxes", lambda: boxes)
+
+    paris = await _cannot_find_point_message(monkeypatch, 48.8566, 2.3522)
+    assert "not one of the parts" in paris
+    assert "either" not in paris
+
+    hyde_park = await _cannot_find_point_message(monkeypatch, 51.507489, -0.162207)
+    assert "on the map" in hyde_park
+    assert "moving the start a little" in hyde_park
+
+
+def test_the_committed_manifest_matches_the_region_set_that_was_built() -> None:
+    """The manifest is a build artefact, and a stale one is worse than none.
+
+    It is committed because the graph lives on the router's disk in a different
+    container, so this file is the only thing that crosses. That makes it
+    possible for it to describe a region set nobody built — which would make the
+    definite answers above confidently wrong.
+    """
+    coverage.reset_region_cache()
+    boxes = coverage.region_boxes()
+    assert boxes is not None, "graphhopper/regions.manifest.json is missing"
+    assert len(boxes) == 3
+
+    # Ella is the location this whole region change was made for.
+    assert coverage.inside_an_imported_region(6.87528, 81.03833) is True
+    # Kandy, Galle and Jaffna came with it.
+    assert coverage.inside_an_imported_region(7.290572, 80.633728) is True
+    # And the two European boxes are still there, which `custom` replacing
+    # `demo` rather than extending it makes a real risk.
+    assert coverage.inside_an_imported_region(51.507489, -0.162207) is True
+    assert coverage.inside_an_imported_region(52.357197, 4.864119) is True
+    # Paris is in the rectangle and in none of the boxes.
+    assert coverage.inside_an_imported_region(48.8566, 2.3522) is False
 
 
 @pytest.mark.asyncio

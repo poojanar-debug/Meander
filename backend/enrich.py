@@ -31,6 +31,7 @@ from .geometry import (
     EARTH_RADIUS_M,
     LatLon,
     bearing_deg,
+    closes_loop,
     cumulative_distance_m,
     sample_every,
 )
@@ -174,10 +175,28 @@ def shade_need(sun: SunPosition) -> float:
     return max(0.0, math.sin(math.radians(sun.elevation_deg)))
 
 
-def route_heading(points: Sequence[LatLon]) -> float:
-    """Overall heading, start to end. Zero for a loop, which has no net heading."""
+def route_heading(points: Sequence[LatLon]) -> float | None:
+    """Overall heading, start to end, or ``None`` when there is not one.
+
+    ⚠ **A loop has no net heading, and 0.0 is not a way of saying that.** This
+    returned 0.0 for a round trip and `golden_hour` consumed it as a bearing of
+    **due north** — so on this app's *default* trip shape the 0.20-weight light
+    term was scoring a departure by whether the sun would be northerly.
+
+    Severity is lower than it sounds, and measuring it is what says so:
+    `golden_hour` only fires for 0 < elevation < 15 degrees, and at those
+    elevations the sun is never due north at any latitude this app covers.
+    Measured over a year of 15-minute samples with `heading = 0.0`, the light
+    term peaks at 0.616 at Hyde Park, 0.642 at Vondelpark and 0.401 at Colombo
+    Fort — a systematic bias in the departure ranking rather than a wild one.
+
+    None rather than 0.0 so the caller renormalises the weights instead of
+    scoring a direction nobody is travelling in.
+    """
     if len(points) < 2:
-        return 0.0
+        return None
+    if closes_loop(points):
+        return None
     return bearing_deg(points[0], points[-1])
 
 
@@ -523,8 +542,8 @@ async def fetch_barrier_nodes(points: Sequence[LatLon]) -> OverpassNodes | None:
 
 def barrier_spans_on_route(
     points: Sequence[LatLon], elements: list[dict[str, Any]]
-) -> list[tuple[int, int, str]]:
-    """Barrier nodes projected onto ``(start, end, value)`` spans of this route.
+) -> list[tuple[int, int, str, float, float]]:
+    """Barrier nodes projected onto ``(start, end, value, lat, lon)`` spans.
 
     ## How a point becomes a span
 
@@ -533,13 +552,47 @@ def barrier_spans_on_route(
     to be stated rather than assumed, because every way of getting it wrong is a
     false claim about whether someone can get through.
 
-    **A barrier blocks the single segment it sits on.** The node is matched to
-    its nearest vertex `i`, and the span is `(i, i + 1)`: one segment, the one
-    the walker is on when they reach it. It is not widened to the surrounding
-    vertices, not to the step, and not to a radius. Widening would report a gate
-    as blocking stretches of path that are demonstrably clear, and — because a
-    FAIL anywhere blocks the whole route — would turn one mis-projected node
-    into a refusal to offer the route at all.
+    **A barrier blocks the single segment it sits on.** The node is projected
+    perpendicularly onto every segment, the nearest segment `i` wins, and the
+    span is `(i, i + 1)`: one segment, the one the walker is on when they reach
+    it. It is not widened to the surrounding vertices, not to the step, and not
+    to a radius. Widening would report a gate as blocking stretches of path that
+    are demonstrably clear, and — because a FAIL anywhere blocks the whole route
+    — would turn one mis-projected node into a refusal to offer the route at all.
+
+    ## Perpendicular to the line, not to the nearest vertex
+
+    This used to take the distance to the nearest **vertex** and compare *that*
+    to ``BARRIER_CORRIDOR_M``, while the docstring below justifies the number as
+    a perpendicular offset — "10 m is the width of a road". Those are different
+    measurements, and the gap between them is not small. For a point lying
+    exactly on the line, distance-to-nearest-vertex is ``min(d, s - d)`` along
+    its segment, which is large in the middle of a long one.
+
+    **Measured over all 86 committed GraphHopper fixtures — 11,331 segments,
+    344.5 km, median segment 14.8 m, p90 69.7 m, longest 499.5 m — 56.3% of
+    route length is more than 10 m from any vertex.** A gate sitting precisely
+    on the route in that 56% was silently dropped, while ``barriers_checked``
+    stayed True and the sentence widened to "Accessibility data covers 100% of
+    this route": a missing datum producing a confident answer, which is this
+    project's founding promise inverted.
+
+    Two honest qualifications. That 56.3% is a property of the geometry, not a
+    rate of real misses — matched against the three committed Overpass barrier
+    fixtures, only 1 of 33 pairings changes a route's verdict. And it shipped
+    for a findable reason: the synthetic test geometry was spaced at *exactly*
+    the corridor width, so the vertex test and the perpendicular test agreed on
+    it and could never disagree. That helper is fixed alongside this.
+
+    ## Why the node's own coordinates travel with the span
+
+    ``_span_verdicts`` places the Finding at ``points[lo]`` — the span's start
+    vertex — because that is all it used to be given. Under the old
+    nearest-vertex match, ``lo`` *was* the matched vertex, so the map pin landed
+    within 10 m of the gate by accident. Under a projection it is the start of a
+    segment that may be hundreds of metres back, and the pin would move off the
+    gate. Trading a missed barrier for a misplaced one is not a fix, so the
+    node's lat/lon are carried through and the Finding uses them.
 
     ## The corridor
 
@@ -573,39 +626,86 @@ def barrier_spans_on_route(
     if not candidates:
         return []
 
-    # Same broadcast haversine as rest_stops_on_route, for the same reason: a
-    # Python loop over every node times every vertex, per route, on the event
-    # loop is the one thing this must not be.
-    node_lat = np.radians(np.fromiter((n.lat for n, _ in candidates), float, len(candidates)))
-    node_lon = np.radians(np.fromiter((n.lon for n, _ in candidates), float, len(candidates)))
-    pt_lat = np.radians(np.fromiter((p.lat for p in points), float, len(points)))
-    pt_lon = np.radians(np.fromiter((p.lon for p in points), float, len(points)))
+    # Broadcast over (nodes x segments), for the same reason the haversine it
+    # replaces was broadcast: a Python loop over every node times every segment,
+    # per route, on the event loop is the one thing this must not be.
+    #
+    # A local equirectangular projection about the route's mean latitude, rather
+    # than a spherical formula, because perpendicular distance to a segment has
+    # no closed form on a sphere. Over the few hundred metres a segment spans it
+    # is indistinguishable from the spherical answer, and `lib/follow.js` does
+    # the same thing on the client for the same reason.
+    pt_lat = np.fromiter((p.lat for p in points), float, len(points))
+    pt_lon = np.fromiter((p.lon for p in points), float, len(points))
+    lat0 = float(pt_lat.mean())
+    kx = math.cos(math.radians(lat0)) * math.pi / 180.0 * EARTH_RADIUS_M
+    ky = math.pi / 180.0 * EARTH_RADIUS_M
 
-    dlat = pt_lat[None, :] - node_lat[:, None]
-    dlon = pt_lon[None, :] - node_lon[:, None]
-    h = (
-        np.sin(dlat / 2.0) ** 2
-        + np.cos(node_lat)[:, None] * np.cos(pt_lat)[None, :] * np.sin(dlon / 2.0) ** 2
-    )
-    distances = 2.0 * EARTH_RADIUS_M * np.arcsin(np.sqrt(np.minimum(1.0, h)))
+    px = pt_lon * kx
+    py = pt_lat * ky
+    ax, ay = px[:-1], py[:-1]
+    bx, by = px[1:], py[1:]
+    abx, aby = bx - ax, by - ay
+    seg_len_sq = abx * abx + aby * aby
 
-    nearest = distances.argmin(axis=1)
-    nearest_m = distances[np.arange(len(candidates)), nearest]
+    node_x = np.fromiter((n.lon for n, _ in candidates), float, len(candidates)) * kx
+    node_y = np.fromiter((n.lat for n, _ in candidates), float, len(candidates)) * ky
 
-    # Deduplicated: two gates a few metres apart match the same vertex, and the
-    # Finding built from a span takes its position from that vertex — so the
-    # route would carry two identical blockers at one point. Measured on the
-    # Hyde Park accessible route, which matched (18, 19, "gate") twice.
-    # Collapsing them loses nothing: one gate on a segment already blocks it.
-    seen: set[tuple[int, int, str]] = set()
-    last_segment = len(points) - 2
-    for i, (_, value) in enumerate(candidates):
+    # t is where along each segment the foot of the perpendicular falls, clamped
+    # to [0, 1] so a node level with the segment but past its end measures to the
+    # endpoint rather than to an imaginary extension of the line.
+    dx = node_x[:, None] - ax[None, :]
+    dy = node_y[:, None] - ay[None, :]
+    with np.errstate(invalid="ignore", divide="ignore"):
+        t = (dx * abx[None, :] + dy * aby[None, :]) / seg_len_sq[None, :]
+    # A duplicated vertex is a zero-length segment and would divide by zero.
+    t = np.where(seg_len_sq[None, :] > 0, np.clip(t, 0.0, 1.0), 0.0)
+    offx = dx - t * abx[None, :]
+    offy = dy - t * aby[None, :]
+    distances = np.hypot(offx, offy)
+
+    # Ties go to the LATER segment, which is what `argmin` does not do — it
+    # returns the first minimum. A node sitting exactly on vertex `i` is zero
+    # from both the segment arriving at it and the segment leaving it, and the
+    # nearest-vertex code this replaces resolved that to `(i, i + 1)`. Keeping
+    # that convention means the span indices are unchanged for every barrier the
+    # old code already found, so this change adds barriers rather than moving
+    # the ones that were working.
+    nearest = distances.shape[1] - 1 - distances[:, ::-1].argmin(axis=1)
+    rows = np.arange(len(candidates))
+    nearest_m = distances[rows, nearest]
+
+    # Where along the route the foot of the perpendicular falls. Computed here,
+    # where the projection already exists, rather than reconstructed downstream
+    # from a vertex index: `at_m` used to be `cum[lo]`, the span's *start
+    # vertex*, which is up to a whole segment short of the barrier. The longest
+    # segment in the committed fixtures is 499.5 m.
+    seg_len = np.hypot(abx, aby)
+    seg_cum = np.concatenate(([0.0], np.cumsum(seg_len)))
+    along_m = seg_cum[nearest] + t[rows, nearest] * seg_len[nearest]
+
+    # Deduplicated: two gates a few metres apart match the same segment, and one
+    # gate on a segment already blocks it. Measured on the Hyde Park accessible
+    # route, which matched (18, 19, "gate") twice.
+    #
+    # The node's own position is part of the key, so two genuinely different
+    # gates on one segment stay two findings with two pins, while one gate
+    # reported twice collapses. Rounded to 7 decimal places — about 11 mm, finer
+    # than any barrier is surveyed — so float noise cannot split a duplicate.
+    seen: set[tuple[int, int, str, float, float, float]] = set()
+    last_segment = max(0, len(points) - 2)
+    for i, (node, value) in enumerate(candidates):
         if nearest_m[i] > BARRIER_CORRIDOR_M:
             continue
-        # The last vertex has no segment after it; a barrier at the very end of
-        # the route sits on the segment that arrives there.
         start = min(int(nearest[i]), last_segment)
-        seen.add((start, start + 1, value))
+        seen.add((
+            start,
+            start + 1,
+            value,
+            round(node.lat, 7),
+            round(node.lon, 7),
+            round(float(along_m[i]), 1),
+        ))
 
     return sorted(seen)
 
@@ -739,10 +839,21 @@ async def best_departure(
         # Under a clear high sun, wanting shade counts against the slot; when it
         # is overcast or the sun is low, it does not matter.
         exposure = shade_need(sun) * (1.0 - (cloud if cloud is not None else 0.5))
-        light = golden_hour(sun, heading)
         air_score = air.score if air else 0.5
 
-        score = 0.45 * air_score + 0.35 * (1.0 - exposure) + 0.20 * light
+        # Renormalised rather than scored as zero. A loop has no net heading, so
+        # `route_heading` returns None and the 0.20 light weight is redistributed
+        # across the two terms that *are* measurable — air and exposure — in
+        # their existing proportions. Scoring the light term as 0 instead would
+        # push every loop's total down uniformly, which changes nothing in the
+        # ranking but makes the number mean less; scoring it against a heading of
+        # due north, which is what 0.0 used to do, changed the ranking itself.
+        if heading is None:
+            score = (0.45 * air_score + 0.35 * (1.0 - exposure)) / 0.80
+            light = 0.0
+        else:
+            light = golden_hour(sun, heading)
+            score = 0.45 * air_score + 0.35 * (1.0 - exposure) + 0.20 * light
         if sun.elevation_deg < -6:
             # After civil twilight nothing is scenic and much is unsafe.
             score *= 0.35

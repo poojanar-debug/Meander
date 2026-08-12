@@ -40,11 +40,25 @@ COPY --from=build /opt/venv /opt/venv
 
 WORKDIR /app
 
-# backend/ and data/cache.db and nothing else. .dockerignore is what keeps
-# fixtures/, frontend/, graphhopper/, tests and .venv out; this COPY list is the
-# second half of the same rule.
+# backend/, data/cache.db and one JSON file, and nothing else. .dockerignore is
+# what keeps fixtures/, frontend/, graphhopper/, tests and .venv out; this COPY
+# list is the second half of the same rule.
 COPY --chown=meander:meander backend/ /app/backend/
 COPY --chown=meander:meander data/cache.db /app/data/cache.db
+
+# The per-region boxes, so the API can tell "never imported" from "no path near
+# that exact spot". GraphHopper's /info reports only the union of everything
+# imported, and for a set spanning Sri Lanka to Britain that rectangle contains
+# Paris, Berlin and most of Europe. The graph itself lives on the router's disk
+# in a different container, so this one small file is the only thing that
+# crosses. Written by `scripts/graphhopper.sh setup` and committed; a build
+# whose graph predates it simply has no file, and `backend/coverage.py`
+# degrades to the hedged wording rather than to a guess.
+#
+# ⚠ `graphhopper/` is excluded wholesale by .dockerignore, so this needs its own
+# un-ignore line there. A COPY of an ignored path fails the build outright,
+# which is the right way for that mistake to surface.
+COPY --chown=meander:meander graphhopper/regions.manifest.json /app/graphhopper/regions.manifest.json
 
 # ⚠ data/cache.db is tracked and holds pre-warmed CLIP segment scores, which is
 # why it is here. It ALSO holds route_cache, whose rows are whole /api/routes

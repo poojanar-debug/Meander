@@ -1,8 +1,79 @@
 import { useEffect, useId, useRef, useState } from 'react'
 
 import { geocode } from '../api/client.js'
+import { GEOLOCATED } from '../lib/permalink.js'
 
-const DEBOUNCE_MS = 300
+/**
+ * How long after the last keystroke the search fires.
+ *
+ * **300 ms sat exactly on the median inter-keystroke interval of a 40 wpm
+ * typist** — 200 characters a minute is 300 ms a character — which made the
+ * cost of a name knife-edge bimodal. At a constant 299 ms gap a 20-character
+ * name costs 1 request; at 301 ms it costs 19. Simulated with lognormal gaps
+ * (200,000 trials, sigma 0.40, 20 characters): 60 wpm costs a mean of 3.8
+ * requests, **40 wpm costs 8.6**, and a slower typist at a 400 ms median costs
+ * 14.8.
+ *
+ * The failure that produced: two place names came to 17.1 requests against a
+ * per-IP bucket of 12 that /api/routes shared, so **the bucket was empty before
+ * the first route request was made** and that request was refused too, showing
+ * routing copy under the place box. Continuous typing hit the first 429 at a
+ * median of 32 characters.
+ *
+ * 500 ms is well clear of a 40 wpm typist's gaps, which is what moves it off
+ * the knife edge: the same 20-character name drops from a mean of 8.6 requests
+ * to 2.8, about 67% fewer. Not 600: the last keystroke's request always fires
+ * at exactly +DEBOUNCE_MS, so the entire visible cost of this change is 200 ms
+ * more before suggestions appear after someone stops typing.
+ */
+const DEBOUNCE_MS = 500
+
+/**
+ * Queries already answered, so backspacing costs nothing.
+ *
+ * Module-level rather than per-component on purpose: there are three of these
+ * inputs (origin and destination in TripBar, and the one in FirstRun) and they
+ * search the same world. Deleting three characters and typing them back is the
+ * case this actually serves — the server-side cache exists for the same reason,
+ * and neither is really a normalisation win: case-folding the 12-query burst
+ * recorded in `fixtures/nominatim/` still gives 12 distinct keys.
+ *
+ * Small and short-lived because it is a keystroke cache, not a store. Fifty
+ * entries is far more than one session's typing, and five minutes is long
+ * enough to cover editing a trip and short enough that a place renamed in OSM
+ * is not remembered wrongly for the rest of the day.
+ */
+const LRU_MAX = 50
+const LRU_TTL_MS = 5 * 60 * 1000
+const lru = new Map()
+
+const cacheKey = (q) => q.replace(/\s+/g, ' ').trim().toLowerCase()
+
+function lruGet(key) {
+  const hit = lru.get(key)
+  if (!hit) return null
+  if (Date.now() - hit.at > LRU_TTL_MS) {
+    lru.delete(key)
+    return null
+  }
+  // Re-inserted so it becomes the most recent. A Map iterates in insertion
+  // order, which is what makes the eviction below least-recently-used rather
+  // than least-recently-written.
+  lru.delete(key)
+  lru.set(key, hit)
+  return hit.results
+}
+
+function lruPut(key, results) {
+  lru.delete(key)
+  lru.set(key, { results, at: Date.now() })
+  while (lru.size > LRU_MAX) lru.delete(lru.keys().next().value)
+}
+
+/** Exported for the test suite only; nothing in the app calls it. */
+export function __resetPlaceCache() {
+  lru.clear()
+}
 
 /**
  * Debounced place search with a proper combobox.
@@ -25,22 +96,47 @@ export default function PlaceInput({ label, placeholder, value, onPick, onClear 
   const [searching, setSearching] = useState(false)
 
   const abortRef = useRef(null)
-  const skipNextSearch = useRef(false)
+  // Seeded from the incoming value, so a field that arrives already filled does
+  // not search for what it is already showing. It used to: the effect ran on
+  // mount against `value.name`, so pressing "Use my location" issued
+  // `GET /api/geocode?q=Your%20location` — a request for a sentinel string that
+  // names no place, spending a token from the bucket the type-ahead needs, on
+  // the one path where the user has told us the coordinates outright.
+  const skipNextSearch = useRef(Boolean(value?.name))
 
   useEffect(() => {
     setQuery(value?.name ?? '')
   }, [value])
+
+  // The effect keys on the trimmed value, not the raw one. Typing the space in
+  // a two-word name used to re-arm the timer for a byte-identical query and
+  // cost a duplicate request — the effect depended on `query` while the search
+  // used `query.trim()`, so "St " and "St" were different dependencies and the
+  // same search.
+  const trimmed = query.trim()
 
   useEffect(() => {
     if (skipNextSearch.current) {
       skipNextSearch.current = false
       return undefined
     }
-    const trimmed = query.trim()
     if (trimmed.length < 2) {
       setResults([])
       setOpen(false)
       setError(null)
+      return undefined
+    }
+    // Never the sentinel. GEOLOCATED is the name given to a position the
+    // browser reported, so it is the one query guaranteed to match nothing.
+    if (trimmed === GEOLOCATED) return undefined
+
+    const key = cacheKey(trimmed)
+    const remembered = lruGet(key)
+    if (remembered) {
+      setResults(remembered)
+      setOpen(remembered.length > 0)
+      setActive(-1)
+      setError(remembered.length === 0 ? 'No places found for that search.' : null)
       return undefined
     }
 
@@ -48,9 +144,14 @@ export default function PlaceInput({ label, placeholder, value, onPick, onClear 
       abortRef.current?.abort()
       const controller = new AbortController()
       abortRef.current = controller
+      // Set before the await and cleared in `finally`, and the hint below is no
+      // longer gated on `!open`: nothing ever set `open` back to false between
+      // queries, so after the first successful search the "Searching…" hint
+      // could never appear again for the rest of the session.
       setSearching(true)
       try {
         const found = await geocode(trimmed, { signal: controller.signal })
+        lruPut(key, found)
         setResults(found)
         setOpen(found.length > 0)
         setActive(-1)
@@ -67,7 +168,7 @@ export default function PlaceInput({ label, placeholder, value, onPick, onClear 
     }, DEBOUNCE_MS)
 
     return () => clearTimeout(timer)
-  }, [query])
+  }, [trimmed])
 
   useEffect(() => () => abortRef.current?.abort(), [])
 
@@ -147,9 +248,7 @@ export default function PlaceInput({ label, placeholder, value, onPick, onClear 
               ))}
             </ul>
           )}
-          {!open && !error && searching && (
-            <p className="field__hint">Searching…</p>
-          )}
+          {!error && searching && <p className="field__hint">Searching…</p>}
           {error && (
             <p className="field__error" id={errorId} role="alert">
               {error}

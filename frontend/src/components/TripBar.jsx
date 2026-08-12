@@ -184,7 +184,7 @@ export default function TripBar({
           onClear={() => onDest(null)}
         />
         <p className="field__hint">
-          Empty means a round trip — Meander brings you back to where you started.
+          Empty means a round trip: Meander brings you back to where you started.
         </p>
       </TripDrawer>
 

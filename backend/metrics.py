@@ -51,19 +51,54 @@ class Metrics:
             self._roll_day_locked()
             self._sessions_today.add(digest)
 
+    # Every counter that exists, named here so a new one appears without anyone
+    # having to remember this list. They start at zero rather than being absent,
+    # so a dashboard reading the endpoint sees a series from the first scrape
+    # instead of a key that materialises on the first failure.
+    KNOWN_COUNTERS = (
+        "route_requests_total",
+        "routes_blocked_total",
+        "cache_hits_total",
+        "cache_misses_total",
+        "segments_scored_total",
+        "rate_limited_total",
+        "upstream_failures_total",
+        "narration_failures_total",
+        "enrichment_failures_total",
+        "unhandled_errors_total",
+        "stream_failures_total",
+        "request_deadline_exceeded_total",
+        "overpass_truncated_total",
+        "client_disconnects_total",
+    )
+
     def snapshot(self) -> dict[str, Any]:
+        """Every counter, not an eleven-name allowlist.
+
+        ⚠ **Five counters were incremented and never read.** `snapshot()`
+        hard-coded eleven names while `incr()` accepted any, so
+        `unhandled_errors_total`, `stream_failures_total`,
+        `request_deadline_exceeded_total`, `overpass_truncated_total` and
+        `client_disconnects_total` were maintained perfectly and published
+        nowhere.
+
+        `overpass_truncated_total` is the one that matters most: it is the
+        **only** signal that the 6,000-element cap was reached, which means a
+        barrier survey with holes in it was presented as a complete look. The
+        code that raised that cap from 200 explains exactly why that is
+        dangerous, and then left the alarm unwired.
+
+        Unknown names are included too. A counter that exists is a counter
+        somebody wanted; silently dropping it is how these five were lost.
+        """
         with self._lock:
             self._roll_day_locked()
+            counters = {name: self._counters[name] for name in self.KNOWN_COUNTERS}
+            counters.update(
+                {k: v for k, v in self._counters.items() if k not in counters}
+            )
             return {
-                "route_requests_total": self._counters["route_requests_total"],
-                "routes_blocked_total": self._counters["routes_blocked_total"],
-                "cache_hits_total": self._counters["cache_hits_total"],
-                "cache_misses_total": self._counters["cache_misses_total"],
-                "segments_scored_total": self._counters["segments_scored_total"],
-                "rate_limited_total": self._counters["rate_limited_total"],
-                "upstream_failures_total": self._counters["upstream_failures_total"],
-                "narration_failures_total": self._counters["narration_failures_total"],
-                "enrichment_failures_total": self._counters["enrichment_failures_total"],
+                **counters,
                 "unique_sessions_today": len(self._sessions_today),
                 "uptime_s": int(
                     (datetime.now(UTC) - self._started_at).total_seconds()

@@ -12,9 +12,24 @@ import { fmtDist } from '../lib/format.js'
  * Nothing is invented. Every word except the connective comes from the router;
  * where it gives no street name, the sentence simply does not name one.
  */
+/**
+ * Below this, a distance is not worth saying and cannot be said honestly.
+ *
+ * `formatDistance` rounds to the nearest 10 m below 1 km, so anything under 5 m
+ * renders as **"0 m"** — and under 1.524 m as "0 ft" — producing "follow it for
+ * 0 m" in the step list. The threshold was 1 m, which let 1 to 4 m through into
+ * exactly that sentence.
+ *
+ * Fixed at the call site rather than in `formatDistance`, which `units.test.js`
+ * pins byte-for-byte over every integer metre from 0 to 200,000 and which is
+ * right to keep saying 0 for a number that rounds to 0. What is wrong is asking
+ * it about a distance nobody needs to be told.
+ */
+const WORTH_SAYING_M = 5
+
 function sentence(step, units) {
   const text = step.text.trim().replace(/\.$/, '')
-  const far = step.distance_m >= 1
+  const far = step.distance_m >= WORTH_SAYING_M
 
   // An arrival instruction has no distance and needs no "and follow it for".
   if (!far) return `${text}.`

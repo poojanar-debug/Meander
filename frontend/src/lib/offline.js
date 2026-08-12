@@ -127,7 +127,7 @@ export function offlineBarText(ageMs, online) {
       detail: online
         ? 'Nothing new has arrived yet.'
         : 'These are the last routes this device received.',
-      mapDetail: 'The map cannot load without a connection — the list below is the whole answer.',
+      mapDetail: 'The map cannot load without a connection. The list below is the whole answer.',
     }
   }
   if (tier === 'amber') {
@@ -136,7 +136,7 @@ export function offlineBarText(ageMs, online) {
       headline,
       detail:
         'Enough time has passed that air quality, shade and daylight will have changed. The route shapes have not.',
-      mapDetail: 'The map cannot load without a connection — the list below is the whole answer.',
+      mapDetail: 'The map cannot load without a connection. The list below is the whole answer.',
     }
   }
   return {
@@ -147,7 +147,7 @@ export function offlineBarText(ageMs, online) {
         : `Showing an old saved copy, from ${when}.`,
     detail:
       'Do not rely on it. Barriers, closures and daylight will all have changed since it was saved.',
-    mapDetail: 'The map cannot load without a connection — the list below is the whole answer.',
+    mapDetail: 'The map cannot load without a connection. The list below is the whole answer.',
   }
 }
 

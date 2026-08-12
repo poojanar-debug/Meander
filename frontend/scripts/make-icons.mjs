@@ -3,6 +3,7 @@ import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
+import { markPoints } from '../src/lib/mark.js'
 import { rgb, token } from './tokens.mjs'
 
 /**
@@ -107,16 +108,10 @@ function distanceToSegment(px, py, ax, ay, bx, by) {
   return Math.hypot(px - cx, py - cy)
 }
 
-/** The meander itself, in unit coordinates. */
-function markPoints() {
-  const points = []
-  const turns = 2.15
-  for (let i = 0; i <= 48; i += 1) {
-    const t = i / 48
-    points.push([0.16 + t * 0.68, 0.5 + Math.sin(t * Math.PI * turns) * 0.245])
-  }
-  return points
-}
+// The curve now lives in src/lib/mark.js, so the icon set and the in-page logo
+// draw the same shape rather than two hand-matched copies of it. That module is
+// geometry and nothing else — no colours — because `tokens.mjs` must never
+// enter the bundle and this import goes the other way.
 
 function draw({ size, maskable, opaque }) {
   const pixels = Buffer.alloc(size * size * 4)

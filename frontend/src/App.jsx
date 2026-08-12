@@ -19,6 +19,8 @@ import TakeItWithYou from './components/TakeItWithYou.jsx'
 import TripBar from './components/TripBar.jsx'
 import { announceRoutes, announceSelection, effectiveMode } from './lib/format.js'
 import { haversineM } from './lib/follow.js'
+import { useFollowTracking } from './lib/followTracking.js'
+import { MOBILE_LAYOUT, useMatchMedia } from './lib/media.js'
 import { applyTheme, initialTheme, readStoredTheme, storeTheme, systemTheme } from './lib/theme.js'
 import { cacheAgeMs, formatCacheAge } from './lib/offline.js'
 import { useCacheAge, useOnline } from './lib/offlineStore.js'
@@ -51,7 +53,7 @@ const initialState = {
   phase: 'idle', // idle | locating | loading | success | error
   minutes: 35,
   mode: 'auto',
-  objectives: ['fastest', 'nature', 'accessible'],
+  objectives: ['fastest', 'scenic', 'accessible'],
   origin: null,
   dest: null,
   routes: [],
@@ -109,6 +111,25 @@ function init(state) {
 }
 
 /**
+ * A route with the replay stamp removed.
+ *
+ * ⚠ **A spread cannot clear a key the incoming object does not have.** A
+ * replayed route carries `servedFromCache: true` and `cachedAt`; a live SSE
+ * route carries neither, so `{ ...old, ...new }` keeps the old stamp and the
+ * new distance. Simulated: merging a live `{id:'fastest', distance_m:2450}`
+ * over a replayed one yields the new distance and the old timestamp, and fresh
+ * data is then labelled "Saved copy from N minutes ago".
+ *
+ * `cacheStamp` derives the banner from the routes precisely so it cannot drift
+ * from what is on screen — which only holds if the routes themselves are
+ * honest. Merging onto a stamp-free base is what makes that true.
+ */
+function stampFree(route) {
+  const { servedFromCache, cachedAt, ...rest } = route
+  return rest
+}
+
+/**
  * Is what we are looking at a replay, and from when.
  *
  * Derived from the routes rather than held in the reducer, so it cannot drift
@@ -142,9 +163,15 @@ function reducer(state, action) {
       // Never allow zero: a route list with nothing in it is not a state the
       // user can recover from without guessing.
       if (present && state.objectives.length === 1) return state
+      // A fourth chip used to silently un-press the first: `.slice(-3)` drops
+      // the oldest with no disabled state and no announcement of what went. The
+      // limit is real — the API accepts at most three objectives — so the
+      // refusal is honest; being silent about it was not. `onToggleObjective`
+      // in App reads `dropped` and says so.
+      if (!present && state.objectives.length >= 3) return state
       const next = present
         ? state.objectives.filter((o) => o !== action.value)
-        : [...state.objectives, action.value].slice(-3)
+        : [...state.objectives, action.value]
       return withRefetch(state, { objectives: next }, DEBOUNCE.objectives)
     }
 
@@ -181,10 +208,21 @@ function reducer(state, action) {
       const routes =
         index === -1
           ? [...state.routes, incoming]
-          : state.routes.map((r) => (r.id === incoming.id ? { ...r, ...incoming } : r))
-      const ordered = [...routes].sort(
-        (a, b) => state.objectives.indexOf(a.id) - state.objectives.indexOf(b.id),
-      )
+          : state.routes.map((r) =>
+              r.id === incoming.id ? { ...stampFree(r), ...incoming } : r,
+            )
+      // Routes for objectives the user has since removed sorted to the TOP,
+      // because `indexOf` returns -1 for an id no longer in the list and -1
+      // sorts before 0. They are dropped rather than merely re-ordered: a route
+      // for a chip that is no longer pressed is an answer to a question nobody
+      // is asking, and leaving it in the rail while sorting it last would only
+      // move the confusion.
+      const live = routes.filter((r) => state.objectives.includes(r.id))
+      const rank = (id) => {
+        const i = state.objectives.indexOf(id)
+        return i === -1 ? Number.MAX_SAFE_INTEGER : i
+      }
+      const ordered = [...live].sort((a, b) => rank(a.id) - rank(b.id))
       const firstRoutable = ordered.find((r) => r.status === 'ok')
       return {
         ...state,
@@ -233,6 +271,28 @@ function reducer(state, action) {
     case 'follow':
       return { ...state, follow: action.value }
 
+    /**
+     * Back to the beginning, keeping only what is a display preference.
+     *
+     * **Not routed through `withRefetch()`.** That bumps `nonce`, and the fetch
+     * effect keys on `nonce` alone — so a reset would immediately re-request
+     * the search it had just cleared. Landing on `initialState`'s 0 both
+     * changes the value and lands on the one the effect ignores.
+     *
+     * The honest reason, rather than the convenient one: the effect would in
+     * fact return a line earlier anyway, at `if (!state.origin)`, because
+     * `origin` is now null. That is a second reason and not the first, and
+     * writing it as the first would leave the next person thinking the nonce
+     * does not matter here. It does — it is what makes a reset while three
+     * routes are streaming not turn into a fourth request.
+     *
+     * Theme and units survive because they are persisted display preferences
+     * that the user set deliberately and that no search produced. Everything
+     * else goes.
+     */
+    case 'reset':
+      return { ...initialState, theme: state.theme, units: state.units }
+
     default:
       return state
   }
@@ -240,7 +300,14 @@ function reducer(state, action) {
 
 export default function App() {
   const [state, dispatch] = useReducer(reducer, initialState, init)
-  const [announcement, setAnnouncement] = useState('')
+  // `{ text, seq }` rather than a bare string, and the seq is the whole reason.
+  // React bails out of a re-render when the new state is `Object.is`-equal to
+  // the old, so setting the same sentence twice never mutates the text node and
+  // no assistive technology fires — "GPX file saved." twice in a row, or "Link
+  // copied" twice, announced once. Bumping a counter alongside the text makes
+  // every announcement a distinct value while the rendered string stays the
+  // sentence.
+  const [announcement, setAnnouncement] = useState({ text: '', seq: 0 })
   // Which stretch of the selected route the map should emphasise, from the step
   // under the cursor. Local state, not reducer state: it changes on every
   // mousemove across a list and has no business triggering the fetch effect.
@@ -276,7 +343,26 @@ export default function App() {
   const announce = useCallback((text) => {
     if (!text) return
     clearTimeout(announceTimer.current)
-    announceTimer.current = setTimeout(() => setAnnouncement(text), 350)
+    announceTimer.current = setTimeout(
+      () => setAnnouncement((prev) => ({ text, seq: prev.seq + 1 })),
+      350,
+    )
+  }, [])
+
+  /**
+   * The same region, without the wait.
+   *
+   * The 350ms debounce is right for a dial drag, where two announcements inside
+   * one gesture should collapse to the last. It is wrong for navigation: a turn
+   * instruction is not a value being scrubbed, it is a thing to do, and
+   * collapsing two of them loses one. Follow mode announces through here so it
+   * keeps the app's single voice — §6.7 — without inheriting a cadence written
+   * for a slider.
+   */
+  const announceNow = useCallback((text) => {
+    if (!text) return
+    clearTimeout(announceTimer.current)
+    setAnnouncement((prev) => ({ text, seq: prev.seq + 1 }))
   }, [])
 
   // --- the one fetch effect ------------------------------------------------
@@ -453,10 +539,18 @@ export default function App() {
 
   const onToggleObjective = useCallback(
     (id) => {
+      // Read before the dispatch, because the reducer is where the refusal
+      // happens and it cannot speak. Pressing a fourth chip used to drop the
+      // oldest silently; now it is refused and said out loud.
+      const pressed = state.objectives.includes(id)
+      if (!pressed && state.objectives.length >= 3) {
+        announce('Three route types at a time. Unpress one to choose another.')
+        return
+      }
       dispatch({ type: 'toggleObjective', value: id })
-      announce(`Objectives changed.`)
+      announce('Objectives changed.')
     },
-    [announce],
+    [state.objectives, announce],
   )
 
   const hasRoutes = state.routes.length > 0
@@ -465,11 +559,172 @@ export default function App() {
     ? (state.routes.find((r) => r.id === state.follow) ?? null)
     : null
 
+  // --- follow mode ---------------------------------------------------------
+
+  // One watch, one position, read by both the sheet and the map. It lived in
+  // FollowMode's local state, where MapView could not see it at all — so the
+  // camera was a whole-route fitBounds that never moved as anyone walked.
+  // Passing null starts nothing.
+  const tracking = useFollowTracking(followRoute)
+
+  // Below 900px the overlay is full-screen and therefore modal; above it the
+  // stage is a column beside a panel that stays legitimately usable, and
+  // trapping focus there would take the rest of the app away for no reason.
+  // The query is shared with the stylesheet through one constant.
+  const followIsModal = useMatchMedia(MOBILE_LAYOUT) && Boolean(followRoute)
+
+  const stageRef = useRef(null)
+  const panelRef = useRef(null)
+  const topbarRef = useRef(null)
+  const returnFocusRef = useRef(null)
+
+  const onStartFollow = useCallback((id, trigger) => {
+    // The button that opened follow mode, passed explicitly rather than read
+    // off `document.activeElement`. Both are the same thing after a keyboard
+    // activation and after a mouse click in most browsers, and they are NOT the
+    // same after a touch tap in Safari, which fires the click without moving
+    // focus — so the read would have quietly returned `<body>` on exactly the
+    // devices this whole part is about.
+    //
+    // Leaving follow mode used to drop focus to `<body>` unconditionally, which
+    // is a WCAG 2.4.3 failure that existed before this screen became modal and
+    // gets worse for becoming one.
+    returnFocusRef.current = trigger ?? document.activeElement
+    dispatch({ type: 'follow', value: id })
+  }, [])
+
+  const onExitFollow = useCallback(() => {
+    dispatch({ type: 'follow', value: null })
+    const target = returnFocusRef.current
+    returnFocusRef.current = null
+    // After the unmount and after `inert` comes off, or the focus call lands on
+    // an element the browser still considers unfocusable. setTimeout rather
+    // than requestAnimationFrame for the reason MapView already documents: rAF
+    // does not run in a hidden tab, and a walk that ends with the phone locked
+    // would leave focus on `<body>` exactly as before.
+    setTimeout(() => {
+      if (target?.isConnected) target.focus()
+    }, 0)
+  }, [])
+
+  // The modal contract, in one place because it is one decision.
+  //
+  // `inert` on the siblings rather than `aria-hidden`: `aria-hidden-focus` is a
+  // wcag2a rule the gate runs, so marking a subtree hidden while it still holds
+  // focusable elements is a failure. `inert` removes them from the tab order
+  // and the accessibility tree together, which is what is actually meant.
+  //
+  // The live region is deliberately NOT inerted. It is a sibling of the layout,
+  // it is how follow mode speaks, and `inert` would silence the one voice §6.7
+  // asks the app to have.
+  useEffect(() => {
+    if (!followIsModal) return undefined
+    const layer = stageRef.current
+    const siblings = [panelRef.current, topbarRef.current].filter(Boolean)
+    for (const el of siblings) el.inert = true
+
+    const onKeyDown = (event) => {
+      if (event.key === 'Escape') {
+        event.preventDefault()
+        onExitFollow()
+        return
+      }
+      if (event.key !== 'Tab' || !layer) return
+      // axe has no rule for focus trapping and none for Escape-to-close, so
+      // neither of these is covered by the gate's axe pass and both are written
+      // out here instead. The map lives inside this layer precisely so that
+      // trapping focus does not make it unreachable, which is what §6.7 asks
+      // for and what a trap around the sheet alone would have reversed.
+      const focusable = [...layer.querySelectorAll(
+        'button:not([disabled]), a[href], input, select, textarea, [tabindex]:not([tabindex="-1"])',
+      )].filter((el) => el.offsetWidth > 0 || el.offsetHeight > 0)
+      if (!focusable.length) return
+      const first = focusable[0]
+      const last = focusable[focusable.length - 1]
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault()
+        last.focus()
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault()
+        first.focus()
+      } else if (!layer.contains(document.activeElement)) {
+        event.preventDefault()
+        first.focus()
+      }
+    }
+    document.addEventListener('keydown', onKeyDown)
+    return () => {
+      document.removeEventListener('keydown', onKeyDown)
+      for (const el of siblings) el.inert = false
+    }
+  }, [followIsModal, onExitFollow])
+
+  // Follow mode is not allowed to survive its own route disappearing. `case
+  // 'settled'` replaces `routes` wholesale, so any refetch returning a set
+  // without this id used to leave `state.follow` pointing at nothing and the
+  // sheet simply vanished mid-walk with no explanation.
+  useEffect(() => {
+    if (!state.follow) return
+    if (state.routes.some((r) => r.id === state.follow)) return
+    dispatch({ type: 'follow', value: null })
+    announceNow('That route is no longer available, so following it has stopped.')
+  }, [state.follow, state.routes, announceNow])
+
   // The first-run card replaces panel and stage entirely (§7). Gating on
   // `origin` rather than on `routes` means the map is never created until there
-  // is somewhere to draw — and once created it is never unmounted, which is the
-  // single-MapLibre-instance rule the old build already held to.
+  // is somewhere to draw.
+  //
+  // ⚠ This used to end "and once created it is never unmounted, which is the
+  // single-MapLibre-instance rule the old build already held to." That stopped
+  // being true when the wordmark became a reset: pressing it clears `origin`,
+  // this flips back to true, and MapView is torn down. The rule it was
+  // protecting still holds — there is never more than one map — but it holds
+  // because the teardown at `MapView.jsx:275-288` is correct and because
+  // creation is deferred a tick past StrictMode's double-mount, not because the
+  // unmount cannot happen. A comment asserting an invariant the code no longer
+  // has is worse than no comment: the next person reads it and stops checking.
   const firstRun = !state.origin && state.phase !== 'locating' && !hasRoutes
+
+  /**
+   * The logo and the wordmark start the app over.
+   *
+   * Three of these four lines are things a reducer cannot do, and each one is a
+   * failure somebody would otherwise have to reproduce on a phone.
+   *
+   * Without the abort, pressing the logo while three routes are streaming
+   * leaves the reset visibly undone a second later: the in-flight SSE keeps
+   * dispatching `route` events into the cleared state and the rail repopulates
+   * from a search that no longer exists.
+   *
+   * Without the `clearTimeout`, `announce`'s 350ms debounce delivers the
+   * *previous* sentence after the reset has happened — "Three routes ready" to
+   * a screen with nothing on it.
+   *
+   * `highlight` is local state and outside the reducer entirely, so it survives
+   * a reset that clears everything else and leaves the map emphasising a
+   * stretch of a route that is gone.
+   *
+   * **Never `location.reload()`**, for three reasons and one of them is
+   * reachable: it re-reads the current URL, so a permalinked page reloads
+   * straight back into the same search it was asked to clear; it discards an
+   * offline-saved route the user may be relying on; and it costs a full network
+   * round trip in exactly the situation — no signal — where this app is meant
+   * to keep working.
+   *
+   * The address bar clears itself. `origin` going null makes the `writeUrl`
+   * effect emit a bare path, and `permalink.js` early-returns when the URL is
+   * already bare, so no history entry is written either way. It uses
+   * `replaceState` and never `pushState`, which means **a reset is not undoable
+   * with the back button** — consistent with that module's contract, and worth
+   * knowing before pressing it.
+   */
+  const onReset = useCallback(() => {
+    abortRef.current?.abort()
+    clearTimeout(announceTimer.current)
+    setHighlight(null)
+    dispatch({ type: 'reset' })
+    announceNow('Cleared. Start a new walk.')
+  }, [announceNow])
 
   // The About disclosure lives at the foot of a panel that scrolls, so the
   // topbar button has to open it *and* bring it into view. Opening alone would
@@ -490,10 +745,16 @@ export default function App() {
 
       {/* One polite live region for the whole app. */}
       <p className="visually-hidden" role="status" aria-live="polite">
-        {announcement}
+        {announcement.text}
       </p>
 
-      <Topbar theme={state.theme} onTheme={onTheme} onAbout={onAbout} />
+      <Topbar
+        ref={topbarRef}
+        theme={state.theme}
+        onTheme={onTheme}
+        onAbout={onAbout}
+        onReset={onReset}
+      />
 
       <Ribbon routes={state.routes} />
 
@@ -511,7 +772,7 @@ export default function App() {
         />
       ) : (
       <div className="layout">
-        <main className="panel">
+        <main className="panel" ref={panelRef}>
           <TripBar
             minutes={state.minutes}
             mode={state.mode}
@@ -533,6 +794,11 @@ export default function App() {
             onClearUnits={onClearUnits}
           />
 
+          {/* Everything below the trip bar scrolls; the bar itself does not.
+              It used to be a sticky first child of this scroller, which pinned
+              between 133px and 801.5px of an 808px desktop scrollport depending
+              on which drawer was open — up to 99.2% of it, unscrollable. */}
+          <div className="panel__scroll">
           <DepartureStrip
             bestDeparture={state.bestDeparture}
             reason={state.reason}
@@ -575,6 +841,11 @@ export default function App() {
             />
 
             <RouteDetail
+              // Remounts on a route change. Without it the children keep their
+              // state across routes: select a 5 km route, drag the barrier
+              // reporter to 3000 m, select a 1 km route, and the label reads a
+              // distance past the end of the route it would file against.
+              key={selectedRoute?.id ?? 'none'}
               route={selectedRoute}
               theme={state.theme}
               units={state.units}
@@ -584,13 +855,14 @@ export default function App() {
                   route={selectedRoute}
                   origin={state.origin}
                   dest={state.dest}
+                  units={state.units}
                   onAnnounce={announce}
                 />
               }
               stepList={
                 <StepList route={selectedRoute} units={state.units} onHighlight={setHighlight} />
               }
-              onStart={(id) => dispatch({ type: 'follow', value: id })}
+              onStart={onStartFollow}
             >
               <DaylightGuard
                 route={selectedRoute}
@@ -618,9 +890,17 @@ export default function App() {
           <div className="panel__spacer" aria-hidden="true" />
 
           <About ref={aboutRef} cache={state.cache} />
+          </div>
         </main>
 
-        <div className="stage">
+        {/* Full-screen below 900px while following, and only then. The class is
+            on the stage rather than on `.follow` so that the MAP is inside the
+            layer that goes full-screen — MapLibre is never unmounted, the
+            single-instance rule holds, and the focus trap does not have to
+            choose between containing the sheet and reaching the map.
+            §6.7's "the map underneath stays pannable" is amended rather than
+            contradicted: underneath becomes inside. */}
+        <div className={followIsModal ? 'stage stage--following' : 'stage'} ref={stageRef}>
           {hasRoutes && (
             <MapView
               routes={state.routes}
@@ -630,16 +910,17 @@ export default function App() {
               theme={state.theme}
               highlight={highlight}
               onSelect={onSelect}
+              follow={followRoute ? { route: followRoute, tracking } : null}
             />
           )}
 
-          {/* The sheet is not a modal: the map underneath stays reachable. */}
           {followRoute && (
             <FollowMode
               route={followRoute}
               units={state.units}
-              onExit={() => dispatch({ type: 'follow', value: null })}
-              onAnnounce={announce}
+              tracking={tracking}
+              onExit={onExitFollow}
+              onAnnounce={announceNow}
             />
           )}
         </div>

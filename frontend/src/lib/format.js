@@ -1,7 +1,7 @@
 /** Formatting helpers. Every string here can end up in a screen reader, so they
  * read as sentences rather than as abbreviations. */
 
-import { METRIC_24, formatDistance } from './units.js'
+import { METRIC_24, UNKNOWN, formatDistance } from './units.js'
 
 /** Must match `derive_mode` in backend/models.py exactly. */
 export const deriveMode = (m) => (m <= 45 ? 'foot' : m <= 120 ? 'bike' : 'car')
@@ -37,7 +37,7 @@ export function effectiveMode(mode, minutes, straightLineM = null) {
 
 /** "1 hr 25 min" — spoken form, not "1:25". */
 export function fmtDur(minutes) {
-  if (minutes == null || Number.isNaN(minutes)) return '—'
+  if (minutes == null || Number.isNaN(minutes)) return UNKNOWN
   const total = Math.round(minutes)
   if (total < 60) return `${total} min`
   const hours = Math.floor(total / 60)
@@ -52,7 +52,7 @@ export function fmtDur(minutes) {
  * kind of quiet wrongness a route duration must not have.
  */
 export function durationParts(minutes) {
-  if (minutes == null || Number.isNaN(minutes)) return { value: '—', unit: '' }
+  if (minutes == null || Number.isNaN(minutes)) return { value: UNKNOWN, unit: '' }
   const total = Math.round(minutes)
   if (total < 60) return { value: String(total), unit: 'min' }
   const hours = Math.floor(total / 60)
@@ -84,7 +84,9 @@ export function fmtDist(metres, units = METRIC_24) {
 }
 
 export function fmtPct(fraction) {
-  if (fraction == null || Number.isNaN(fraction)) return '—'
+  // The one of the five that is prose rather than a number in a column, so it
+  // gets the word. See UNKNOWN in units.js for why the other four do not.
+  if (fraction == null || Number.isNaN(fraction)) return 'Unknown'
   return `${Math.round(fraction * 100)}%`
 }
 
@@ -144,7 +146,7 @@ export function confidenceSentence(confidence, scoringMethod, serverNote) {
   const pct = Math.round(confidence * 100)
   if (confidence < 0.3) {
     return {
-      text: `Accessibility data covers only ${pct}% of this route. Most of it is unverified — do not rely on it.`,
+      text: `Accessibility data covers only ${pct}% of this route. Most of it is unverified. Do not rely on it.`,
       severity: 'warning',
     }
   }
@@ -212,7 +214,7 @@ export function waysBack(count) {
 
 export const SCORING_METHOD_LABEL = {
   clip: 'Scored from street-level imagery',
-  geometry_only: 'Scored from route shape only — no imagery available here',
+  geometry_only: 'Scored from route shape only (no imagery available here)',
   placeholder: 'Placeholder values, not a measurement',
 }
 

@@ -319,12 +319,12 @@ def _arterial_route() -> tuple[list[LatLon], list[float], dict]:
 
 
 def test_a_park_route_scores_above_an_arterial_route() -> None:
-    """The whole point of the nature score. If this inverts, the feature is a lie."""
+    """The whole point of the scenic score. If this inverts, the feature is a lie."""
     park = score_geometry(*_park_route())
     arterial = score_geometry(*_arterial_route())
 
-    assert park.nature > arterial.nature
-    assert park.nature - arterial.nature > 0.3
+    assert park.scenic > arterial.scenic
+    assert park.scenic - arterial.scenic > 0.3
 
 
 def test_the_park_route_beats_the_arterial_on_every_component() -> None:
@@ -348,12 +348,12 @@ def test_air_proxy_ranks_a_footpath_above_a_motorway() -> None:
 def test_scores_stay_in_the_unit_interval() -> None:
     for builder in (_park_route, _arterial_route):
         scores = score_geometry(*builder())
-        assert 0.0 <= scores.nature <= 1.0
+        assert 0.0 <= scores.scenic <= 1.0
         assert 0.0 <= scores.curviness <= 1.0
         assert scores.air is None or 0.0 <= scores.air <= 1.0
 
 
-def test_missing_elevation_does_not_drag_the_nature_score_down() -> None:
+def test_missing_elevation_does_not_drag_the_scenic_score_down() -> None:
     """Weights are renormalised, not just dropped — otherwise a router that
     returns no elevation would make every route in that region look worse."""
     points, _, details = _park_route()
@@ -361,8 +361,8 @@ def test_missing_elevation_does_not_drag_the_nature_score_down() -> None:
     without = score_geometry(points, None, details)
 
     assert without.elevation_variance is None
-    assert without.nature > 0.5
-    assert abs(without.nature - with_elevation.nature) < 0.25
+    assert without.scenic > 0.5
+    assert abs(without.scenic - with_elevation.scenic) < 0.25
 
 
 def test_no_tags_at_all_still_produces_a_score_from_shape() -> None:
@@ -371,7 +371,7 @@ def test_no_tags_at_all_still_produces_a_score_from_shape() -> None:
 
     assert scores.naturalness is None
     assert scores.tag_coverage == 0.0
-    assert scores.nature == pytest.approx(scores.curviness)
+    assert scores.scenic == pytest.approx(scores.curviness)
 
 
 def test_clip_term_dominates_when_present() -> None:
@@ -379,7 +379,7 @@ def test_clip_term_dominates_when_present() -> None:
     without = score_geometry(points, elevations, details)
     with_clip = score_geometry(points, elevations, details, clip_score=1.0)
 
-    assert with_clip.nature > without.nature + 0.3
+    assert with_clip.scenic > without.scenic + 0.3
 
 
 def test_tag_coverage_is_reported() -> None:

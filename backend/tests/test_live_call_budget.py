@@ -2,7 +2,7 @@
 
 It used to be a **lifetime** cap that was still consulted in live mode and
 metered a self-hosted server at 3 credits a call. One round trip runs up to 6
-nature candidates plus fastest plus accessible — 8 requests x 3 = 24 units
+scenic candidates plus fastest plus accessible — 8 requests x 3 = 24 units
 against a cap of 80. Three route requests per container, ever, and then 503
 until somebody deleted a file they had never heard of.
 """
@@ -154,7 +154,7 @@ def test_a_deployed_round_trip_no_longer_exhausts_the_cap(
 
     from backend.routing import GRAPHHOPPER_CREDIT_COST
 
-    requests_per_route = 6 + 1 + 1  # nature candidates, fastest, accessible
+    requests_per_route = 6 + 1 + 1  # scenic candidates, fastest, accessible
     for _ in range(200):
         for _ in range(requests_per_route):
             metered, _reason = fx.budget_applies("graphhopper")
