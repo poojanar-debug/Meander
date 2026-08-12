@@ -2,10 +2,72 @@ import maplibregl from 'maplibre-gl'
 import { useCallback, useEffect, useRef, useState } from 'react'
 
 import { routeColor, styleFor, swatchBackground } from '../lib/dash.js'
+import { pointAtDistance } from '../lib/follow.js'
 
 const STYLE_URL = 'https://tiles.openfreemap.org/styles/positron'
 const INITIAL_CENTER = [79.8521, 6.921]
 const INITIAL_ZOOM = 12.6
+
+const RAD = Math.PI / 180
+
+/**
+ * How much ground one pixel covers while following.
+ *
+ * The camera used to be a whole-route `fitBounds` and nothing else, which for
+ * the default three routes at the gate's London origin computes to **3.4 to 5.1
+ * metres per pixel**. At that scale a 1.4 m/s walker moves 0.28 px per second
+ * and the 7px selected line is 35 m wide on the ground: the map is a picture of
+ * the walk, not a thing to walk by.
+ *
+ * 0.4 m/px is about z17 at London's latitude, and a street is then a street.
+ *
+ * **This costs nothing in privacy, and that was checked rather than assumed.**
+ * A camera that follows someone could disclose their path to the basemap host
+ * through tile requests even though the app itself sends nothing. It does not
+ * here: the OpenFreeMap style's vector source declares `maxzoom: 14`
+ * (`https://tiles.openfreemap.org/planet`), so every zoom past 14 is served by
+ * overzooming tiles the client already has — and the whole-route view fetched
+ * exactly those z14 tiles before follow mode opened. Measured over a full
+ * simulated walk of the route with a DevTools trace: three requests in the
+ * entire session, all of them glyph ranges, and no tile request at all.
+ */
+const FOLLOW_METRES_PER_PIXEL = 0.4
+
+/**
+ * The zoom that puts `metresPerPixel` on the ground at this latitude.
+ *
+ * Computed rather than hard-coded to z17, because metres per pixel is what
+ * actually matters and it is latitude-dependent: the same zoom that gives
+ * 0.37 m/px in London gives 0.59 m/px in Colombo, and this app routes in both.
+ *
+ * MapLibre sizes the world as `512 * 2^zoom` pixels, so the scale at the
+ * equator is 78271.516 / 2^zoom and shrinks with the cosine of the latitude.
+ * The familiar 156543 constant is the 256px-tile figure and is off by exactly
+ * one zoom level here.
+ */
+function zoomForScale(metresPerPixel, lat) {
+  return Math.log2((78271.516 * Math.cos(lat * RAD)) / metresPerPixel)
+}
+
+/**
+ * A circle of `radiusM` metres about a point, as a GeoJSON ring.
+ *
+ * A polygon rather than a `circle` layer with a zoom expression: `circle-radius`
+ * is in screen pixels, so holding a *metre* radius through a zoom change means
+ * an interpolation expression that has to be rewritten whenever the zoom range
+ * moves. A ring in degrees is simply correct at every zoom and is updated as
+ * source data, which is the separation this file already keeps.
+ */
+function circleRing([lon, lat], radiusM, steps = 48) {
+  const dLat = radiusM / 111320
+  const dLon = radiusM / (111320 * Math.max(0.01, Math.cos(lat * RAD)))
+  const ring = []
+  for (let i = 0; i <= steps; i += 1) {
+    const a = (i / steps) * 2 * Math.PI
+    ring.push([lon + dLon * Math.cos(a), lat + dLat * Math.sin(a)])
+  }
+  return { type: 'Polygon', coordinates: [ring] }
+}
 
 // How long to wait for the basemap before giving up on it and showing the
 // fallback. Deliberately generous: a cold tile CDN fetching style, sprites,
@@ -127,14 +189,33 @@ function applyMapPalette(map) {
  * that only runs while the page is visible, and the `jump`-instead-of-`fly`
  * guard for a hidden tab. None of them should be tidied away.
  */
-export default function MapView({ routes, selected, origin, dest, theme, highlight, onSelect }) {
+export default function MapView({
+  routes,
+  selected,
+  origin,
+  dest,
+  theme,
+  highlight,
+  onSelect,
+  follow = null,
+}) {
   const containerRef = useRef(null)
   const mapRef = useRef(null)
   const markersRef = useRef([])
   const layerIdsRef = useRef([])
+  const layerHandlersRef = useRef([])
   const onSelectRef = useRef(onSelect)
   const [ready, setReady] = useState(false)
   const [failed, setFailed] = useState(false)
+  // Whether the user has taken the camera off the walker. Only a gesture sets
+  // it, never one of our own camera calls — MapLibre fires `zoomstart` for
+  // `easeTo` too, and treating that as a pan would make the re-centre button
+  // appear the instant following began and never go away.
+  const [cameraTaken, setCameraTaken] = useState(false)
+
+  const followTracking = follow?.tracking ?? null
+  const followPosition = followTracking?.position ?? null
+  const followActive = Boolean(follow && followPosition)
 
   useEffect(() => {
     onSelectRef.current = onSelect
@@ -301,13 +382,33 @@ export default function MapView({ routes, selected, origin, dest, theme, highlig
     const map = mapRef.current
     if (!map || !ready) return
 
+    // Delegated listeners come off before their layers do. `map.off` appeared
+    // zero times in this file, so every re-run of this effect added another
+    // click/mouseenter/mouseleave triple for a layer id that keeps recurring
+    // across searches — and MapLibre holds them on the map, not on the layer,
+    // so removing the layer does not remove them. Seven routes arriving over a
+    // stream meant seven live handlers per line, all firing onSelect.
+    for (const [type, layer, handler] of layerHandlersRef.current) {
+      map.off(type, layer, handler)
+    }
+    layerHandlersRef.current = []
+
     for (const id of layerIdsRef.current) {
       if (map.getLayer(`line-${id}`)) map.removeLayer(`line-${id}`)
       if (map.getLayer(`case-${id}`)) map.removeLayer(`case-${id}`)
       if (map.getSource(`route-${id}`)) map.removeSource(`route-${id}`)
     }
-    for (const id of ['highlight', 'rest-stops']) {
+    for (const id of [
+      'highlight',
+      'rest-stops',
+      'follow-walked-case',
+      'follow-walked',
+      'follow-accuracy',
+      'follow-here',
+    ]) {
       if (map.getLayer(id)) map.removeLayer(id)
+    }
+    for (const id of ['highlight', 'rest-stops', 'follow-walked', 'follow-here']) {
       if (map.getSource(id)) map.removeSource(id)
     }
 
@@ -354,14 +455,56 @@ export default function MapView({ routes, selected, origin, dest, theme, highlig
         paint,
       })
 
-      map.on('click', `line-${route.id}`, () => onSelectRef.current?.(route.id))
-      map.on('mouseenter', `line-${route.id}`, () => {
+      const layer = `line-${route.id}`
+      const onClick = () => onSelectRef.current?.(route.id)
+      const onEnter = () => {
         map.getCanvas().style.cursor = 'pointer'
-      })
-      map.on('mouseleave', `line-${route.id}`, () => {
+      }
+      const onLeave = () => {
         map.getCanvas().style.cursor = ''
-      })
+      }
+      map.on('click', layer, onClick)
+      map.on('mouseenter', layer, onEnter)
+      map.on('mouseleave', layer, onLeave)
+      layerHandlersRef.current.push(
+        ['click', layer, onClick],
+        ['mouseenter', layer, onEnter],
+        ['mouseleave', layer, onLeave],
+      )
     }
+
+    // --- follow layers, added once and thereafter only fed new data ---------
+    //
+    // The separation this file keeps: sources and layers are created here,
+    // paint and data are updated elsewhere. Re-adding a layer per GPS fix would
+    // tear down and rebuild every route layer once a second.
+    map.addSource('follow-walked', {
+      type: 'geojson',
+      data: { type: 'Feature', geometry: { type: 'LineString', coordinates: [] } },
+    })
+    // A --raised case at the selected line's own width, so the stretch already
+    // walked is genuinely blanked before being repainted at the unselected 0.45
+    // rather than merely tinted — painting 45% of a colour over 100% of the
+    // same colour changes nothing.
+    map.addLayer({
+      id: 'follow-walked-case',
+      type: 'line',
+      source: 'follow-walked',
+      layout: { 'line-cap': 'round', 'line-join': 'round' },
+      paint: { 'line-color': token('--raised'), 'line-width': 7.5 },
+    })
+    map.addLayer({
+      id: 'follow-walked',
+      type: 'line',
+      source: 'follow-walked',
+      layout: { 'line-cap': 'round', 'line-join': 'round' },
+      paint: { 'line-color': token('--ink-2'), 'line-width': 7, 'line-opacity': 0.45 },
+    })
+
+    map.addSource('follow-here', {
+      type: 'geojson',
+      data: { type: 'FeatureCollection', features: [] },
+    })
 
     // The stretch of line belonging to the step under the cursor (§6.4). Added
     // before the rest stops so their circles stay on top of it.
@@ -395,7 +538,136 @@ export default function MapView({ routes, selected, origin, dest, theme, highlig
         'circle-stroke-color': ['get', 'colour'],
       },
     })
+
+    // Last, so the walker is on top of every route, every rest stop and every
+    // highlight. Where you are is the one thing on this map that must never be
+    // underneath anything.
+    //
+    // The reported accuracy is drawn rather than described: someone standing
+    // still while the app insists they are sixty metres along deserves to see
+    // how sure it is.
+    map.addLayer({
+      id: 'follow-accuracy',
+      type: 'fill',
+      source: 'follow-here',
+      filter: ['==', ['geometry-type'], 'Polygon'],
+      paint: { 'fill-color': token('--accent'), 'fill-opacity': 0.12 },
+    })
+    // Distinct from the brand-green A pin on purpose: on a round trip the start
+    // and the walker are the same place at the start and the same place again
+    // at the end, and two identical marks there say nothing.
+    map.addLayer({
+      id: 'follow-here',
+      type: 'circle',
+      source: 'follow-here',
+      filter: ['==', ['geometry-type'], 'Point'],
+      paint: {
+        'circle-radius': 8,
+        'circle-color': token('--accent'),
+        'circle-stroke-width': 3,
+        'circle-stroke-color': token('--raised'),
+      },
+    })
   }, [routes, ready, theme])
+
+  // --- follow: data only, never a layer ------------------------------------
+
+  useEffect(() => {
+    const map = mapRef.current
+    if (!map || !ready) return
+
+    const walked = map.getSource('follow-walked')
+    const here = map.getSource('follow-here')
+    if (!walked || !here) return
+
+    const at = followTracking?.at ?? null
+    const geometry = follow?.route?.geometry ?? null
+
+    // Split at `at.alongM`: whole vertices up to the one behind the walker,
+    // then the projected point itself, so the join is where the person is
+    // rather than at the last vertex they happened to pass.
+    let trace = []
+    if (followActive && at && geometry?.length > 1) {
+      trace = geometry.slice(0, at.index + 1)
+      const head = pointAtDistance(geometry, at.alongM, followTracking.cumulative)
+      if (head) trace = [...trace, [head.lon, head.lat]]
+    }
+    walked.setData({
+      type: 'Feature',
+      geometry: { type: 'LineString', coordinates: trace.length > 1 ? trace : [] },
+    })
+
+    const features = []
+    if (followActive) {
+      const accuracyM = followTracking.accuracyM
+      if (accuracyM != null && accuracyM > 0) {
+        features.push({
+          type: 'Feature',
+          properties: {},
+          geometry: circleRing(followPosition, accuracyM),
+        })
+      }
+      features.push({
+        type: 'Feature',
+        properties: {},
+        geometry: { type: 'Point', coordinates: followPosition },
+      })
+    }
+    here.setData({ type: 'FeatureCollection', features })
+  }, [followActive, followPosition, followTracking, follow?.route?.geometry, ready, theme])
+
+  // --- follow: the camera ---------------------------------------------------
+
+  // A gesture, and only a gesture. MapLibre fires movestart/zoomstart for
+  // programmatic camera calls too, and those carry no `originalEvent` — without
+  // that test our own easeTo would mark the camera as taken on the first fix.
+  useEffect(() => {
+    const map = mapRef.current
+    if (!map || !ready) return undefined
+    const taken = (event) => {
+      if (event?.originalEvent) setCameraTaken(true)
+    }
+    map.on('dragstart', taken)
+    map.on('zoomstart', taken)
+    map.on('rotatestart', taken)
+    return () => {
+      map.off('dragstart', taken)
+      map.off('zoomstart', taken)
+      map.off('rotatestart', taken)
+    }
+  }, [ready])
+
+  // Leaving follow mode hands the camera back.
+  useEffect(() => {
+    if (!follow) setCameraTaken(false)
+  }, [follow])
+
+  const recentre = useCallback(() => {
+    const map = mapRef.current
+    if (!map || !followPosition) return
+    setCameraTaken(false)
+    const instant = prefersReducedMotion() || document.hidden
+    map.easeTo({
+      center: followPosition,
+      zoom: zoomForScale(FOLLOW_METRES_PER_PIXEL, followPosition[1]),
+      duration: instant ? 0 : 400,
+    })
+  }, [followPosition])
+
+  useEffect(() => {
+    const map = mapRef.current
+    if (!map || !ready || !followActive || cameraTaken) return
+    // The same two guards every other camera call in this file uses. MapLibre
+    // animates on requestAnimationFrame, which does not run in a hidden tab —
+    // an animated move started while backgrounded never progresses, and coming
+    // back shows the camera still where it was when the phone went in a pocket.
+    const instant = prefersReducedMotion() || document.hidden
+    map.easeTo({
+      center: followPosition,
+      zoom: zoomForScale(FOLLOW_METRES_PER_PIXEL, followPosition[1]),
+      duration: instant ? 0 : 600,
+    })
+  }, [followActive, followPosition, cameraTaken, ready])
 
   // --- selection emphasis (paint properties only, never re-adding layers) ---
 
@@ -480,7 +752,15 @@ export default function MapView({ routes, selected, origin, dest, theme, highlig
     })
   }, [routes, selected, ready])
 
-  useEffect(fit, [fit])
+  // Not while following. `fit` is keyed on [routes, selected, ready], and
+  // `case 'settled'` replaces `routes` wholesale — so a refetch landing
+  // mid-walk used to yank the camera from the walker back out to the whole
+  // route's bounds, at the exact moment someone was looking at it to decide
+  // which way to turn. The button still calls `fit` deliberately.
+  useEffect(() => {
+    if (followActive) return
+    fit()
+  }, [fit, followActive])
 
   // --- markers -------------------------------------------------------------
 
@@ -532,6 +812,10 @@ export default function MapView({ routes, selected, origin, dest, theme, highlig
   const zoom = (delta) => {
     const map = mapRef.current
     if (!map) return
+    // Pressing + or - while following is a deliberate choice of scale, so it
+    // counts as taking the camera. Without this the next fix would ease the
+    // zoom straight back to 0.4 m/px and the button would look broken.
+    if (followActive) setCameraTaken(true)
     map.easeTo({ zoom: map.getZoom() + delta, duration: prefersReducedMotion() ? 0 : 200 })
   }
 
@@ -588,6 +872,16 @@ export default function MapView({ routes, selected, origin, dest, theme, highlig
             )
           })}
         </div>
+      )}
+
+      {/* Only after a gesture has taken the camera, and gone again the moment
+          it is handed back. A permanent re-centre button on a screen someone is
+          walking with is one more thing to read; a button that appears exactly
+          when it has something to do is a status as much as a control. */}
+      {followActive && cameraTaken && (
+        <button type="button" className="map__recentre" onClick={recentre}>
+          <span aria-hidden="true">◎</span> Re-centre
+        </button>
       )}
 
       {/* Last in the DOM inside the stage, and the stage is after the panel, so

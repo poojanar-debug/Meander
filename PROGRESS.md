@@ -3690,3 +3690,109 @@ against the real API rather than the mock, drove `rate_limited_total` from 21 to
 27 in a single run over seven viewports, and left **three of the seven with no
 routes at all**. Capacity 12, refill 1.0/min, one bucket shared with geocode.
 That is Part 2's thesis reproducing itself on the machine, unprompted.
+
+## §13.1 — Follow mode goes full-screen, and §6.7 is amended rather than broken
+
+**The decision, written down because it changes a spec.** DESIGN-HANDOFF §6.7
+says the sheet is deliberately not a modal, because the map underneath must stay
+pannable. Full-screen changes what "underneath" means, and the two available
+readings are not equivalent:
+
+- Sheet full-screen, map left behind it. A focus trap is then correct for the
+  sheet and makes the map unreachable, which reverses §6.7 outright.
+- **Map inside the full-screen layer.** The trap contains both, so the map stays
+  reachable while the rest of the app is properly out of the way.
+
+The second was taken. Mechanically it means the class goes on `.stage`, not on
+`.follow`: the stage already contains `MapView` *and* the overlay, so promoting
+the stage takes the map with it. MapLibre is never unmounted, the
+single-instance rule holds, and no route layer is rebuilt. §6.7's requirement is
+met by a different arrangement of the same parts: **underneath becomes inside.**
+
+`.stage` is not resized in any other state, so gate check 5
+(`stage.bottom <= panel.top + 2` at 390x844) still measures an ordinary load and
+still passes.
+
+Above 900px nothing changes. The stage there is a column beside a panel that
+stays legitimately usable, and trapping focus would take the rest of the app
+away for no reason. The breakpoint is one constant, `MOBILE_LAYOUT` in
+`lib/media.js`, read by both the stylesheet's media query and the JavaScript
+decision — a second literal `899` is how a layer becomes modal on one side of a
+breakpoint while the layout stays two-column on the other.
+
+### Measured after, in the same browser as before
+
+| device | map strip before | after | sheet spill before | after |
+|---|---|---|---|---|
+| iPhone SE 375x667 | 64px | **395.7px** | +23.98px | **0** |
+| iPhone 13 mini 375x812 | 64px | **540.7px** | +15.28px | **0** |
+| iPhone 14/15 390x844 | 64px | **592.2px** | +13.36px | **0** |
+| Pixel 7 412x915 | 64px | **703.0px** | +9.11px | **0** |
+| landscape 844x390 | 64px | **156.2px** | clipped its own text | **0, not clipped** |
+| iPad portrait 768x1024 | 64px | **790.2px** | +2.56px | **0** |
+
+The layer sits exactly on the viewport on every one of them
+(`fb.bottom - innerHeight` is 0.00), and the sheet is no longer clipped in
+landscape — `min-height: 0` lets flex shrink it and `overflow-y: auto` scrolls
+what does not fit, instead of an explicit `min-height` overriding
+`min-height: auto` and hiding the remainder.
+
+### A simulated walk along the route's own geometry
+
+Driven through a scripted `watchPosition` at 390x844, 61 vertices of the
+`fastest` route:
+
+```
+   0%  to-turn 0.4 mi  banner "Chatham Street"            now "Continue onto Galle Road"
+  50%  to-turn Now     banner "York Street"               now "Turn right onto Chatham Street"
+  75%  to-turn Now     banner "Main Street"               now "Keep left onto York Street"
+  90%  to-turn 0.2 mi  banner "Arrive at your destination" now "Bear right onto Main Street"
+ 100%  progress 100%
+```
+
+The banner names the turn **ahead** and the demoted line names the step you are
+inside. Before this, the step you were inside was the largest thing on the
+screen — GraphHopper names a manoeuvre at the *start* of its interval, so that
+was always the turn already taken, and `steps[stepIndex + 1]` was never rendered
+at all. `Step.sign` had been on the wire since the first day there were steps and
+`grep -rn '\.sign\b' frontend/src` returned zero lines; it is now the glyph.
+
+The camera holds **z16.89**, which is 0.400 m/px at 51.5 N — computed from a
+target metres-per-pixel rather than pinned to z17, because the same zoom is
+0.59 m/px in Colombo and this app routes in both.
+
+**Arrival, and the sentence it replaces.** Sixty metres past the final vertex the
+sheet reads "You have arrived." and `offRoute` stays false through eighteen
+seconds of holding still — comfortably past the fifteen-second sustain that used
+to turn walking to the door into "You've left the route."
+
+**The accuracy gate.** A fix reporting 2 km of accuracy, in the Gulf of Guinea,
+leaves progress untouched and raises the visible "Poor signal" strip. Before,
+`FollowMode.jsx:79` kept longitude and latitude and discarded accuracy, heading,
+speed and timestamp, so nothing could reject it.
+
+### The privacy trace
+
+Recorded with CDP `Network.enable` over a full session against the **real** API
+(not the mock): forty-one fixes along the line, a poor fix, an off-route
+excursion, arrival, and Stop.
+
+```
+Requests before follow mode opened : 70
+Requests during the follow session : 3
+   GET Fetch https://tiles.openfreemap.org/fonts/Noto%20Sans%20Italic/0-255.pbf
+   GET Fetch https://tiles.openfreemap.org/fonts/Noto%20Sans%20Regular/0-255.pbf
+   GET Fetch https://tiles.openfreemap.org/fonts/Noto%20Sans%20Bold/0-255.pbf
+Distinct coordinate needles searched: 81
+CLEAN: no request carried a live coordinate.
+```
+
+Every latitude and longitude the watch reported was searched for, at four
+decimal places (~11 m), in every request URL and body. Nothing matched, and no
+`/api` request was made at all.
+
+**The camera following the walker discloses nothing to the tile host either, and
+that was checked rather than assumed.** OpenFreeMap's vector source declares
+`maxzoom: 14`, so every zoom past 14 is served by overzooming tiles the client
+already holds — and the whole-route view had already fetched exactly those z14
+tiles. Hence three requests in the session and none of them a tile.

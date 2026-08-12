@@ -221,7 +221,10 @@ export default function RouteDetail({
             className="button button--primary"
             disabled={blocked}
             aria-describedby={blocked ? 'start-blocked' : undefined}
-            onClick={() => onStart(route.id)}
+            // The element is handed over so App can put focus back on it when
+            // follow mode closes. `document.activeElement` is not a substitute:
+            // a touch tap in Safari fires the click without moving focus.
+            onClick={(event) => onStart(route.id, event.currentTarget)}
           >
             Start this route
           </button>

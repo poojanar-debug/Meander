@@ -13,9 +13,15 @@ import ThemeToggle from './ThemeToggle.jsx'
  * absent one, because it reads as broken rather than as unbuilt. When §6.5 is
  * promoted, the button belongs between the theme toggle and About.
  */
-export default function Topbar({ theme, onTheme, onAbout }) {
+// `ref` is taken as an ordinary prop, which React 19 allows for a function
+// component without forwardRef. App needs the element itself so it can mark the
+// bar `inert` while full-screen follow mode is open: the bar is behind that
+// layer, and a focusable control underneath a modal layer is reachable by Tab
+// while being invisible, which is the failure `aria-hidden-focus` describes
+// from the other direction.
+export default function Topbar({ theme, onTheme, onAbout, ref }) {
   return (
-    <header className="topbar">
+    <header className="topbar" ref={ref}>
       <div className="topbar__brand">
         <h1 className="topbar__wordmark">Meander</h1>
         <span className="topbar__tagline">routes that are worth the walk</span>

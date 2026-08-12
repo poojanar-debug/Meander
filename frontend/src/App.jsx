@@ -19,6 +19,8 @@ import TakeItWithYou from './components/TakeItWithYou.jsx'
 import TripBar from './components/TripBar.jsx'
 import { announceRoutes, announceSelection, effectiveMode } from './lib/format.js'
 import { haversineM } from './lib/follow.js'
+import { useFollowTracking } from './lib/followTracking.js'
+import { MOBILE_LAYOUT, useMatchMedia } from './lib/media.js'
 import { applyTheme, initialTheme, readStoredTheme, storeTheme, systemTheme } from './lib/theme.js'
 import { cacheAgeMs, formatCacheAge } from './lib/offline.js'
 import { useCacheAge, useOnline } from './lib/offlineStore.js'
@@ -240,7 +242,14 @@ function reducer(state, action) {
 
 export default function App() {
   const [state, dispatch] = useReducer(reducer, initialState, init)
-  const [announcement, setAnnouncement] = useState('')
+  // `{ text, seq }` rather than a bare string, and the seq is the whole reason.
+  // React bails out of a re-render when the new state is `Object.is`-equal to
+  // the old, so setting the same sentence twice never mutates the text node and
+  // no assistive technology fires — "GPX file saved." twice in a row, or "Link
+  // copied" twice, announced once. Bumping a counter alongside the text makes
+  // every announcement a distinct value while the rendered string stays the
+  // sentence.
+  const [announcement, setAnnouncement] = useState({ text: '', seq: 0 })
   // Which stretch of the selected route the map should emphasise, from the step
   // under the cursor. Local state, not reducer state: it changes on every
   // mousemove across a list and has no business triggering the fetch effect.
@@ -276,7 +285,26 @@ export default function App() {
   const announce = useCallback((text) => {
     if (!text) return
     clearTimeout(announceTimer.current)
-    announceTimer.current = setTimeout(() => setAnnouncement(text), 350)
+    announceTimer.current = setTimeout(
+      () => setAnnouncement((prev) => ({ text, seq: prev.seq + 1 })),
+      350,
+    )
+  }, [])
+
+  /**
+   * The same region, without the wait.
+   *
+   * The 350ms debounce is right for a dial drag, where two announcements inside
+   * one gesture should collapse to the last. It is wrong for navigation: a turn
+   * instruction is not a value being scrubbed, it is a thing to do, and
+   * collapsing two of them loses one. Follow mode announces through here so it
+   * keeps the app's single voice — §6.7 — without inheriting a cadence written
+   * for a slider.
+   */
+  const announceNow = useCallback((text) => {
+    if (!text) return
+    clearTimeout(announceTimer.current)
+    setAnnouncement((prev) => ({ text, seq: prev.seq + 1 }))
   }, [])
 
   // --- the one fetch effect ------------------------------------------------
@@ -465,6 +493,117 @@ export default function App() {
     ? (state.routes.find((r) => r.id === state.follow) ?? null)
     : null
 
+  // --- follow mode ---------------------------------------------------------
+
+  // One watch, one position, read by both the sheet and the map. It lived in
+  // FollowMode's local state, where MapView could not see it at all — so the
+  // camera was a whole-route fitBounds that never moved as anyone walked.
+  // Passing null starts nothing.
+  const tracking = useFollowTracking(followRoute)
+
+  // Below 900px the overlay is full-screen and therefore modal; above it the
+  // stage is a column beside a panel that stays legitimately usable, and
+  // trapping focus there would take the rest of the app away for no reason.
+  // The query is shared with the stylesheet through one constant.
+  const followIsModal = useMatchMedia(MOBILE_LAYOUT) && Boolean(followRoute)
+
+  const stageRef = useRef(null)
+  const panelRef = useRef(null)
+  const topbarRef = useRef(null)
+  const returnFocusRef = useRef(null)
+
+  const onStartFollow = useCallback((id, trigger) => {
+    // The button that opened follow mode, passed explicitly rather than read
+    // off `document.activeElement`. Both are the same thing after a keyboard
+    // activation and after a mouse click in most browsers, and they are NOT the
+    // same after a touch tap in Safari, which fires the click without moving
+    // focus — so the read would have quietly returned `<body>` on exactly the
+    // devices this whole part is about.
+    //
+    // Leaving follow mode used to drop focus to `<body>` unconditionally, which
+    // is a WCAG 2.4.3 failure that existed before this screen became modal and
+    // gets worse for becoming one.
+    returnFocusRef.current = trigger ?? document.activeElement
+    dispatch({ type: 'follow', value: id })
+  }, [])
+
+  const onExitFollow = useCallback(() => {
+    dispatch({ type: 'follow', value: null })
+    const target = returnFocusRef.current
+    returnFocusRef.current = null
+    // After the unmount and after `inert` comes off, or the focus call lands on
+    // an element the browser still considers unfocusable. setTimeout rather
+    // than requestAnimationFrame for the reason MapView already documents: rAF
+    // does not run in a hidden tab, and a walk that ends with the phone locked
+    // would leave focus on `<body>` exactly as before.
+    setTimeout(() => {
+      if (target?.isConnected) target.focus()
+    }, 0)
+  }, [])
+
+  // The modal contract, in one place because it is one decision.
+  //
+  // `inert` on the siblings rather than `aria-hidden`: `aria-hidden-focus` is a
+  // wcag2a rule the gate runs, so marking a subtree hidden while it still holds
+  // focusable elements is a failure. `inert` removes them from the tab order
+  // and the accessibility tree together, which is what is actually meant.
+  //
+  // The live region is deliberately NOT inerted. It is a sibling of the layout,
+  // it is how follow mode speaks, and `inert` would silence the one voice §6.7
+  // asks the app to have.
+  useEffect(() => {
+    if (!followIsModal) return undefined
+    const layer = stageRef.current
+    const siblings = [panelRef.current, topbarRef.current].filter(Boolean)
+    for (const el of siblings) el.inert = true
+
+    const onKeyDown = (event) => {
+      if (event.key === 'Escape') {
+        event.preventDefault()
+        onExitFollow()
+        return
+      }
+      if (event.key !== 'Tab' || !layer) return
+      // axe has no rule for focus trapping and none for Escape-to-close, so
+      // neither of these is covered by the gate's axe pass and both are written
+      // out here instead. The map lives inside this layer precisely so that
+      // trapping focus does not make it unreachable, which is what §6.7 asks
+      // for and what a trap around the sheet alone would have reversed.
+      const focusable = [...layer.querySelectorAll(
+        'button:not([disabled]), a[href], input, select, textarea, [tabindex]:not([tabindex="-1"])',
+      )].filter((el) => el.offsetWidth > 0 || el.offsetHeight > 0)
+      if (!focusable.length) return
+      const first = focusable[0]
+      const last = focusable[focusable.length - 1]
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault()
+        last.focus()
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault()
+        first.focus()
+      } else if (!layer.contains(document.activeElement)) {
+        event.preventDefault()
+        first.focus()
+      }
+    }
+    document.addEventListener('keydown', onKeyDown)
+    return () => {
+      document.removeEventListener('keydown', onKeyDown)
+      for (const el of siblings) el.inert = false
+    }
+  }, [followIsModal, onExitFollow])
+
+  // Follow mode is not allowed to survive its own route disappearing. `case
+  // 'settled'` replaces `routes` wholesale, so any refetch returning a set
+  // without this id used to leave `state.follow` pointing at nothing and the
+  // sheet simply vanished mid-walk with no explanation.
+  useEffect(() => {
+    if (!state.follow) return
+    if (state.routes.some((r) => r.id === state.follow)) return
+    dispatch({ type: 'follow', value: null })
+    announceNow('That route is no longer available, so following it has stopped.')
+  }, [state.follow, state.routes, announceNow])
+
   // The first-run card replaces panel and stage entirely (§7). Gating on
   // `origin` rather than on `routes` means the map is never created until there
   // is somewhere to draw — and once created it is never unmounted, which is the
@@ -490,10 +629,10 @@ export default function App() {
 
       {/* One polite live region for the whole app. */}
       <p className="visually-hidden" role="status" aria-live="polite">
-        {announcement}
+        {announcement.text}
       </p>
 
-      <Topbar theme={state.theme} onTheme={onTheme} onAbout={onAbout} />
+      <Topbar ref={topbarRef} theme={state.theme} onTheme={onTheme} onAbout={onAbout} />
 
       <Ribbon routes={state.routes} />
 
@@ -511,7 +650,7 @@ export default function App() {
         />
       ) : (
       <div className="layout">
-        <main className="panel">
+        <main className="panel" ref={panelRef}>
           <TripBar
             minutes={state.minutes}
             mode={state.mode}
@@ -590,7 +729,7 @@ export default function App() {
               stepList={
                 <StepList route={selectedRoute} units={state.units} onHighlight={setHighlight} />
               }
-              onStart={(id) => dispatch({ type: 'follow', value: id })}
+              onStart={onStartFollow}
             >
               <DaylightGuard
                 route={selectedRoute}
@@ -620,7 +759,14 @@ export default function App() {
           <About ref={aboutRef} cache={state.cache} />
         </main>
 
-        <div className="stage">
+        {/* Full-screen below 900px while following, and only then. The class is
+            on the stage rather than on `.follow` so that the MAP is inside the
+            layer that goes full-screen — MapLibre is never unmounted, the
+            single-instance rule holds, and the focus trap does not have to
+            choose between containing the sheet and reaching the map.
+            §6.7's "the map underneath stays pannable" is amended rather than
+            contradicted: underneath becomes inside. */}
+        <div className={followIsModal ? 'stage stage--following' : 'stage'} ref={stageRef}>
           {hasRoutes && (
             <MapView
               routes={state.routes}
@@ -630,16 +776,17 @@ export default function App() {
               theme={state.theme}
               highlight={highlight}
               onSelect={onSelect}
+              follow={followRoute ? { route: followRoute, tracking } : null}
             />
           )}
 
-          {/* The sheet is not a modal: the map underneath stays reachable. */}
           {followRoute && (
             <FollowMode
               route={followRoute}
               units={state.units}
-              onExit={() => dispatch({ type: 'follow', value: null })}
-              onAnnounce={announce}
+              tracking={tracking}
+              onExit={onExitFollow}
+              onAnnounce={announceNow}
             />
           )}
         </div>
