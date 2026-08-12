@@ -81,6 +81,30 @@ REJECTED_BARRIERS = frozenset({"GATE", "STILE", "TURNSTILE", "KISSING_GATE"})
 # Barrier values that mean "there is nothing in the way here". Named rather than
 # inline in assess_barrier() so enrich.py can ask Overpass for exactly the values
 # this module has an opinion about — see BARRIER_VALUES_WITH_A_VERDICT.
+# ⚠ **"NONE" in here is dead, and removing it costs more than leaving it.**
+#
+# It is also in UNKNOWN_VALUES below, and `assess_barrier` checks that set
+# first, so a `barrier=none` tag has always assessed to UNKNOWN and this
+# membership has never once decided anything. Read literally it says "we accept
+# barrier=none as evidence that nothing is in the way", which is a claim this
+# module does not make — UNKNOWN never passes and never fails, while an accepted
+# value is evidence of clearance, and for a tag that merely records somebody
+# writing "none" the UNKNOWN reading is the honest one.
+#
+# It stays because `BARRIER_VALUES_WITH_A_VERDICT` below is derived from this
+# set and builds the Overpass query string, which is what every committed
+# Overpass fixture is keyed on. Verified rather than assumed: removing it
+# rewrites the query from
+#   ^(entrance|gate|kissing_gate|no|none|stile|turnstile)$
+# to
+#   ^(entrance|gate|kissing_gate|no|stile|turnstile)$
+# and **all three committed barrier fixtures become unreachable** — the offline
+# suite's whole barrier corpus, gone, for a membership that changes no answer.
+# The shipped query therefore still fetches `barrier=none`, which costs a few
+# nodes that assess to UNKNOWN and produce no finding.
+#
+# The fix is one line here plus re-recording those three fixtures against a live
+# Overpass, in a commit that does only that.
 ACCEPTED_BARRIERS = frozenset({"NO", "NONE", "ENTRANCE"})
 
 # Every barrier value that changes an answer. Anything outside this set assesses
@@ -247,7 +271,18 @@ def _resample_elevation(
     total = float(cum[-1]) if len(cum) else 0.0
     if total < spacing_m * 2:
         return np.zeros(0), np.zeros(0)
+    # `np.arange` excludes the endpoint, so the last partial span of the route
+    # was never sampled and its climb was invisible to the gradient checks.
+    # Measured across all 86 committed fixtures with elevation: the dropped tail
+    # is **mean 10.33 m, max 19.68 m**, `distances_m` moves on all 86, and
+    # ascent is lost on 11 of them — mean 0.106 m, **max 1.398 m**. Small, real,
+    # and free.
+    #
+    # Appended rather than switched to `linspace`, which would move every
+    # interior sample and change the smoothing window's spacing along with it.
     grid = np.arange(0.0, total, spacing_m)
+    if grid.size == 0 or grid[-1] < total:
+        grid = np.append(grid, total)
     return grid, np.interp(grid, cum, np.asarray(elevations, dtype=float))
 
 

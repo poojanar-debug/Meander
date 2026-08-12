@@ -28,7 +28,7 @@ from .config import (
     path_details,
     settings,
 )
-from .fixtures import BudgetExhausted, FixtureMissing, fetch, is_synthetic
+from .fixtures import BudgetExhausted, FixtureMissing, ResponseTooLarge, fetch, is_synthetic
 from .geometry import LatLon, closes_loop, path_length_m, to_lonlat_pairs
 from .logging_setup import get_logger
 from .models import EffectiveMode, GeocodeResult
@@ -628,6 +628,14 @@ async def _post_route(body: dict[str, Any], mode: EffectiveMode, preset: str) ->
             "This server has reached its routing budget for now. Please try again later.",
             status_code=503,
         ) from exc
+    except ResponseTooLarge as exc:
+        # ⚠ Raised by `fixtures.fetch` and caught **nowhere**, so a 32 MB
+        # upstream body escaped as an unhandled exception and became an
+        # `internal` 500 — this service reporting its own failure for an
+        # upstream's. It is an upstream failure with a written message, and the
+        # 502 says so.
+        log.warning("graphhopper_response_too_large")
+        raise RoutingError("upstream", str(exc), status_code=502) from exc
     except httpx.HTTPError as exc:
         log.warning("graphhopper_transport_error", extra={"error": type(exc).__name__})
         raise RoutingError(
@@ -983,6 +991,10 @@ async def geocode_search(query: str) -> list[GeocodeResult]:
             "Place search has reached its budget for now. Please try again later.",
             status_code=503,
         ) from exc
+    except ResponseTooLarge as exc:
+        # The same unhandled path as the routing call above.
+        log.warning("nominatim_response_too_large")
+        raise GeocodeError(str(exc), status_code=502) from exc
     except httpx.HTTPError as exc:
         log.warning("nominatim_transport_error", extra={"error": type(exc).__name__})
         raise GeocodeError("Could not reach the place-search service.", status_code=502) from exc

@@ -186,8 +186,35 @@ def test_route_heading_of_a_northbound_line_is_zero() -> None:
     assert route_heading(_line(LONDON, 1000)) == pytest.approx(0.0, abs=1.0)
 
 
-def test_route_heading_of_a_degenerate_route_is_zero() -> None:
-    assert route_heading([LONDON]) == 0.0
+def test_route_heading_of_a_degenerate_route_is_none() -> None:
+    """**Changed return, and the change is the point.**
+
+    This asserted 0.0, which is a bearing — due north — rather than an absence
+    of one. `golden_hour` consumed it as a real heading, so a route with no net
+    direction was scored by whether the sun would be northerly.
+    """
+    assert route_heading([LONDON]) is None
+
+
+def test_a_loop_has_no_heading_rather_than_a_northerly_one() -> None:
+    """A round trip is this app's **default** trip shape.
+
+    `route_heading` returned 0.0 for it — start and end are the same place — and
+    `golden_hour(sun, 0.0)` scores by `cos(azimuth)`, which is a real preference
+    for a northerly sun on a route that has no direction at all. The 0.20-weight
+    light term was ranking departures on it.
+
+    Measured over a year of 15-minute samples with `heading = 0.0`: the light
+    term peaks at 0.616 at Hyde Park, 0.642 at Vondelpark and 0.401 at Colombo
+    Fort. A systematic bias, not a wild one — `golden_hour` only fires for
+    0 < elevation < 15 degrees, and at those elevations the sun is never due
+    north at any latitude this app covers. Real all the same, and free to fix.
+    """
+    out = _line(LONDON, 800)
+    loop = [*out, *reversed(out)]
+
+    assert route_heading(loop) is None
+    assert route_heading(out) is not None
 
 
 # ---------------------------------------------------------------------------

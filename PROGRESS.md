@@ -4321,3 +4321,90 @@ docstrings. It also asserts that the two **bracketing pairs** stayed brackets:
 with another, and `Coverage.describe()` returns "roughly 6°N to 55°N, 1°W to
 80°E" — a string with a comma in it — straight into the middle of one. Commas
 there would have produced a sentence with four of them and no structure.
+
+## §13.9 — Part 9: what two audit passes found
+
+Every finding was reproduced before it was fixed. Two did not reproduce as
+stated and are recorded as such rather than fixed quietly.
+
+### 9a — the serious one, reproduced exactly
+
+`enrich.py` compared `BARRIER_CORRIDOR_M` against the distance to the nearest
+**vertex** while its own docstring justifies the number as a **perpendicular**
+offset. Measured over all 86 committed GraphHopper fixtures — 11,331 segments,
+344.5 km, median segment 14.8 m, p90 69.7 m, longest 499.5 m — **56.3% of route
+length is more than 10 m from any vertex**, which is the predicted figure to the
+decimal.
+
+| | route length from which a barrier standing ON the line is accepted |
+|---|---|
+| nearest-vertex | 43.7% (150.6 km of 344.5 km) |
+| perpendicular | **100%** |
+
+Against the three committed Overpass barrier fixtures, **29 of 258** route x
+fixture pairings gain or lose a barrier. That is a barrier-set delta rather than
+a verdict delta, so the blast radius is modest and the fix is careful rather
+than urgent.
+
+The node's own lat/lon and its along-route distance now travel in the span,
+because the Finding used to take its position from the span's start vertex —
+which *was* the matched vertex under nearest-vertex matching, so the pin landed
+near the gate by accident. And `test_enrich.py`'s `_line(LONDON, 400)` put a
+vertex every **10.00 m**, the corridor width to the centimetre, so the two
+measurements agreed at every point and the bug could not be expressed. That is
+why it shipped.
+
+### 9c — withdrawn, and left alone
+
+The brief's own second pass withdrew it, and it was left alone. `sentence()`'s
+two-branch behaviour is what commit `5ce2bc0` deliberately built.
+
+### 9g — the cache-key collision, reproduced
+
+At 51.5N a 3 dp cell is 111.3 x 69.3 m with a 131.1 m diagonal, and a *pair* of
+rounded points can be displaced by up to **262.3 m**. Found by search: a
+2561.2 m straight line resolving to **foot** and a 2629.0 m one resolving to
+**bike** both produced cache key `a9fe930aacb574781b1bee7b`. One request got the
+other's travel mode. The resolved mode, `path_details()` and `fixture_mode` are
+all in the key now, and `_departure_bucket` falls back to the current hour —
+a null `depart_at` means *now*, and now was not in the key at all.
+
+### 9h — reproduced against the running API
+
+With `Origin:` set: **413 present, 422 present, 429 present**. The 500 is
+produced by `ServerErrorMiddleware`, which sits outside every user middleware,
+so it never reached CORS. Fixed by reusing the `_too_large` pattern, factored
+into one `_reflected_cors` helper both handlers share.
+
+### 9n — one item fixed by not fixing it
+
+`ACCEPTED_BARRIERS` contains `"NONE"`, which is also in `UNKNOWN_VALUES` and is
+checked first, so the membership is genuinely dead. Removing it is one line —
+and it rewrites the Overpass query from
+`^(entrance|gate|kissing_gate|no|none|stile|turnstile)$` to
+`^(entrance|gate|kissing_gate|no|stile|turnstile)$`, which **orphans all three
+committed barrier fixtures**: the offline suite's entire barrier corpus, for a
+membership that changes no answer. Verified by re-signing them against the
+current code, not assumed.
+
+Left in place with the cost written beside it. The fix is that one line plus
+re-recording three fixtures against a live Overpass, in a commit that does only
+that — and re-recording fixtures on this VM is exactly what the brief forbids,
+because `.env` points at a self-hosted router and the generator would key them
+*with* `smoothness` while the offline suite asks without it.
+
+### Everything else
+
+9b (a check reported without running), 9d (routes found then rejected, reported
+as none found), 9e (a truncated answer cached for six hours), 9f (a cache write
+destroying a computed answer, on both transports), 9i (a `done`-less stream
+displayed as a finished result, plus the unflushed tail and the unguarded JSON
+branch), 9j (fresh routes inheriting a cache stamp), 9k (a live region silent on
+a repeated sentence), 9l (exports always metric), 9m (a consent sweep that never
+ran on the first-run screen), and the 9n list: stale objectives sorting to the
+top, a silent fourth chip, `RouteDetail` keeping child state across routes,
+MapView's leaked delegated listeners, `route_heading` returning 0.0 for a loop,
+the elevation grid dropping a mean 10.33 m tail, five counters incremented and
+never published, `fixture_inventory` calling invented data measured,
+`ResponseTooLarge` caught nowhere, one dead selector and two dead class names,
+and distances under 5 m rendering as "0 m".

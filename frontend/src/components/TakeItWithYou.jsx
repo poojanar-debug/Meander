@@ -19,7 +19,7 @@ import {
  * The disclosure states that before the links exist in the DOM, and both links
  * are described by it.
  */
-export default function TakeItWithYou({ route, origin, dest, onAnnounce }) {
+export default function TakeItWithYou({ route, origin, dest, units, onAnnounce }) {
   const [showHandoff, setShowHandoff] = useState(false)
 
   // A printed sheet with the directions collapsed is a printed sheet without
@@ -50,18 +50,18 @@ export default function TakeItWithYou({ route, origin, dest, onAnnounce }) {
 
   if (!route) return null
 
-  const note = provenanceNote(route)
+  const note = provenanceNote(route, units)
   const stamp = exportStamp(route)
   const exportable = (route.geometry?.length ?? 0) >= 2
   const google = exportable ? googleMapsUrl(route) : null
   const apple = exportable ? appleMapsUrl(route) : null
 
   const onGpx = () => {
-    downloadGpx(route, { origin, dest })
+    downloadGpx(route, { origin, dest }, units)
     onAnnounce?.('GPX file saved.')
   }
   const onGeoJson = () => {
-    downloadGeoJson(route)
+    downloadGeoJson(route, units)
     onAnnounce?.('GeoJSON file saved.')
   }
 
@@ -102,7 +102,7 @@ export default function TakeItWithYou({ route, origin, dest, onAnnounce }) {
             </button>
 
             <div className="takeaway__warn" id="takeaway-handoff" hidden={!showHandoff}>
-              <p className="takeaway__warn-title" id="takeaway-warn-title">
+              <p id="takeaway-warn-title">
                 <span aria-hidden="true">⚠ </span>
                 <strong>This will not be the same route.</strong> Those apps route again from the
                 start and end points. None of the surface, kerb or gradient checks below apply to

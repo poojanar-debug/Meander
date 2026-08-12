@@ -28,7 +28,7 @@ export default function OfflineBar({ ageMs, online }) {
         {headline}
       </p>
       <p className="offline__detail">{detail}</p>
-      {!online && <p className="offline__detail offline__detail--map">{mapDetail}</p>}
+      {!online && <p className="offline__detail">{mapDetail}</p>}
     </div>
   )
 }

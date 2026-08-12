@@ -1887,9 +1887,6 @@ fieldset.chips legend {
   html {
     scroll-padding-top: var(--topbar-h);
   }
-  .route-list {
-    grid-template-columns: 1fr;
-  }
   /* The rail is the legend at this width, and the map is only 36vh — a card
      sitting in the corner of it would cover a third of the route. */
   .legend {

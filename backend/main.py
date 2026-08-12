@@ -17,7 +17,7 @@ import uuid
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, replace
-from datetime import UTC
+from datetime import UTC, datetime
 from typing import Any
 
 from fastapi import FastAPI, Query, Request, Response
@@ -353,6 +353,20 @@ async def unhandled_error(request: Request, exc: Exception) -> JSONResponse:
                 "message": "Something went wrong on our side. Please try again.",
             }
         },
+        # ⚠ This is the same defect the 413 was fixed for two commits earlier,
+        # arriving by a different route. Starlette dispatches `Exception`
+        # handlers through `ServerErrorMiddleware`, which sits **outside every
+        # user middleware** — so this response is produced above CORSMiddleware
+        # and never gets a CORS header. Measured with `Origin:` set before the
+        # fix: 413 present, 422 present, 429 present, **500 None**, and
+        # `X-Request-Id` None with it.
+        #
+        # A browser reports that to the page as a generic network failure, so
+        # the envelope this handler exists to guarantee is unreadable by the
+        # only client that would ever see it — and this deployment is
+        # cross-origin by construction (*.pages.dev -> meander-app.duckdns.org),
+        # which makes it the normal path rather than an edge case.
+        headers=_reflected_cors(request),
     )
 
 
@@ -372,12 +386,6 @@ def _too_large(request: Request) -> JSONResponse:
     request-id ordering too — this reflects the one header that matters, and
     only for an origin already on the allowlist.
     """
-    headers = {}
-    origin = request.headers.get("origin")
-    allowed = settings.allowed_origins
-    if origin and (origin in allowed or "*" in allowed):
-        headers["Access-Control-Allow-Origin"] = origin
-        headers["Vary"] = "Origin"
     return JSONResponse(
         status_code=413,
         content={
@@ -386,8 +394,30 @@ def _too_large(request: Request) -> JSONResponse:
                 "message": "That request body is too large.",
             }
         },
-        headers=headers,
+        headers=_reflected_cors(request),
     )
+
+
+def _reflected_cors(request: Request) -> dict[str, str]:
+    """The one CORS header that matters, for a response CORSMiddleware never saw.
+
+    Two handlers need this and they are outside the middleware for different
+    reasons: `_too_large` runs in a middleware that sits above CORSMiddleware,
+    and the catch-all 500 handler is routed by Starlette to
+    `ServerErrorMiddleware`, which sits above every user middleware there is.
+    Neither response is ever touched by CORS, so a browser reports both to the
+    page as a generic network failure and the carefully worded body is
+    unreadable by the only client that would ever see it.
+
+    Reflected only for an origin already on the allowlist, so this widens
+    nothing. A response that would have been refused by CORSMiddleware is still
+    refused here, by the same list.
+    """
+    origin = request.headers.get("origin")
+    allowed = settings.allowed_origins
+    if origin and (origin in allowed or "*" in allowed):
+        return {"Access-Control-Allow-Origin": origin, "Vary": "Origin"}
+    return {}
 
 
 @app.middleware("http")
@@ -547,6 +577,19 @@ def _client_ip(request: Request) -> str | None:
 # ---------------------------------------------------------------------------
 
 
+def fixture_mode_now() -> str:
+    """The fixture mode, read at call time rather than at import.
+
+    ``fixtures.current_mode`` is monkeypatched by the ``fixture_mode`` test
+    fixture, so importing the module here and calling through it keeps the cache
+    key honest under test as well as in production. Binding the function at
+    import time would freeze whichever mode the process started in.
+    """
+    from . import fixtures
+
+    return str(fixtures.current_mode())
+
+
 def route_cache_key(req: RouteRequest) -> str:
     """Rounded inputs only — never a raw user coordinate."""
     origin = (
@@ -580,10 +623,50 @@ def route_cache_key(req: RouteRequest) -> str:
             # Bucketed to the hour, which is the granularity best_departure and
             # the air-quality series actually use, and for the same reason the
             # coordinates above are rounded to 3 dp: an unrounded timestamp
-            # would miss the cache on literally every request. Nothing sends
-            # departAt today, so this is latent — until Phase 5.5 plumbs a real
-            # timestamp through, at which point it stops being latent.
+            # would miss the cache on literally every request.
+            #
+            # A comment here used to say "Nothing sends departAt today, so this
+            # is latent". It was false in the direction that matters: a *null*
+            # departAt means now, and now was not in the key at all. See
+            # `_departure_bucket`.
             "depart_at": _departure_bucket(req),
+
+            # **The resolved mode, not the requested one.** `mode` above can be
+            # "auto", and what "auto" resolves to depends on the straight-line
+            # distance against FOOT_MAX_STRAIGHT_M = 2596.15 m, computed from
+            # full-precision coordinates — while this key rounds them to 3 dp,
+            # which at 51.5N is a 111.3 x 69.3 m cell, a 131.1 m diagonal, and
+            # up to 262.3 m of displacement across a pair of points.
+            #
+            # Reproduced: a 2561.2 m straight line resolving to foot and a
+            # 2629.0 m one resolving to bike both produced cache key
+            # a9fe930aacb574781b1bee7b. One request got the other's travel mode,
+            # which is not a stale answer but the wrong question answered.
+            #
+            # Strictly more precise than `mode` and costs nothing: for a
+            # non-auto request it is the same value.
+            "effective_mode": effective_mode(req.mode, req.minutes, req.straight_line_m()),
+
+            # What the router is asked for, and whether the answer is real.
+            #
+            # `path_details()` changes with `graphhopper_is_self_hosted()` —
+            # `smoothness` is requested only from a self-hosted server — and
+            # that decides whether the accessible custom model can exclude
+            # IMPASSABLE surfaces at all. `fixture_mode` decides whether the
+            # answer is live or replayed, which is a larger difference than any
+            # of the above and appeared in this function not at all.
+            #
+            # Neither string was in the key, so a cache written in replay mode
+            # was served to a live request, and one written against the hosted
+            # API was served to a self-hosted one with a different set of
+            # accessibility constraints behind it.
+            "path_details": list(path_details()),
+            "fixture_mode": fixture_mode_now(),
+
+            # The only anti-staleness component, and it has been "0.1.0" since
+            # the repository was created. It invalidates nothing on its own,
+            # which is why the three keys above had to be added rather than
+            # relying on a version bump nobody performs.
             "version": __version__,
         },
         sort_keys=True,
@@ -611,11 +694,26 @@ def geocode_cache_key(q: str) -> str:
     return hashlib.sha256(material.encode()).hexdigest()[:24]
 
 
-def _departure_bucket(req: RouteRequest) -> str | None:
-    """The departure hour, in UTC, or None when the caller did not ask for one."""
-    if req.depart_at is None:
-        return None
-    when = req.depart_at
+def _departure_bucket(req: RouteRequest) -> str:
+    """The departure hour, in UTC. Falls back to *now* rather than to None.
+
+    ⚠ **A null `depart_at` is not "no departure time", it is "now".**
+    `enrich.py` computes `when = depart_at or datetime.now(UTC)`, and that
+    instant drives `best_departure`, both Open-Meteo hour indexes, the solar
+    position and the shade score. Returning None here left every one of those
+    out of the cache key, so two identical bodies six hours apart produced the
+    same key and the second caller was served departure advice whose latest
+    candidate had already passed.
+
+    Null is **the initial UI state**, not a corner: the dial sends no departure
+    until someone picks one, so this was the common path.
+
+    Bucketing to the current hour bounds that staleness at one hour instead of
+    the cache's six. It is the same granularity the departure search and the
+    air-quality series actually use, and the same reason the coordinates are
+    rounded to 3 dp: an unrounded instant would miss the cache on every request.
+    """
+    when = req.depart_at or datetime.now(UTC)
     if when.tzinfo is None:
         when = when.replace(tzinfo=UTC)
     return when.astimezone(UTC).strftime("%Y-%m-%dT%H")
@@ -790,12 +888,33 @@ def _status_note(
         return raw.preset_note
     if route_id != "accessible" or access is None:
         return None
-    if access.coverage < VERY_LOW_CONFIDENCE_THRESHOLD:
+    if access.coverage >= VERY_LOW_CONFIDENCE_THRESHOLD:
+        return None
+
+    # ⚠ **"No barriers were found" is a report of a check, and the check does
+    # not always run.** This sentence used to be returned on coverage alone,
+    # without consulting `barriers_checked` — so one route object could carry
+    # both "Gates and stiles were not checked" from `access.sentence()` and a
+    # report of that check's result from here, contradicting itself in two
+    # adjacent paragraphs.
+    #
+    # It is reachable on the ordinary path, not an exotic one: the first pass
+    # always calls `_assess(raw)` with `osm_tags=None`, and when Overpass is
+    # unreachable the reassessment is skipped entirely, so the route ships with
+    # the first pass's answer.
+    #
+    # The two branches are different claims and the honest one depends on which
+    # happened. Nothing was found is evidence; nothing was looked for is not.
+    if not access.barriers_checked:
         return (
-            "No barriers were found, but almost nothing along this route has been "
-            "recorded in OpenStreetMap. That is an absence of data, not a step-free route."
+            "Gates and stiles could not be checked for this route, and almost nothing "
+            "along it has been recorded in OpenStreetMap. That is an absence of data, "
+            "not a step-free route."
         )
-    return None
+    return (
+        "No barriers were found, but almost nothing along this route has been "
+        "recorded in OpenStreetMap. That is an absence of data, not a step-free route."
+    )
 
 
 def _guard(stage: str, fn: Any, *args: Any, **kwargs: Any) -> Any:
@@ -1094,8 +1213,27 @@ async def route_events(req: RouteRequest) -> AsyncIterator[dict[str, Any]]:
         routes.append(route)
         yield {"type": "route", "route": route.model_dump()}
 
-    if not any(r.status == "ok" for r in routes):
+    # ⚠ "Nothing routed" and "everything routed and was rejected" are different
+    # answers, and this used to give the first one for both.
+    #
+    # When every objective routes successfully and the accessibility engine
+    # blocks them all, `failures` is **empty** — nothing failed — so
+    # `_best_failure` fell through to a fabricated
+    # `NoRouteFound("No route could be found from there.")`, discarding the
+    # blockers the user actually needs. Reproduced with
+    # `objectives=["accessible"]` against a route the router tagged
+    # `road_class == STEPS`: two `route` events arrive carrying
+    # `blockers=['steps']`, and then the generator raises and the client throws
+    # them away.
+    #
+    # It is a route that exists and cannot be used, which is a first-class
+    # answer in this project — "it will tell you it cannot get you there rather
+    # than inventing a path you cannot use" — and it became reachable for the
+    # first time when the barrier work landed.
+    if not routes and not any(r.status == "ok" for r in routes):
         raise await _best_failure(failures)
+    if not any(r.status == "ok" for r in routes):
+        log.info("every_route_blocked", extra={"routes": len(routes)})
 
     # Narration arrives after the routes, as a second pass over the same ids.
     # The client merges by id rather than appending.
@@ -1120,6 +1258,14 @@ async def route_events(req: RouteRequest) -> AsyncIterator[dict[str, Any]]:
         reason = (
             f"Every route found is longer than your {budget}-minute budget. "
             "The shortest option is shown first."
+        )
+    elif routes and not ok_routes:
+        # The top-level sentence for the case above: routes were found and every
+        # one of them is blocked. It has to be true of what is on screen, and
+        # what is on screen is a list of routes with reasons attached.
+        reason = (
+            "Every route found is blocked. Each one below says what stops it, "
+            "so you can see whether it matters for you."
         )
     yield {
         "type": "done",
@@ -1218,6 +1364,18 @@ async def route_events_with_deadline(
             return
         yield {
             "type": "done",
+            # ⚠ `partial` is what stops this being written to the cache for six
+            # hours. `_stream` and the JSON path both wrote *any* done payload
+            # with the full TTL, and this one carries `enrichment_pending: True`,
+            # `rest_stops: None`, null air and shade, `segments_scored: 0` and a
+            # sentence telling the reader to try again for the full picture —
+            # so every later user behind that cache key was served a truncated
+            # answer that invited them to retry, and retrying returned it again.
+            #
+            # A flag on the event rather than a short TTL: the answer is not
+            # merely stale, it is incomplete, and a complete one is a request
+            # away. It is stripped before the payload reaches the client.
+            "partial": True,
             "payload": RoutesResponse(
                 routes=[Route(**r) for r in usable],
                 best_departure=None,
@@ -1330,10 +1488,34 @@ async def _stream(req: RouteRequest, cache_key: str) -> AsyncIterator[str]:
 
             if event["type"] == "done":
                 finished = event["payload"]
-                await run_in_threadpool(
-                    get_cache().put_route, cache_key, finished, settings.route_cache_ttl_s
-                )
-                cached = True
+                # The frame goes out FIRST, and the cache write is wrapped.
+                #
+                # ⚠ Both halves are the fix for one defect. The write used to
+                # happen before the yield, inside the try whose `except
+                # Exception` emits an `internal` error frame — so a failing
+                # `put_route` destroyed an answer that had already been computed
+                # and paid for: SSE delivered the `route` frames, then an error,
+                # and never the `done` frame the client needs to settle.
+                # Reproduced by making `put_route` raise
+                # `sqlite3.OperationalError("database or disk is full")`, which
+                # is the named failure mode of the cache growth this project
+                # has already had to fix once.
+                #
+                # A cache is a cost control. Failing to write one is not a
+                # reason to withhold the answer it was meant to speed up.
+                yield _sse(event)
+                if not event.get("partial"):
+                    try:
+                        await run_in_threadpool(
+                            get_cache().put_route,
+                            cache_key,
+                            finished,
+                            settings.route_cache_ttl_s,
+                        )
+                        cached = True
+                    except Exception:  # noqa: BLE001 — the answer is already sent
+                        log.warning("route_cache_write_failed")
+                continue
             yield _sse(event)
 
     except asyncio.CancelledError:
@@ -1436,6 +1618,7 @@ async def post_routes(req: RouteRequest, request: Request, response: Response) -
     try:
         payload: dict[str, Any] | None = None
         failure: dict[str, Any] | None = None
+        partial_answer = False
         async for event in route_events_with_deadline(req):
             if _shutting_down.is_set():
                 return _error(
@@ -1446,6 +1629,10 @@ async def post_routes(req: RouteRequest, request: Request, response: Response) -
                 )
             if event["type"] == "done":
                 payload = event["payload"]
+                # See the same flag on the SSE path. A deadline-truncated answer
+                # is complete enough to return and not complete enough to hand
+                # to the next caller for six hours.
+                partial_answer = bool(event.get("partial"))
             # **The error event used to be dropped on the floor here.** The loop
             # looked only for "done", so a deadline that produced nothing left
             # `payload` as None and fell through to the generic 502 below: the
@@ -1468,7 +1655,15 @@ async def post_routes(req: RouteRequest, request: Request, response: Response) -
     if payload is None:
         return _error("upstream", "No route could be produced for that request.", 502)
 
-    await run_in_threadpool(cache.put_route, key, payload, settings.route_cache_ttl_s)
+    # Wrapped, and after the answer exists — the same reasoning as the SSE path.
+    # A `put_route` that raises (`sqlite3.OperationalError("database or disk is
+    # full")` is the named failure mode) used to propagate out of this handler
+    # and turn a computed, paid-for answer into a 500.
+    if not partial_answer:
+        try:
+            await run_in_threadpool(cache.put_route, key, payload, settings.route_cache_ttl_s)
+        except Exception:  # noqa: BLE001 — the answer is already computed
+            log.warning("route_cache_write_failed")
     response.headers["X-Meander-Cache"] = "miss"
     return payload
 
@@ -1621,7 +1816,7 @@ async def prometheus_metrics() -> Response:
     snapshot = metrics.snapshot()
 
     # Written by hand rather than with prometheus_client: that is 200 KB and a
-    # registry abstraction to serialise eleven integers, and it would be the
+    # registry abstraction to serialise a handful of integers, and it would be the
     # first entry in requirements-deploy.txt that exists purely for
     # observability.
     described = {
@@ -1634,6 +1829,23 @@ async def prometheus_metrics() -> Response:
         "upstream_failures_total": ("counter", "Upstream calls that failed."),
         "narration_failures_total": ("counter", "Narration attempts that failed."),
         "enrichment_failures_total": ("counter", "Enrichment stages that failed."),
+        # The five that were incremented and never published, because
+        # `metrics.snapshot()` hard-coded an eleven-name allowlist.
+        "unhandled_errors_total": ("counter", "Exceptions caught by the catch-all handler."),
+        "stream_failures_total": ("counter", "SSE streams that ended in an error frame."),
+        "request_deadline_exceeded_total": (
+            "counter",
+            "Requests truncated by the per-request deadline.",
+        ),
+        # ⚠ The only signal that the 6,000-element Overpass cap was reached,
+        # which means a barrier survey with holes in it was presented as a
+        # complete look. The code that raised that cap explains exactly why that
+        # is dangerous, and then left the alarm unwired.
+        "overpass_truncated_total": (
+            "counter",
+            "Overpass answers that hit the element cap and are therefore incomplete.",
+        ),
+        "client_disconnects_total": ("counter", "Streams cancelled by the client hanging up."),
         "unique_sessions_today": ("gauge", "Distinct sessions today, from an unpersisted digest."),
         "uptime_s": ("gauge", "Seconds since this process started."),
     }

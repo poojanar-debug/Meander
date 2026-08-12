@@ -111,6 +111,25 @@ function init(state) {
 }
 
 /**
+ * A route with the replay stamp removed.
+ *
+ * ⚠ **A spread cannot clear a key the incoming object does not have.** A
+ * replayed route carries `servedFromCache: true` and `cachedAt`; a live SSE
+ * route carries neither, so `{ ...old, ...new }` keeps the old stamp and the
+ * new distance. Simulated: merging a live `{id:'fastest', distance_m:2450}`
+ * over a replayed one yields the new distance and the old timestamp, and fresh
+ * data is then labelled "Saved copy from N minutes ago".
+ *
+ * `cacheStamp` derives the banner from the routes precisely so it cannot drift
+ * from what is on screen — which only holds if the routes themselves are
+ * honest. Merging onto a stamp-free base is what makes that true.
+ */
+function stampFree(route) {
+  const { servedFromCache, cachedAt, ...rest } = route
+  return rest
+}
+
+/**
  * Is what we are looking at a replay, and from when.
  *
  * Derived from the routes rather than held in the reducer, so it cannot drift
@@ -144,9 +163,15 @@ function reducer(state, action) {
       // Never allow zero: a route list with nothing in it is not a state the
       // user can recover from without guessing.
       if (present && state.objectives.length === 1) return state
+      // A fourth chip used to silently un-press the first: `.slice(-3)` drops
+      // the oldest with no disabled state and no announcement of what went. The
+      // limit is real — the API accepts at most three objectives — so the
+      // refusal is honest; being silent about it was not. `onToggleObjective`
+      // in App reads `dropped` and says so.
+      if (!present && state.objectives.length >= 3) return state
       const next = present
         ? state.objectives.filter((o) => o !== action.value)
-        : [...state.objectives, action.value].slice(-3)
+        : [...state.objectives, action.value]
       return withRefetch(state, { objectives: next }, DEBOUNCE.objectives)
     }
 
@@ -183,10 +208,21 @@ function reducer(state, action) {
       const routes =
         index === -1
           ? [...state.routes, incoming]
-          : state.routes.map((r) => (r.id === incoming.id ? { ...r, ...incoming } : r))
-      const ordered = [...routes].sort(
-        (a, b) => state.objectives.indexOf(a.id) - state.objectives.indexOf(b.id),
-      )
+          : state.routes.map((r) =>
+              r.id === incoming.id ? { ...stampFree(r), ...incoming } : r,
+            )
+      // Routes for objectives the user has since removed sorted to the TOP,
+      // because `indexOf` returns -1 for an id no longer in the list and -1
+      // sorts before 0. They are dropped rather than merely re-ordered: a route
+      // for a chip that is no longer pressed is an answer to a question nobody
+      // is asking, and leaving it in the rail while sorting it last would only
+      // move the confusion.
+      const live = routes.filter((r) => state.objectives.includes(r.id))
+      const rank = (id) => {
+        const i = state.objectives.indexOf(id)
+        return i === -1 ? Number.MAX_SAFE_INTEGER : i
+      }
+      const ordered = [...live].sort((a, b) => rank(a.id) - rank(b.id))
       const firstRoutable = ordered.find((r) => r.status === 'ok')
       return {
         ...state,
@@ -503,10 +539,18 @@ export default function App() {
 
   const onToggleObjective = useCallback(
     (id) => {
+      // Read before the dispatch, because the reducer is where the refusal
+      // happens and it cannot speak. Pressing a fourth chip used to drop the
+      // oldest silently; now it is refused and said out loud.
+      const pressed = state.objectives.includes(id)
+      if (!pressed && state.objectives.length >= 3) {
+        announce('Three route types at a time. Unpress one to choose another.')
+        return
+      }
       dispatch({ type: 'toggleObjective', value: id })
-      announce(`Objectives changed.`)
+      announce('Objectives changed.')
     },
-    [announce],
+    [state.objectives, announce],
   )
 
   const hasRoutes = state.routes.length > 0
@@ -797,6 +841,11 @@ export default function App() {
             />
 
             <RouteDetail
+              // Remounts on a route change. Without it the children keep their
+              // state across routes: select a 5 km route, drag the barrier
+              // reporter to 3000 m, select a 1 km route, and the label reads a
+              // distance past the end of the route it would file against.
+              key={selectedRoute?.id ?? 'none'}
               route={selectedRoute}
               theme={state.theme}
               units={state.units}
@@ -806,6 +855,7 @@ export default function App() {
                   route={selectedRoute}
                   origin={state.origin}
                   dest={state.dest}
+                  units={state.units}
                   onAnnounce={announce}
                 />
               }

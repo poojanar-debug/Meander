@@ -85,6 +85,23 @@ class FixtureMissing(RuntimeError):
 MAX_RESPONSE_BYTES = 32 * 1024 * 1024
 
 
+def envelope_provenance(envelope: dict[str, Any]) -> str:
+    """How a fixture came to exist, defaulting to synthetic when it does not say.
+
+    ⚠ **One helper because there were two defaults, and they disagreed.** The
+    loader defaulted a provenance-less envelope to `synthetic` — deliberately,
+    because a hand-written fixture is exactly what `FixtureMissing`'s own
+    message tells a developer to create, and calling invented data "recorded"
+    is the substitution this project must never make. `fixture_inventory`
+    defaulted the same envelope to `recorded`, so `/api/health` reported
+    invented data as measured while the loader treated it as invented.
+
+    Synthetic is the safe direction: it understates what is known.
+    """
+    value = envelope.get("_meander_provenance")
+    return str(value) if value else PROVENANCE_SYNTHETIC
+
+
 class ResponseTooLarge(RuntimeError):
     """An upstream sent more than MAX_RESPONSE_BYTES. Treated as a failure, not
     truncated: half a JSON document is not a smaller answer, it is not an answer.
@@ -415,7 +432,7 @@ def read_fixture(service: str, sig: str) -> httpx.Response | None:
     # tells a developer to "add a synthetic fixture at <path>", and a
     # hand-written file that omits the key is the obvious result. Every
     # committed fixture carries the key, so nothing changes for them.
-    provenance = envelope.get("_meander_provenance", PROVENANCE_SYNTHETIC)
+    provenance = envelope_provenance(envelope)
     headers = dict(resp_spec.get("headers") or {})
     headers[PROVENANCE_HEADER] = provenance
 
@@ -783,7 +800,7 @@ def fixture_inventory() -> dict[str, dict[str, int]]:
         counts = {"recorded": 0, "synthetic": 0}
         for f in service_dir.glob("*.json"):
             try:
-                prov = json.loads(f.read_text()).get("_meander_provenance", PROVENANCE_RECORDED)
+                prov = envelope_provenance(json.loads(f.read_text()))
             except (OSError, json.JSONDecodeError):
                 continue
             counts[prov] = counts.get(prov, 0) + 1
