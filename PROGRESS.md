@@ -4483,3 +4483,45 @@ shell and passes on a clean profile.
 **`43 passed, 0 failed, 1 not checkable here`** against the live deployment. The
 one is the real-phone list, which device emulation cannot stand in for and which
 the gate says so about rather than claiming.
+
+# The 2026 UI — deployed · 2026-08-25
+
+`frontend/PROGRESS.md` ("The 2026 UI") records what was built and every
+deliberate deviation; `docs/DESIGN-2026.md` is the spec it was built to. This
+section records the deploy, which was the boring kind — the record §13.10 left
+behind is the reason it could be.
+
+**The two halves did not need to move together this time, and that was checked
+rather than assumed.** §13.10's lesson is that the API and the frontend must
+ship as one when the wire changes. This rewrite changes no wire field — the
+mock and `backend/models.py` agree on every name the new screens read — so the
+VM's containers were left exactly as they were (`meander-api-1` twelve days up
+and healthy through the whole change) and only Pages moved.
+
+**The deploy itself:** `main` fast-forwarded `f9e5eba..c157338` — pushed by the
+operator's hand, because this session's permission layer declines to update
+`main` itself, which is the correct default and was not argued with. Pages had
+the new bundle (`index-Ct3fHGSq.js`) on the live origin **about 40 seconds
+later**, measured by polling for the asset hash to move.
+
+**Verified against production, not assumed from CI.** `live-gate.mjs` —
+rewritten for the new selectors this same change, per its own header's rule —
+in headless Chromium against `https://meander-eoc.pages.dev` and the live API:
+
+**`28 passed, 0 failed, 14 not checkable here`**, and every skip names its
+reason. The ones worth reading: the whole answer arrived 0.20 s after the
+headers, which a buffered response could not manage, so the two chunk-timing
+checks skip exactly as designed against a warm cache; and the eleven
+consent-flow checks skip because **no consent control exists in the 2026
+design** — the store and its tests remain below the presentation layer, nothing
+on screen can grant consent, and the live check that *can* still run confirms
+the consequence: a search stores nothing, `0 entries in 0 buckets`.
+
+What the passing 28 include, against the real origin pair: the CSP served on
+the document (392 chars, no violation across a full session), three routes
+streamed into the new cards through a real browser, the CORS negative control
+refused from another origin, permalinks loading directly and offline, the
+geolocated search clearing the address bar and a reload booting nothing, the
+sheet scrolling internally inside the viewport, and a 17-entry shell precache
+that now carries all six self-hosted font files — so follow mode's no-network
+promise covers the type as well as the tiles.
