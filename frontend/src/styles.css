@@ -1,189 +1,248 @@
-/* Meander design system.
+/**
+ * Meander's stylesheet — the 2026 redesign.
  *
- * Two rules constrain everything here:
- *   1. No third-party requests. Fonts are named with local fallbacks rather
- *      than fetched from a CDN, because loading a webfont would leak every
- *      visitor's IP to a third party and this app promises it does not.
- *   2. Colour is never the only signal. Every route carries a dash pattern and
- *      a full text description as well as a hue.
+ * One look, deliberately. The approved mockups define a single palette of
+ * clean pastels on warm neutrals and no dark variant, so the dark block below
+ * restates the same values rather than a second palette. It exists because
+ * three consumers are pinned to its shape: `scripts/check_palette.sh` permits
+ * hex only inside the two token blocks, `dash-palette.test.js` reads
+ * `--route-*` and `--ink-2` out of both, and `scripts/make-icons.mjs` reads
+ * `--accent` out of the dark one.
  *
- * Every colour is declared once, here and in the [data-theme="dark"] block
- * below. No hard-coded hex may appear anywhere else in this file — that is a
- * checkable property, and `grep '#' styles.css` outside these two blocks is how
- * it gets checked. Implements DESIGN-HANDOFF §2.
+ * Every colour is declared here and nowhere else. Values the design states as
+ * oklch are converted to sRGB hex because MapLibre paints to a canvas and its
+ * colour parser does not read oklch() — the oklch source is kept in a comment
+ * beside each conversion so the canonical value is never lost. Values the
+ * design states as hex are used verbatim.
  */
 
+/* ------------------------------------------------------------------ fonts */
+
+/* Self-hosted, so the shell the service worker precaches includes them and
+ * follow mode's no-network promise covers the type as well as the tiles.
+ * Licence texts sit beside the files (OFL-*.txt); both faces are OFL. */
+
+@font-face {
+  font-family: 'Hanken Grotesk';
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url('./fonts/hanken-grotesk-var-latin.woff2') format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA,
+    U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193,
+    U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: 'Hanken Grotesk';
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url('./fonts/hanken-grotesk-var-latin-ext.woff2') format('woff2');
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF,
+    U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020,
+    U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+@font-face {
+  font-family: 'Space Mono';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url('./fonts/space-mono-400-latin.woff2') format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA,
+    U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193,
+    U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: 'Space Mono';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url('./fonts/space-mono-400-latin-ext.woff2') format('woff2');
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF,
+    U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020,
+    U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+@font-face {
+  font-family: 'Space Mono';
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url('./fonts/space-mono-700-latin.woff2') format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA,
+    U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193,
+    U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: 'Space Mono';
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url('./fonts/space-mono-700-latin-ext.woff2') format('woff2');
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF,
+    U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020,
+    U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+
+/* ---------------------------------------------------------------- palette */
+
 :root {
-  /* -- surface and ink (§2.1) -------------------------------------------- */
-  --paper: #f6f3ec;
-  --raised: #fffefa;
-  --sunken: #ede9df;
-  --rule: #dcd5c6;
-  --rule-strong: #c4bca8;
-  --ink: #16241c;
-  --ink-2: #55645a;
+  /* -- warm neutrals ------------------------------------------------------ */
+  --ink: #232320;
+  --ink-2: #77756c; /* secondary */
+  --ink-3: #a6a49b; /* tertiary — decoration and disabled surfaces only: as
+   * running text it measures 2.4:1 and fails the gate, so every rendered
+   * sentence that the mockups set tertiary wears --ink-2 instead */
+  --ink-2-deep: #6f6d64; /* secondary for text on tinted grounds (input fill,
+   * the segmented container), where #77756c drops under 4.5:1 */
+  --ink-disabled: #b4b2a8;
+  --surface: #fdfcfa;
+  --canvas: #eceae4;
+  --on-dark: #f5f4ef;
 
-  /* -- brand and accent --------------------------------------------------- */
-  --brand: #1c4633;
-  --brand-hover: #122e21;
-  --brand-on: #f6f3ec;
-  --brand-tint: #e4ede5;
-  --accent: #2f7d53;
-  --ok-ink: #1c5e3c;
+  /* -- sky: primary actions, fastest, GPS puck ---------------------------- */
+  --sky-deep: #4e7fbe; /* oklch(0.58 0.11 245), design's stated fallback */
+  --sky-action: #3077ad; /* oklch(0.55 0.11 245): the deep, darkened to the
+   * nearest value where surface-white button text clears WCAG's 4.5:1. The
+   * approved #4e7fbe measures 4.01:1 under white 14-16px text, and the a11y
+   * gate is a harder constraint than the swatch; lines, dots and the puck
+   * keep the true deep, which as a graphic only needs 3:1. */
+  --sky-deep-hover: #226ba0; /* oklch(0.51 0.11 245): the action tone, 4 points lower L */
+  --sky-wash: #d5ebfe; /* oklch(0.93 0.035 245) */
+  --sky-on-wash: #19517b; /* oklch(0.42 0.09 245) */
+  --sky-link: #296898; /* oklch(0.5 0.1 245) */
+  --sky-border: #92bde2; /* oklch(0.78 0.07 245) */
+  --sky-halo: rgba(78, 127, 190, 0.25); /* the deep, for pin and puck halos */
 
-  /* -- warning ------------------------------------------------------------ */
-  --warn-ink: #8a2c14;
-  --warn-ground: #f7e9e1;
-  --warn-rule: #d3a184;
+  /* -- mint: scenic, ok/success, rest stops ------------------------------- */
+  --mint-deep: #3fa284; /* oklch(0.6 0.1 165), design's stated fallback */
+  --mint-wash: #d0f1e1; /* oklch(0.93 0.04 165) */
+  --mint-on-wash: #135b42; /* oklch(0.42 0.08 165) */
+  --mint-border: #8dc6ac; /* oklch(0.78 0.07 165) */
 
-  /* -- route identity (§2.3) ---------------------------------------------
-   * Graphics only — map lines, the 4px card edge, swatches, the legend. Never
-   * as text on paper: --route-fastest clears the 3:1 graphical-object
-   * threshold but not the 4.5:1 text threshold. Mirrored in lib/dash.js,
-   * which is what the map reads. */
-  --route-fastest: #c2703d;
-  --route-scenic: #2f7d53;
-  --route-accessible: #5b6ecf;
-  --route-quiet: #8a5cb4;
-  --route-shade: #1e7a78;
-  --route-air: #b0455f;
+  /* -- lilac: accessible, coverage notes ---------------------------------- */
+  --lilac-deep: #886aaa; /* oklch(0.58 0.1 305) */
+  --lilac-wash: #ede2fb; /* oklch(0.93 0.035 305) */
+  --lilac-on-wash: #4f3f62; /* oklch(0.4 0.06 305) */
+  --lilac-border: #c2addc; /* oklch(0.78 0.07 305) */
 
-  /* -- map palette (§2.4) -------------------------------------------------- */
-  --map-land: #e9e5d8;
-  --map-park: #cfe0c9;
-  --map-water: #c6dae4;
+  /* -- amber: barriers, steep spans, departure ---------------------------- */
+  --amber-deep: #c99d4e; /* oklch(0.72 0.11 80) */
+  --amber-wash: #fcedcd; /* oklch(0.95 0.045 85) */
+  --amber-on-wash: #784900; /* oklch(0.45 0.1 70) */
+  --amber-border: #cfb384; /* oklch(0.78 0.07 80) */
+
+  /* -- rose: blocked, steps, End ------------------------------------------ */
+  --rose-deep: #b65a5c; /* oklch(0.58 0.12 20) */
+  --rose-wash: #ffdfde; /* oklch(0.93 0.035 20) */
+  --rose-on-wash: #88383b; /* oklch(0.45 0.11 20) */
+  --rose-border: #e1a6a5; /* oklch(0.78 0.07 20) */
+
+  /* -- map (§ visual direction: restyled basemap; tiles stay uncached) ----- */
+  --map-land: #ecf0e6;
+  --map-park: #deebd3;
+  --map-water: #d9e7ee;
   --map-road: #fbfaf6;
+  --map-follow-behind: #b8b6ac; /* follow mode: the stretch already walked */
+  --map-connector: #9a988e; /* off-route dashed connector back to the line */
 
-  /* -- elevation (§2.6) ---------------------------------------------------- */
-  --shadow-1: 0 1px 2px rgb(22 36 28 / 6%), 0 2px 8px rgb(22 36 28 / 6%);
-  --shadow-2: 0 2px 4px rgb(22 36 28 / 8%), 0 8px 24px rgb(22 36 28 / 10%);
+  /* -- route identity -----------------------------------------------------
+   * Mirrored in lib/dash.js, where the MapLibre layers read them — a WebGL
+   * paint property cannot resolve var(). dash-palette.test.js holds the two
+   * copies together. quiet/shade/air ship disabled ("· soon"); their hues are
+   * placeholders drawn from the same oklch system so the table stays total. */
+  --route-fastest: #4e7fbe;
+  --route-scenic: #3fa284;
+  --route-accessible: #886aaa;
+  --route-quiet: #6975b5; /* oklch(0.58 0.1 275) */
+  --route-shade: #008c8d; /* oklch(0.58 0.1 195) */
+  --route-air: #b87252; /* oklch(0.62 0.1 45) */
 
-  color-scheme: light;
+  /* -- legacy brand pair, consumed by the icon generator only --------------
+   * scripts/make-icons.mjs draws the launcher icons from --brand and the dark
+   * block's --accent, and icons.test.js pins the shipped pixels to exactly
+   * these values. The launcher identity is outside the redesign's scope, so
+   * the pair keeps its values and nothing else in this file reads it. */
+  --brand: #1c4633;
+  --accent: #2f7d53;
 }
 
-/* Dark (§2.2). No transition between the two: cross-fading two full palettes
- * looks broken rather than smooth (§10). */
+/* The same palette again. See the header: this design commits to one look,
+ * and this block exists for the three consumers pinned to its shape. */
 [data-theme='dark'] {
-  --paper: #0c1611;
-  --raised: #132019;
-  --sunken: #080f0b;
-  --rule: #26362c;
-  --rule-strong: #3a4e42;
-  --ink: #e8efe8;
-  --ink-2: #9baea1;
+  --ink: #232320;
+  --ink-2: #77756c;
+  --ink-3: #a6a49b;
+  --ink-disabled: #b4b2a8;
+  --surface: #fdfcfa;
+  --canvas: #eceae4;
+  --on-dark: #f5f4ef;
 
-  --brand: #7fc79b;
-  --brand-hover: #9ad6b0;
-  --brand-on: #0a1710;
-  --brand-tint: #17281e;
-  --accent: #8fd3a9;
-  --ok-ink: #8fd3a9;
+  --route-fastest: #4e7fbe;
+  --route-scenic: #3fa284;
+  --route-accessible: #886aaa;
+  --route-quiet: #6975b5;
+  --route-shade: #008c8d;
+  --route-air: #b87252;
 
-  --warn-ink: #f5b49b;
-  --warn-ground: #2a1811;
-  --warn-rule: #6b3a24;
-
-  --route-fastest: #e8a46f;
-  --route-scenic: #6fc38e;
-  --route-accessible: #95a4f0;
-  --route-quiet: #c2a0e8;
-  --route-shade: #63c4be;
-  --route-air: #ee8aa0;
-
-  --map-land: #16221b;
-  --map-park: #1d3527;
-  --map-water: #152a33;
-  --map-road: #24332b;
-
-  --shadow-1: 0 1px 2px rgb(0 0 0 / 40%);
-  --shadow-2: 0 8px 28px rgb(0 0 0 / 50%);
-
-  color-scheme: dark;
+  --accent: #8fd3a9; /* the icon generator's PATH colour — pinned by test */
 }
 
-/* Type, space and shape carry no colour, so they are declared once and are the
- * same under both themes. */
+/* ------------------------------------------------- theme-invariant tokens */
+
 :root {
-  --font-display: 'Newsreader', 'Iowan Old Style', 'Palatino Linotype', Palatino, Georgia,
-    'Times New Roman', serif;
-  --font-body: 'IBM Plex Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto,
-    'Helvetica Neue', system-ui, sans-serif;
+  --font-ui: 'Hanken Grotesk', 'Avenir Next', 'Segoe UI', 'Helvetica Neue',
+    Arial, sans-serif;
+  --font-mono: 'Space Mono', ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
 
-  --t-display: 2rem;
-  --t-h2: 1.375rem;
-  --t-h3: 1.0625rem;
-  --t-metric: 1.75rem;
-  --t-body: 0.9375rem;
-  --t-small: 0.8125rem;
-  --t-micro: 0.75rem;
+  /* Alpha-derived neutrals. rgba over hex so the colour gate stays a hex
+   * gate; all of these are stated by the design in exactly this form. */
+  --hairline: rgba(35, 35, 32, 0.08); /* list separators */
+  --border: rgba(35, 35, 32, 0.12); /* borders, hairline circles */
+  --border-strong: rgba(35, 35, 32, 0.16);
+  --input-fill: rgba(35, 35, 32, 0.055);
+  --track: rgba(35, 35, 32, 0.07);
+  --seg-fill: rgba(35, 35, 32, 0.06); /* segmented-control container */
+  --hover-fill: rgba(35, 35, 32, 0.04); /* desktop hover on outline pills */
+  --grabber: rgba(35, 35, 32, 0.14);
+  --scrim: rgba(35, 35, 32, 0.16);
+  --map-attribution: rgba(35, 35, 32, 0.45);
+  --hairline-on-dark: rgba(245, 244, 239, 0.16); /* rules on the ink card */
 
-  /* 4px base. The handoff writes this as "--s1 … --s10" and then enumerates
-   * eight values; eight is what the rest of the document references. */
-  --s1: 4px;
-  --s2: 8px;
-  --s3: 12px;
-  --s4: 16px;
-  --s5: 20px;
-  --s6: 24px;
-  --s7: 32px;
-  --s8: 40px;
-
-  --r-sm: 8px;
-  --r-md: 12px;
-  --r-lg: 16px;
+  /* Radii */
   --r-pill: 999px;
+  --r-input: 14px; /* inputs and primary buttons: 13–14 */
+  --r-chip: 10px; /* barrier chip inside the step list */
+  --r-card: 16px;
+  --r-dock: 18px;
+  --r-banner: 20px;
+  --r-sheet: 22px; /* mobile sheet top corners */
+  --r-modal: 24px; /* desktop modal */
 
-  /* Print is theme-invariant on purpose: a dark-theme sheet would either empty
-   * a cartridge or print as light grey on white. These sit here, not in either
-   * colour block, because they do not change with the theme. */
-  --print-paper: #ffffff;
-  --print-ink: #000000;
-  --print-rule: #999999;
+  /* Shadows */
+  --shadow-card: 0 10px 28px rgba(30, 30, 25, 0.1);
+  --ring-card: 0 0 0 1px rgba(35, 35, 32, 0.09); /* the flat alternative */
+  --shadow-selected: 0 14px 34px rgba(30, 30, 25, 0.16); /* + 2px route ring */
+  --shadow-seg: 0 2px 8px rgba(30, 30, 25, 0.1); /* the active segment's small lift */
+  --shadow-sheet: 0 -14px 44px rgba(30, 30, 25, 0.14);
+  --shadow-float: 0 14px 40px rgba(30, 30, 25, 0.18);
+  --shadow-modal: 0 30px 80px rgba(30, 30, 25, 0.28);
+  --glow-sky: 0 8px 22px oklch(0.58 0.11 245 / 0.35);
 
-  /* A URL is checked character by character, and a proportional face makes 1/l
-   * and 0/O ambiguous. System stack only — a webfont would be a third-party
-   * request, which this file's header rules out. */
-  --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-
-  /* Every interactive target must be at least this in both dimensions. */
+  /* Every interactive target clears this. dash-palette.test.js refuses any
+   * smaller min-height anywhere in this file. */
   --target: 44px;
-  /* The height of the sticky topbar, declared once.
-   *
-   * `56px` appeared as a literal in exactly one rule and was referenced by
-   * nothing, so the two offsets that depend on it — `scroll-padding-top` below,
-   * and the follow layer's top inset — had no way to say so. Nothing measures
-   * the header at runtime and nothing needs to: it is `min-height` plus the top
-   * inset, and both are declared here.
-   *
-   * Read through `var(--safe-top)` and never `env()` directly, so the four-call
-   * budget `styles.safe-area.test.js` pins stays at four and the probe at the
-   * end of this file can still substitute real device insets. */
-  --topbar-h: calc(56px + var(--safe-top));
 
-  /* Device geometry, theme-invariant for the same reason --target is.
-   *
-   * index.html:5 already sets viewport-fit=cover, so this app is opted into
-   * painting under the notch whether or not it handles the insets. These make
-   * that opt-in honest.
-   *
-   * The `0px` fallback is load-bearing, not decoration: on a UA that does not
-   * recognise the inset name the property is invalid at computed-value time
-   * and every calc() below collapses — taking the ordinary --s4 padding with
-   * it. Removing four characters would silently unpad the app.
-   *
-   * Read through these tokens, never env() directly. That indirection is what
-   * makes the geometry testable by substitution — see the probe at the end of
-   * this file — and styles.safe-area.test.js enforces it.
-   *
-   * `padding-inline` below is logical and env() is physical. Safe only because
-   * this app is LTR-only (index.html:2 is lang="en"; there is no [dir] or
-   * :dir() selector in this file). If RTL is ever added, every inline pairing
-   * below inverts. */
+  /* Device geometry, theme-invariant. Read through var(--safe-*) and never
+   * env() directly — styles.safe-area.test.js counts exactly these four
+   * calls, and the explicit 0px fallback is the difference between "no inset"
+   * and an invalid declaration that vanishes at computed-value time. */
   --safe-top: env(safe-area-inset-top, 0px);
   --safe-right: env(safe-area-inset-right, 0px);
   --safe-bottom: env(safe-area-inset-bottom, 0px);
   --safe-left: env(safe-area-inset-left, 0px);
 }
+
+/* ------------------------------------------------------------------- base */
 
 *,
 *::before,
@@ -191,661 +250,2125 @@
   box-sizing: border-box;
 }
 
+/* One look means one colour-scheme. index.html's inline script — whose bytes
+ * the CSP hash pins, so it cannot cheaply change — still writes an inline
+ * `color-scheme` per the stored theme; !important is the one specificity that
+ * outranks an inline style, and without it a dark-preference visitor gets dark
+ * UA scrollbars and form controls against a warm cream page. */
+html {
+  color-scheme: light !important;
+}
+
 html,
-body,
-#root {
-  height: 100%;
+body {
+  margin: 0;
+  padding: 0;
 }
 
 body {
-  margin: 0;
-  background: var(--paper);
+  background: var(--canvas);
   color: var(--ink);
-  font-family: var(--font-body);
-  font-size: 16px;
-  line-height: 1.5;
+  font-family: var(--font-ui);
+  font-size: 15px;
+  line-height: 1.45;
   -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
 }
 
-h1,
-h2,
-h3 {
-  font-family: var(--font-display);
-  font-weight: 500;
-  margin: 0;
-  line-height: 1.2;
+/* The data face. Every numeral and machine-ish string wears this. */
+.mono {
+  font-family: var(--font-mono);
 }
 
-/* One global focus style. Never `outline: none` without a replacement. */
-*:focus-visible {
-  outline: 3px solid var(--accent);
+/* Uppercase micro-label: mono 10, tracking 1.8. */
+.microlabel {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 400;
+  letter-spacing: 1.8px;
+  text-transform: uppercase;
+  color: var(--ink-2);
+}
+
+button {
+  font: inherit;
+  color: inherit;
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+}
+
+input,
+select,
+textarea {
+  font: inherit;
+  color: inherit;
+}
+
+a {
+  color: var(--sky-link);
+}
+
+/* Focus: 2px sky ring, offset 2. */
+:focus-visible {
+  outline: 2px solid var(--sky-deep);
   outline-offset: 2px;
-  border-radius: 4px;
 }
 
 .visually-hidden {
   position: absolute;
   width: 1px;
   height: 1px;
-  padding: 0;
   margin: -1px;
+  padding: 0;
   overflow: hidden;
   clip: rect(0 0 0 0);
-  clip-path: inset(50%);
   white-space: nowrap;
   border: 0;
 }
 
 .skip-link {
   position: absolute;
-  inset-inline-start: calc(var(--safe-left) + var(--s2));
-  top: -60px;
-  z-index: 100;
-  background: var(--raised);
+  z-index: 60;
+  top: calc(var(--safe-top) + 8px);
+  left: -9999px;
+  min-height: var(--target);
+  display: inline-flex;
+  align-items: center;
+  background: var(--surface);
   color: var(--ink);
-  border: 2px solid var(--accent);
-  border-radius: var(--r-sm);
-  padding: var(--s3) var(--s4);
-  font-weight: 600;
-  text-decoration: none;
-  transition: top 120ms ease;
-}
-/* Without --safe-top this lands at 8px — inside the status-bar strip on a
-   notched phone, so the first thing a keyboard user reaches is the one thing
-   they cannot see. */
-.skip-link:focus {
-  top: calc(var(--safe-top) + var(--s2));
+  border: 2px solid var(--sky-deep);
+  border-radius: var(--r-input);
+  padding: 10px 16px;
 }
 
-.tabular {
-  font-variant-numeric: tabular-nums;
+.skip-link:focus-visible {
+  left: calc(var(--safe-left) + 8px);
 }
 
-/* ---------------------------------------------------------------- layout */
+/* ------------------------------------------------------------- app layout */
 
-/* The app owns the viewport: the panel scrolls, the map does not. dvh rather
- * than vh so a mobile browser's collapsing address bar does not leave a strip
- * of blank page below the map. */
+/* Full-viewport map with floating layers over it, on both sides of the
+ * breakpoint. dvh rather than vh: iOS measures vh with the URL bar retracted,
+ * so a plain-vh layer overhangs the screen exactly while the bar shows. */
 .app {
-  display: flex;
-  flex-direction: column;
-  height: 100vh;
+  position: relative;
   height: 100dvh;
-}
-
-/* minmax(0, 1fr) on the stage is REQUIRED and is not a stylistic choice. A
- * plain `1fr` resolves its minimum to min-content, and the map's SVG reports a
- * min-content width wider than the column it is in — which pushes the grid
- * about 12px past the viewport and gives the whole page a horizontal scrollbar
- * on mobile. `minmax(0, ...)` lets the column shrink below its content. The
- * same reasoning is why .panel and .stage both set min-width: 0. */
-.layout {
-  display: grid;
-  grid-template-columns: minmax(360px, 420px) minmax(0, 1fr);
-  flex: 1 1 auto;
-  min-height: 0;
-}
-
-/* The panel no longer scrolls. `.panel__scroll` below does.
- *
- * The trip bar used to be a `position: sticky` first flex child of the
- * scrollport, which meant the pinned block was whatever the trip bar happened
- * to be tall at that moment — and it is not one height, it is five. Measured in
- * Chromium 150 at 1200x900, against an 808px scrollport:
- *
- *     closed                    133px   16.5% of the scrollport
- *     "From" open               306px   37.9%
- *     "To" open                 299px   37.0%
- *     "To" + suggestions      318.5px   39.4%  (up to ~559 with a full list)
- *     "Compare" open            391px   48.4%
- *     "Time & travel" open    801.5px   99.2%
- *
- * That last row is the whole argument. Opening the drawer that holds the dial,
- * the mode select and the units control pins **99.2% of the desktop
- * scrollport**, and none of it can be scrolled away, because a sticky element
- * at `top: 0` is by definition the thing that does not move. A 668px swing in
- * the height of an unscrollable region is not a value to compensate for with a
- * `scroll-padding-top`; it is an arrangement to stop using.
- *
- * Taking the bar out of the scrollport inverts it: an open drawer now
- * *shortens* the scrolling area instead of freezing it.
- *
- * `overflow-y: hidden` and not the `overflow` shorthand, and both axes are
- * restated in the mobile override. See that override for why. */
-.panel {
-  display: flex;
-  flex-direction: column;
-  /* Two children now — the bar and the scroller — and the seam between them is
-     a border rather than a gap. See .tripbar. */
-  gap: 0;
-  overflow-y: hidden;
-  overflow-x: hidden;
-  min-width: 0;
-  min-height: 0;
-  padding: var(--s4);
-  /* This one rule is the whole "panel and footer" half of the port. .about is
-     the footer — it was collapsed into the About disclosure — and it is pinned
-     to the panel's bottom by .panel__spacer, in normal flow, so it needs no
-     rule of its own. Same for .departure, .steps and .detail__actions.
-     padding-inline-end is deliberately absent: above 900px the panel's
-     trailing edge is the border it shares with .stage, not the viewport. It is
-     added below 900px in the safe-area section at the end of this file. */
-  padding-inline-start: calc(var(--s4) + var(--safe-left));
-  padding-bottom: calc(var(--s4) + var(--safe-bottom));
-  background: var(--paper);
-  border-inline-end: 1px solid var(--rule);
+  overflow: hidden;
 }
 
 .stage {
-  position: relative;
-  min-width: 0;
-  min-height: 0;
-  background: var(--sunken);
+  position: absolute;
+  inset: 0;
 }
 
-/* Pins the About disclosure to the bottom of the panel however short the
- * content above it is (§4.9). */
-.panel__spacer {
-  flex: 1 1 auto;
-  min-height: var(--s4);
+.map {
+  position: absolute;
+  inset: 0;
 }
 
-.results-head {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: var(--s3);
-  margin: 0;
-}
-.results-head__title {
-  font-family: var(--font-display);
-  font-size: var(--t-h2);
-  margin: 0;
+/* Two selectors deep on purpose. MapLibre stamps `.maplibregl-map` onto this
+ * element with `position: relative` and no height, and maplibre-gl.css loads
+ * after this file — at equal specificity its rule wins and the canvas box
+ * collapses to 390x0 while the WebGL canvas floats at its 300px default.
+ * Measured, not theoretical. The extra class outranks it without !important. */
+.map .map__canvas {
+  position: absolute;
+  inset: 0;
 }
 
-/* ---------------------------------------------------------------- topbar */
-
-.topbar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--s4);
-  /* min-height, not height: box-sizing is border-box globally, so `height: 56px`
-     plus the padding-top below would eat the inset out of the content box and
-     clip the 44px .icon-button and the 36px .theme-toggle. min-height also lets
-     the bar grow under large Dynamic Type. .topbar is flex:none in a 100dvh
-     column, so this is what sizes it; .layout shrinks by the same amount, which
-     is right — the strip under the status bar was never usable map. */
-  min-height: var(--topbar-h);
-  flex: none;
-  /* Padding, never margin: the background must keep painting edge-to-edge under
-     the status bar. */
-  padding-top: var(--safe-top);
-  padding-inline: calc(var(--s4) + var(--safe-left)) calc(var(--s4) + var(--safe-right));
-  background: var(--raised);
-  border-bottom: 1px solid var(--rule);
-  position: sticky;
-  top: 0;
-  z-index: 40;
+.map__fallback {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: var(--canvas);
+  text-align: center;
+  color: var(--ink-2);
 }
 
-.topbar__brand {
-  display: flex;
-  align-items: baseline;
-  gap: var(--s3);
-  min-width: 0;
+/* Bottom-center attribution: mono 9.5. The link inside sits in a sentence, so
+ * WCAG 2.5.8's inline exemption applies and the 44px sweep leaves it alone. */
+.map-attribution {
+  position: absolute;
+  z-index: 20;
+  left: 50%;
+  transform: translateX(-50%);
+  bottom: calc(var(--safe-bottom) + 4px);
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  color: var(--map-attribution);
+  white-space: nowrap;
+  pointer-events: auto;
 }
 
-.topbar__wordmark {
-  font-family: var(--font-display);
-  font-size: 1.375rem;
-  letter-spacing: -0.01em;
-  color: var(--brand);
+.map-attribution a {
+  color: inherit;
 }
 
-/* The wordmark is a button now: pressing it starts a new walk.
-   No background and no border, deliberately — one would read as a third pill
-   beside the theme toggle and About on the right, and this is a wordmark that
-   happens to be pressable rather than a control that happens to say Meander.
-   `color: inherit` and `font: inherit` are what keep it looking like the h1 it
-   is inside; a UA-styled button here would undo the display face and the
-   letter-spacing above. */
-.topbar__home {
+/* Re-centre, follow mode only, only after a gesture took the camera. */
+.map__recentre {
+  position: absolute;
+  z-index: 25;
+  right: calc(var(--safe-right) + 16px);
+  top: 50%;
+  transform: translateY(-50%);
+  min-width: var(--target);
+  min-height: var(--target);
   display: inline-flex;
   align-items: center;
-  gap: var(--s2);
-  /* The 44px floor, met by the control rather than by its text. */
-  min-height: var(--target);
-  padding: 0;
-  border: 0;
-  background: none;
-  color: inherit;
-  font: inherit;
-  letter-spacing: inherit;
-  cursor: pointer;
-}
-.topbar__home:hover .topbar__logo {
-  color: var(--accent);
+  gap: 6px;
+  padding: 10px 16px;
+  background: var(--surface);
+  color: var(--sky-on-wash);
+  border-radius: var(--r-pill);
+  box-shadow: var(--shadow-float);
+  font-weight: 600;
+  font-size: 13px;
 }
 
-/* Sized in em so it tracks the wordmark: ~24px beside 22px of text, and it
-   grows with Dynamic Type instead of staying at whatever px it was born.
-   `flex: none` so a narrow bar squeezes the word and never the mark. */
-.topbar__logo {
+/* Map markers (DOM, so they carry aria-labels). */
+.marker {
+  border-radius: 50%;
+  box-sizing: content-box;
+}
+
+/* Origin: ink pin 8px with surface ring and sky halo. */
+.marker--origin {
+  width: 8px;
+  height: 8px;
+  background: var(--ink);
+  border: 3px solid var(--surface);
+  box-shadow: 0 0 0 6px var(--sky-halo);
+}
+
+/* Blockers: an accent dot with a surface ring at the barrier's coordinates.
+ * Steps are rose; every other barrier is amber. */
+.marker--barrier {
+  width: 12px;
+  height: 12px;
+  background: var(--amber-deep);
+  border: 3px solid var(--surface);
+  box-shadow: var(--ring-card);
+}
+
+.marker--barrier-steps {
+  background: var(--rose-deep);
+}
+
+.marker--dest {
+  width: 10px;
+  height: 10px;
+  background: var(--ink);
+  border: 3px solid var(--surface);
+}
+
+/* --------------------------------------------------------------- ribbon */
+
+/* Demonstration-data warning. Not dismissible: a route built from invented
+ * geometry must never stop announcing itself. A full-width strip along the
+ * top edge rather than a floating card, and every top-anchored layer below
+ * shifts down under it via the .app--demo offsets — a warning that covered
+ * the search's Cancel or the follow banner's distance would be a warning
+ * that costs the user a control. */
+.ribbon {
+  position: absolute;
+  z-index: 55;
+  top: 0;
+  left: 0;
+  right: 0;
+  padding: calc(var(--safe-top) + 6px) 14px 6px;
+  background: var(--amber-wash);
+  color: var(--amber-on-wash);
+  border-bottom: 1px solid var(--amber-border);
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  line-height: 1.4;
+  text-align: center;
+}
+
+/* Room for the demo strip, on every layer anchored to the top edge. */
+.app--demo .capsule-wrap {
+  top: calc(var(--safe-top) + 22px + 44px);
+}
+
+.app--demo .follow {
+  padding-top: calc(var(--safe-top) + 16px + 44px);
+}
+
+.app--demo .search {
+  padding-top: calc(var(--safe-top) + 12px + 44px);
+}
+
+.app--demo .plan__back {
+  top: calc(var(--safe-top) + 12px + 44px);
+}
+
+.app--demo .linknote,
+.app--demo .status {
+  top: calc(var(--safe-top) + 84px + 44px);
+}
+
+/* ---------------------------------------------------------------- shared */
+
+/* Route/objective identity: a 9–11px filled dot in the deep accent. */
+.dot {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
   flex: none;
-  color: var(--brand);
 }
 
-/* 320px is the narrowest width the gate tests, and the bar has to hold the
-   wordmark, the theme pill and About there. The mark is the one thing on it
-   that carries no information the wordmark does not. */
-@media (max-width: 379px) {
-  .topbar__logo {
-    display: none;
+.dot--fastest { background: var(--route-fastest); }
+.dot--scenic { background: var(--route-scenic); }
+.dot--accessible { background: var(--route-accessible); }
+.dot--quiet { background: var(--route-quiet); }
+.dot--shade { background: var(--route-shade); }
+.dot--air { background: var(--route-air); }
+.dot--sky { background: var(--sky-deep); }
+.dot--amber { background: var(--amber-deep); }
+.dot--ink { background: var(--ink-2); }
+
+/* The primary action: sky button. Hover darkens about 4% L. */
+.button-sky {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: var(--target);
+  background: var(--sky-action);
+  color: var(--surface);
+  font-weight: 700;
+  font-size: 14px;
+  padding: 10px 22px;
+  border-radius: var(--r-pill);
+  box-shadow: var(--glow-sky);
+  transition: background-color 150ms ease-out;
+}
+
+@media (hover: hover) {
+  .button-sky:hover {
+    background: var(--sky-deep-hover);
   }
 }
 
-.topbar__tagline {
-  color: var(--ink-2);
-  font-size: var(--t-micro);
-  white-space: nowrap;
-}
-
-.topbar__actions {
-  display: flex;
-  align-items: center;
-  gap: var(--s2);
-  flex: none;
-}
-
-.icon-button {
-  display: grid;
-  place-items: center;
-  width: var(--target);
-  height: var(--target);
-  padding: 0;
-  border: 1px solid var(--rule-strong);
-  border-radius: var(--r-pill);
-  background: var(--raised);
-  color: var(--ink);
-  font: inherit;
-  font-weight: 700;
-  cursor: pointer;
-}
-.icon-button:hover {
-  border-color: var(--accent);
-  background: var(--sunken);
-}
-
-/* ---------------------------------------------------------------- ribbon */
-
-.ribbon {
-  display: flex;
-  align-items: center;
-  gap: var(--s2);
-  flex: none;
-  padding: var(--s2) var(--s4);
-  /* Inline only: the ribbon never touches the top edge, because Topbar always
-     renders above it. */
-  padding-inline: calc(var(--s4) + var(--safe-left)) calc(var(--s4) + var(--safe-right));
-  background: var(--warn-ground);
-  color: var(--warn-ink);
-  border-bottom: 1px solid var(--warn-rule);
-  font-size: var(--t-small);
-  font-weight: 600;
-}
-.ribbon__icon {
-  font-size: 1rem;
-  line-height: 1;
-}
-
-/* ----------------------------------------------------------------- about */
-
-.about {
-  flex: none;
-  border: 1px solid var(--rule);
-  border-radius: var(--r-md);
-  background: var(--raised);
-}
-.about__summary {
-  display: flex;
-  align-items: center;
-  min-height: var(--target);
-  padding: var(--s2) var(--s4);
-  font-size: var(--t-small);
-  font-weight: 600;
-  cursor: pointer;
-  border-radius: var(--r-md);
-}
-.about__body {
-  padding: 0 var(--s4) var(--s4);
-  color: var(--ink-2);
-  font-size: var(--t-small);
-  line-height: 1.6;
-}
-.about__body p {
-  margin: 0 0 var(--s3);
-}
-.about__body p:last-child {
-  margin-bottom: 0;
-}
-/* Links inside a sentence cannot be 44px tall without wrecking the prose, and
-   WCAG 2.2 exempts inline targets for exactly that reason. They are still made
-   as large as the line box allows. */
-.about__body a {
-  color: inherit;
-  display: inline-block;
-  padding: 5px 2px;
-  text-underline-offset: 3px;
-}
-
-/* Theme toggle. The label is the theme you will *get*, not the one you are in
- * — "Dark" while the page is light. Naming the current state would make the
- * button read as a status display rather than as a control. */
-.theme-toggle {
+/* Outline pill: hairline border, fills faintly on hover. */
+.pill {
   display: inline-flex;
   align-items: center;
-  gap: var(--s2);
-  /* Was 36px. The rule is 44 and there is no exemption for a control that
-     happens to be small — the gate that now measures this would have shipped
-     red, and a gate that ships red gets skipped. */
+  justify-content: center;
+  gap: 6px;
   min-height: var(--target);
-  padding: var(--s2) var(--s4);
-  border: 1px solid var(--rule-strong);
+  padding: 10px 16px;
+  border: 1px solid var(--border);
   border-radius: var(--r-pill);
-  background: var(--raised);
+  background: var(--surface);
   color: var(--ink);
-  font: inherit;
-  font-size: var(--t-small);
   font-weight: 600;
-  cursor: pointer;
-}
-.theme-toggle:hover {
-  border-color: var(--accent);
-  background: var(--sunken);
-}
-.theme-toggle__glyph {
-  font-size: 1rem;
-  line-height: 1;
+  font-size: 13px;
+  text-decoration: none;
+  transition: background-color 150ms ease-out;
 }
 
-/* -------------------------------------------------------------- trip bar */
-
-/* Not sticky any more, and it does not need to be: it is a sibling above the
-   scroller rather than the first thing inside it, so it stays in front by
-   construction. `z-index: 20` went with the sticky — below 900px `.tripbar` was
-   `position: static`, which made that z-index inert anyway, so whatever painted
-   over it did so on source order and not on stacking order. */
-.tripbar {
-  /* Shrinkable, and capped, and that is a consequence of taking it out of the
-     scrollport rather than an afterthought.
-   *
-   * The bar is 138px closed and 806.5px with the "Time & travel" drawer open —
-   * the dial, the mode select and the units control. As a `flex: none` sibling
-   * above a scroller, that height is taken out of the scroller first: on a
-   * 900px window the scrolling area collapses to 16px, and on anything shorter
-   * the bar itself would be clipped by `.panel`'s `overflow-y: hidden` and the
-   * units control would become unreachable. Trading a frozen scrollport for an
-   * unreachable control is not a fix.
-   *
-   * So the bar may shrink, it may not take more than 55% of the panel, and the
-   * drawer inside it scrolls rather than the segments — see `.tripbar .drawer`.
-   * Below 900px `.panel` is content-sized, so this percentage resolves against
-   * an indefinite height and computes to `none`: the bar is uncapped there,
-   * which is correct, because the document scrolls and nothing is frozen. */
-  flex: 0 1 auto;
-  min-height: 0;
-  max-height: 55%;
-  display: flex;
-  flex-direction: column;
-  gap: var(--s2);
-  /* One separation, with an edge in it, where there used to be two without.
-     `.panel`'s 16px flex gap and this 8px padding both sat between the bar and
-     `#results` — 24px of dead paper — while `.tripbar`'s background is
-     `var(--paper)`, byte-identical to `.panel`'s (both computed
-     `rgb(246, 243, 236)`), and the rule body carried no border-bottom and no
-     box-shadow at all. So a route row scrolling behind the bar was scissored
-     against a same-coloured field with no edge, which is why the scroll read as
-     broken rather than as pinned. `.topbar` has always had this border. */
-  padding-bottom: var(--s3);
-  border-bottom: 1px solid var(--rule);
-  background: var(--paper);
+@media (hover: hover) {
+  .pill:hover {
+    background: var(--hover-fill);
+  }
 }
 
-/* The segments never scroll away; the open drawer does.
-   Scoped to `.tripbar` so the rule cannot reach a drawer used anywhere else. */
-.tripbar__grid {
+.icon {
   flex: none;
 }
-.tripbar .drawer {
-  min-height: 0;
-  overflow-y: auto;
+
+/* One sentence over the map when an incoming link could not be honoured. */
+.linknote {
+  position: absolute;
+  z-index: 45;
+  top: calc(var(--safe-top) + 84px);
+  left: 50%;
+  transform: translateX(-50%);
+  max-width: min(520px, calc(100% - 32px));
+  margin: 0;
+  padding: 10px 16px;
+  background: var(--surface);
+  border-radius: var(--r-chip);
+  box-shadow: var(--shadow-float);
+  font-size: 13px;
+  color: var(--ink-2);
+  text-align: center;
 }
 
-/* The scrolling half of the panel. */
-.panel__scroll {
-  /* `flex-basis: 0`, not `auto`, and the difference is visible. With `auto` the
-     scroller's flex base size is its whole content height, which over-subscribes
-     the column by thousands of pixels — so the shrink is shared with the trip
-     bar and the bar is squeezed below its own content. Measured with `auto`:
-     the bar rendered 63.05px against 138px of content, with the segment labels
-     clipped. With basis 0 the scroller asks for nothing and grows into what the
-     bar leaves, which is the arrangement intended. */
-  flex: 1 1 0;
-  /* Without this an overflowing flex item refuses to shrink below its content
-     and the scrollbar never appears — the classic flexbox scroll failure. */
-  min-height: 0;
-  overflow-y: auto;
-  overflow-x: hidden;
-  display: flex;
-  flex-direction: column;
-  gap: var(--s4);
-  /* Breathing room under the rule above, in place of the flex gap `.panel` used
-     to contribute. */
-  padding-top: var(--s4);
-}
+/* ---------------------------------------------------------- status banner */
 
-/* minmax(0, 1fr) for the same reason the stage column needs it: a plain `1fr`
-   takes its minimum from min-content, and "Viharamahadevi Park, Colombo, Sri
-   Lanka" is very wide min-content. The segment then refuses to shrink, the
-   ellipsis on .seg__v never applies, and the grid overflows the panel. */
-.tripbar__grid {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-  gap: var(--s2);
-}
-
-.seg {
+.status {
+  position: absolute;
+  z-index: 46;
+  top: calc(var(--safe-top) + 84px);
+  left: 50%;
+  transform: translateX(-50%);
   display: flex;
   align-items: center;
-  gap: var(--s2);
-  min-height: var(--target);
-  padding: var(--s2) var(--s3);
-  border: 1px solid var(--rule);
-  border-radius: var(--r-md);
-  background: var(--raised);
-  color: var(--ink);
-  font: inherit;
-  text-align: start;
-  cursor: pointer;
+  gap: 12px;
+  max-width: min(560px, calc(100% - 32px));
+  padding: 12px 14px 12px 18px;
+  background: var(--rose-wash);
+  color: var(--rose-on-wash);
+  border: 1px solid var(--rose-border);
+  border-radius: var(--r-banner);
+  box-shadow: var(--shadow-float);
 }
-.seg:hover {
-  border-color: var(--rule-strong);
-  background: var(--sunken);
+
+.status__text {
+  margin: 0;
+  font-size: 13.5px;
 }
-.seg[aria-expanded='true'] {
-  border-color: var(--accent);
-  box-shadow: 0 0 0 1px var(--accent);
-}
-.seg__dot {
+
+.status__retry {
   flex: none;
-  color: var(--brand);
 }
-/* Without min-width:0 a long place name refuses to shrink and blows the grid
-   out past the panel — the ellipsis below never gets a chance to apply. */
-.seg__text {
+
+/* -------------------------------------------------- desktop plan capsule */
+
+.capsule-wrap {
+  position: absolute;
+  z-index: 40;
+  top: calc(var(--safe-top) + 22px);
+  left: 50%;
+  transform: translateX(-50%);
   display: flex;
   flex-direction: column;
-  min-width: 0;
-  overflow: hidden;
+  align-items: center;
 }
-.seg__k {
-  font-size: var(--t-micro);
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  color: var(--ink-2);
+
+.capsule {
+  display: flex;
+  align-items: center;
+  background: var(--surface);
+  border-radius: var(--r-pill);
+  box-shadow: var(--shadow-card);
+  padding: 8px 8px 8px 22px;
 }
-.seg__v {
-  font-size: var(--t-body);
-  font-weight: 600;
+
+.capsule__seg {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: var(--target);
+  padding: 8px 16px;
+  border-radius: var(--r-pill);
   white-space: nowrap;
+  transition: background-color 150ms ease-out;
+}
+
+@media (hover: hover) {
+  .capsule__seg:hover {
+    background: var(--hover-fill);
+  }
+}
+
+.capsule__seg--origin {
+  font-size: 14.5px;
+  font-weight: 600;
+  max-width: 240px;
+}
+
+.capsule__origin-name {
   overflow: hidden;
   text-overflow: ellipsis;
 }
-/* A default the user has not chosen should not look like a decision they made. */
-.seg__v--placeholder {
-  font-weight: 400;
+
+.capsule__seg--minutes {
+  font-size: 13.5px;
+  font-weight: 700;
+}
+
+.capsule__seg--mode {
+  font-size: 14px;
+  font-weight: 600;
+  gap: 6px;
+}
+
+.capsule__seg--objectives {
+  font-size: 13.5px;
+  font-weight: 500;
   color: var(--ink-2);
 }
 
-.drawer {
+/* The 1x22 hairline between segments. */
+.capsule__rule {
+  width: 1px;
+  height: 22px;
+  background: var(--border);
+  flex: none;
+}
+
+.capsule__find {
+  margin-left: 10px;
+}
+
+.capsule__popover {
+  margin-top: 10px;
+  width: min(360px, calc(100vw - 32px));
+  background: var(--surface);
+  border-radius: var(--r-card);
+  box-shadow: var(--shadow-float);
+  padding: 18px;
   display: flex;
   flex-direction: column;
-  gap: var(--s3);
-  padding: var(--s4);
-  border: 1px solid var(--accent);
-  border-radius: var(--r-md);
-  background: var(--raised);
+  gap: 14px;
 }
-.drawer[hidden] {
+
+.capsule__locate {
+  align-self: flex-start;
+}
+
+.capsule__hint {
+  margin: 0;
+  font-size: 10.5px;
+  color: var(--ink-2);
+}
+
+/* ------------------------------------------------------- results + cards */
+
+/* Desktop: the centered row of 292px cards, 30px off the bottom edge. */
+.rail--row {
+  position: absolute;
+  z-index: 35;
+  bottom: calc(var(--safe-bottom) + 30px);
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  max-width: calc(100vw - 32px);
+}
+
+.rail--row .rail__cards {
+  display: flex;
+  gap: 14px;
+  align-items: stretch;
+}
+
+.rail--row .card {
+  width: 292px;
+}
+
+/* Mobile: the same cards inside the sheet. */
+.rail--sheet .rail__cards {
+  display: flex;
+  flex-direction: column;
+  gap: 11px;
+}
+
+.rail__progress {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0;
+}
+
+.rail__pulse {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--sky-deep);
+  animation: pulse 1.4s ease-in-out infinite;
+}
+
+.rail__phase {
+  font-size: 10.5px;
+  color: var(--ink-2);
+}
+
+.rail__bar {
+  width: 200px;
+  height: 3px;
+  border-radius: var(--r-pill);
+  background: var(--track);
+  overflow: hidden;
+}
+
+.rail__bar-fill {
+  display: block;
+  height: 100%;
+  background: var(--sky-deep);
+  border-radius: var(--r-pill);
+  transition: width 250ms ease-out;
+}
+
+.rail__reason {
+  margin: 0;
+  font-size: 13px;
+  color: var(--ink-2);
+  text-align: center;
+  max-width: 560px;
+}
+
+.rail__plan-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 11px;
+  color: var(--ink-2);
+  margin-bottom: 4px;
+}
+
+.rail__edit {
+  min-height: var(--target);
+  display: inline-flex;
+  align-items: center;
+  padding: 8px 12px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--sky-link);
+}
+
+.card {
+  position: relative;
+  background: var(--surface);
+  border-radius: var(--r-card);
+  box-shadow: var(--shadow-card);
+  padding: 16px 18px;
+  text-align: left;
+  transition: box-shadow 150ms ease-out;
+}
+
+@media (hover: hover) {
+  .card:hover {
+    box-shadow: var(--shadow-selected);
+  }
+}
+
+.card__hit {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  width: 100%;
+  text-align: left;
+  min-height: var(--target);
+}
+
+.card__head {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+
+.card__label {
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.card__duration {
+  margin-left: auto;
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.card__chip {
+  font-size: 10px;
+  padding: 3px 9px;
+  border-radius: var(--r-pill);
+}
+
+.card__chip--rose {
+  background: var(--rose-wash);
+  color: var(--rose-on-wash);
+}
+
+.card__chip--mint {
+  background: var(--mint-wash);
+  color: var(--mint-on-wash);
+}
+
+.card__meta {
+  font-size: 11.5px;
+  color: var(--ink-2);
+}
+
+.card__scores {
+  font-size: 11px;
+  color: var(--ink-2);
+}
+
+.card__sentence {
+  font-size: 12.5px;
+  line-height: 1.45;
+}
+
+.card__skeleton {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  padding: 3px 0;
+}
+
+.card__skeleton-bar {
+  height: 10px;
+  border-radius: var(--r-pill);
+  background: var(--track);
+  animation: pulse 1.4s ease-in-out infinite;
+}
+
+.card__pending {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+  color: var(--ink-2);
+}
+
+.card__pulse,
+.card__pulse-dot {
+  animation: pulse 1.4s ease-in-out infinite;
+}
+
+.card__pulse {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--sky-deep);
+  flex: none;
+}
+
+.card__blockers {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-top: 8px;
+  border-top: 1px solid var(--hairline);
+  padding-top: 8px;
+}
+
+.card__blocker {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: var(--target);
+  text-align: left;
+  border-radius: var(--r-chip);
+  padding: 4px 6px;
+  transition: background-color 150ms ease-out;
+}
+
+@media (hover: hover) {
+  .card__blocker:hover {
+    background: var(--hover-fill);
+  }
+}
+
+.card__blocker-circle {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: var(--amber-wash);
+  color: var(--amber-on-wash);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+}
+
+.card__blocker-circle--rose {
+  background: var(--rose-wash);
+  color: var(--rose-on-wash);
+}
+
+.card__blocker-text {
+  font-size: 13px;
+  line-height: 1.35;
+}
+
+.card__blocker-foot {
+  margin: 4px 0 0;
+  font-size: 10px;
+  color: var(--ink-2);
+}
+
+/* ------------------------------------------------------------ the detail */
+
+.detail-scrim {
+  position: absolute;
+  inset: 0;
+  z-index: 50;
+  background: var(--scrim);
+  display: grid;
+  place-items: center;
+  padding: 24px;
+}
+
+.detail--modal {
+  width: min(880px, 100%);
+  max-height: calc(100dvh - 48px);
+  overflow-y: auto;
+  background: var(--surface);
+  border-radius: var(--r-modal);
+  box-shadow: var(--shadow-modal);
+  padding: 28px 34px 24px;
+}
+
+.detail__header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  justify-content: center;
+  position: relative;
+}
+
+.detail__title {
+  margin: 0;
+  font-size: 21px;
+  font-weight: 800;
+  letter-spacing: -0.3px;
+}
+
+.detail__title--sheet {
+  font-size: 19px;
+  letter-spacing: -0.2px;
+}
+
+.detail__chip {
+  font-size: 10.5px;
+  padding: 4px 10px;
+  border-radius: var(--r-pill);
+}
+
+.detail__chip--mint {
+  background: var(--mint-wash);
+  color: var(--mint-on-wash);
+}
+
+.detail__chip--rose {
+  background: var(--rose-wash);
+  color: var(--rose-on-wash);
+}
+
+.detail__close {
+  position: absolute;
+  right: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  width: var(--target);
+  height: var(--target);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+}
+
+/* The visible mark is the 32px hairline circle; the hit area is the full
+ * 44px control around it. */
+.detail__close::before {
+  content: '';
+  position: absolute;
+  width: 32px;
+  height: 32px;
+  border: 1px solid var(--border);
+  border-radius: 50%;
+}
+
+.detail__stats {
+  margin: 10px 0 0;
+  font-size: 13px;
+  text-align: center;
+  color: var(--ink-2);
+}
+
+.detail--sheet .detail__stats {
+  font-size: 12px;
+  text-align: left;
+  margin: 4px 0 0;
+}
+
+.detail__narration-block {
+  margin: 16px auto 0;
+  max-width: 640px;
+  text-align: center;
+}
+
+.detail--sheet .detail__narration-block {
+  text-align: left;
+  margin: 12px 0 0;
+}
+
+.detail__narration {
+  margin: 0;
+  font-size: 15px;
+  line-height: 1.6;
+}
+
+.detail__credit {
+  margin: 6px 0 0;
+  font-size: 10px;
+  color: var(--ink-2);
+}
+
+.detail__blocked-note {
+  margin: 14px auto 0;
+  max-width: 640px;
+  padding: 10px 14px;
+  background: var(--rose-wash);
+  color: var(--rose-on-wash);
+  border-radius: var(--r-chip);
+  font-size: 13px;
+  text-align: center;
+}
+
+.detail--sheet .detail__blocked-note {
+  text-align: left;
+  margin: 12px 0 0;
+}
+
+.detail__columns {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 30px;
+  margin-top: 22px;
+}
+
+.detail__col {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-width: 0;
+}
+
+.detail__head {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin: 0;
+}
+
+.detail--sheet {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.detail__start {
+  width: 100%;
+  font-size: 16px;
+  font-weight: 700;
+  padding: 15px;
+  border-radius: var(--r-input);
+}
+
+/* Score bars: 58px label, 6px track, mono value. */
+.scores {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+}
+
+.scores__row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0;
+}
+
+.scores__label {
+  width: 58px;
+  flex: none;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.scores__track {
+  flex: 1;
+  height: 6px;
+  border-radius: var(--r-pill);
+  background: var(--track);
+  overflow: hidden;
+}
+
+.scores__fill {
+  display: block;
+  height: 100%;
+  border-radius: var(--r-pill);
+}
+
+.scores__fill--mint { background: var(--mint-deep); }
+.scores__fill--sky { background: var(--sky-deep); }
+.scores__fill--lilac { background: var(--lilac-deep); }
+
+.scores__unmeasured {
+  flex: 1;
+  font-size: 10px;
+  color: var(--ink-2);
+}
+
+.scores__value {
+  width: 28px;
+  flex: none;
+  text-align: right;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.scores__method {
+  margin: 2px 0 0;
+  font-size: 10px;
+  color: var(--ink-2);
+}
+
+/* The lilac coverage card. */
+.coverage {
+  background: var(--lilac-wash);
+  color: var(--lilac-on-wash);
+  border-radius: 14px;
+  padding: 12px 14px;
+}
+
+.coverage__text {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.coverage__sub {
+  margin: 6px 0 0;
+  font-size: 9.5px;
+}
+
+/* Elevation. */
+.profile__svg {
+  display: block;
+  width: 100%;
+  height: 56px;
+}
+
+.profile__baseline {
+  stroke: var(--hairline);
+  stroke-width: 1;
+  vector-effect: non-scaling-stroke;
+}
+
+.profile__line {
+  fill: none;
+  stroke: var(--sky-deep);
+  stroke-width: 2.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.profile__steep {
+  fill: none;
+  stroke: var(--amber-deep);
+  stroke-width: 4;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.profile__axis {
+  display: flex;
+  justify-content: space-between;
+  font-size: 8.5px;
+  color: var(--ink-2);
+  margin-top: 2px;
+}
+
+.profile__stat {
+  margin: 6px 0 0;
+  font-size: 11px;
+  color: var(--ink-2);
+}
+
+.profile__absent {
+  margin: 0;
+  font-size: 12.5px;
+  color: var(--ink-2);
+}
+
+/* Rest pills. */
+.rests {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.rests__pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 7px 13px;
+  background: var(--mint-wash);
+  color: var(--mint-on-wash);
+  border-radius: var(--r-pill);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.rests__pill .mono {
+  font-size: 11px;
+  font-weight: 400;
+}
+
+.rests__absent {
+  margin: 0;
+  font-size: 12.5px;
+  color: var(--ink-2);
+}
+
+/* Turn-by-turn list. */
+.steps__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.step {
+  border-bottom: 1px solid var(--hairline);
+  padding: 9px 0;
+}
+
+.step:last-child {
+  border-bottom: 0;
+}
+
+.step__row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.step__index {
+  width: 24px;
+  height: 24px;
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: var(--sky-wash);
+  color: var(--sky-on-wash);
+  font-size: 11px;
+}
+
+.step__text {
+  font-size: 14px;
+  min-width: 0;
+}
+
+.step__dist {
+  margin-left: auto;
+  font-size: 12px;
+  color: var(--ink-2);
+  flex: none;
+}
+
+/* The barrier chip, indented 36 under its step. */
+.step__barrier {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 7px 0 0 36px;
+  padding: 7px 12px;
+  background: var(--amber-wash);
+  color: var(--amber-on-wash);
+  border-radius: var(--r-chip);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.35;
+}
+
+.steps__more {
+  min-height: var(--target);
+  display: inline-flex;
+  align-items: center;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--sky-link);
+}
+
+.steps__absent {
+  margin: 0;
+  font-size: 12.5px;
+  color: var(--ink-2);
+}
+
+/* The mobile turn-by-turn disclosure row. */
+.tbt {
+  border-top: 1px solid var(--hairline);
+  border-bottom: 1px solid var(--hairline);
+}
+
+.tbt__summary {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: var(--target);
+  padding: 12px 0;
+  font-size: 15px;
+  font-weight: 600;
+  cursor: pointer;
+  list-style: none;
+}
+
+.tbt__summary::-webkit-details-marker {
   display: none;
 }
 
-/* preset pills */
+.tbt__meta {
+  margin-left: auto;
+  font-size: 11px;
+  color: var(--ink-2);
+  font-weight: 400;
+}
 
-.presets {
+.tbt[open] .tbt__summary .icon {
+  transform: rotate(90deg);
+}
+
+/* Exports. */
+.exports__warn {
+  margin: 0 0 8px;
+  font-size: 10px;
+  color: var(--ink-2);
+}
+
+.exports__row {
   display: flex;
   flex-wrap: wrap;
-  gap: var(--s2);
+  gap: 8px;
 }
-/* One pressable pill, three uses. `.preset` (first run), `.chip` (objectives
-   and units) and `.hour` (the departure strip) were three copies of the same
-   nine declarations with a byte-identical pressed rule at the end of each — so
-   a change to the pressed treatment had to be made three times and was one
-   oversight away from a control that looks unselected while being selected.
 
-   Grouped selectors rather than a `.pill` base class in the markup: the classes
-   are load-bearing elsewhere (gate.mjs's selector manifest matches `.chip`,
-   and the components name them directly), and this removes the duplication
-   without touching 27 call sites to gain the same rendering.
-
-   What differs stays below, per class, and it is only gap, padding and size.
-   Nothing here is normalised away — `.chip` really is 0.875rem where the other
-   two are --t-small (0.8125rem), and unifying it would silently reflow the
-   objective chips. */
-.preset,
-.chip,
-.hour {
-  display: inline-flex;
+/* The departure row in the detail. */
+.bestwindow {
+  display: flex;
   align-items: center;
-  /* Was 36px, and on the first-run path at that: the presets are the first
-     controls a new user touches. */
-  min-height: var(--target);
-  border: 1px solid var(--rule-strong);
-  border-radius: var(--r-pill);
-  background: var(--raised);
-  color: var(--ink);
-  font: inherit;
-  cursor: pointer;
-}
-.preset[aria-pressed='true'],
-.chip[aria-pressed='true'],
-.hour[aria-pressed='true'] {
-  background: var(--brand-tint);
-  border-color: var(--accent);
-  box-shadow: inset 0 0 0 1px var(--accent);
-  font-weight: 600;
-}
-/* `.chip` has never had a hover treatment and does not gain one here — that
-   would be a rendering change, and this refactor is required to make none. */
-.preset:hover,
-.hour:hover {
-  border-color: var(--accent);
-  background: var(--sunken);
+  gap: 9px;
+  margin: 0;
+  font-size: 13.5px;
 }
 
-.preset {
-  gap: 6px;
-  padding: var(--s2) var(--s4);
-  font-size: var(--t-small);
+.bestwindow strong {
+  font-weight: 700;
 }
 
-/* -------------------------------------------------------------- first run */
-
-/* FirstRun replaces div.layout rather than nesting inside it, so this box is a
-   direct child of .app and touches the left, right and bottom of the viewport. */
-.firstrun {
-  display: grid;
-  place-items: center;
-  padding: var(--s6) var(--s4);
-  padding-inline: calc(var(--s4) + var(--safe-left)) calc(var(--s4) + var(--safe-right));
-  padding-bottom: calc(var(--s6) + var(--safe-bottom));
-  min-height: 100%;
+.bestwindow__reason {
+  color: var(--ink-2);
 }
-.firstrun__card {
+
+/* -------------------------------------------------------- the plan sheet */
+
+.plan {
   display: flex;
   flex-direction: column;
-  gap: var(--s3);
-  width: 100%;
-  max-width: 460px;
-  padding: var(--s8) var(--s6);
-  background: var(--raised);
-  border: 1px solid var(--rule);
-  border-radius: var(--r-lg);
-  box-shadow: var(--shadow-2);
+  align-items: center;
+  gap: 15px;
 }
-.firstrun__headline {
-  font-size: var(--t-display);
-  line-height: 1.1;
-  margin: 0;
-}
-.firstrun__lede {
-  color: var(--ink-2);
-  margin: 0;
-}
-.firstrun__locate {
-  min-height: 52px;
-  width: 100%;
-}
-.firstrun__or {
+
+.plan__search {
   display: flex;
   align-items: center;
-  gap: var(--s3);
-  color: var(--ink-2);
-  font-size: var(--t-small);
-  margin: 0;
+  gap: 0;
+  width: 100%;
+  background: var(--input-fill);
+  border-radius: var(--r-input);
 }
-.firstrun__or::before,
-.firstrun__or::after {
-  content: '';
+
+.plan__search-field {
   flex: 1;
-  height: 1px;
-  background: var(--rule);
-}
-.firstrun__time {
-  margin-top: var(--s2);
-}
-.firstrun__slider {
-  margin-top: var(--s3);
-}
-.firstrun__privacy {
   display: flex;
-  gap: var(--s2);
+  align-items: center;
+  gap: 10px;
+  min-height: var(--target);
+  padding: 13px 0 13px 15px;
+  font-size: 15px;
+  font-weight: 500;
+  text-align: left;
+  color: var(--ink);
+  min-width: 0;
+}
+
+.plan__search-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.plan__search-text.is-empty {
+  color: var(--ink-2-deep);
+}
+
+.plan__search-locate {
+  width: var(--target);
+  min-height: var(--target);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--sky-deep);
+  flex: none;
+}
+
+.plan__hint {
+  margin: -8px 0 0;
+  font-size: 10.5px;
   color: var(--ink-2);
-  font-size: var(--t-small);
+  align-self: flex-start;
+}
+
+.plan__find {
+  width: 100%;
+  font-size: 16px;
+  font-weight: 700;
+  padding: 15px;
+  border-radius: var(--r-input);
+}
+
+.plan__footer {
   margin: 0;
-  padding-top: var(--s3);
-  border-top: 1px solid var(--rule);
+  font-size: 9.5px;
+  color: var(--ink-2);
+}
+
+.plan__back {
+  position: absolute;
+  z-index: 45;
+  top: calc(var(--safe-top) + 12px);
+  left: calc(var(--safe-left) + 12px);
+  box-shadow: var(--shadow-float);
+}
+
+/* The dial. */
+.dial {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+}
+
+.dial__readout {
+  margin: 0;
+  font-size: 38px;
+  font-weight: 700;
+  line-height: 1.1;
+}
+
+/* The input is the 44px target; the 6px track is drawn inside it. WebKit has
+ * no native progress fill, so the sky fill is a gradient split at
+ * `--dial-fill`, which TimeDial writes per value. */
+.dial__slider {
+  width: 100%;
+  appearance: none;
+  min-height: var(--target);
+  background: transparent;
+  margin: 0;
+}
+
+.dial__slider::-webkit-slider-runnable-track {
+  height: 6px;
+  border-radius: var(--r-pill);
+  background: linear-gradient(
+    to right,
+    var(--sky-deep) 0 var(--dial-fill, 0%),
+    var(--track) var(--dial-fill, 0%) 100%
+  );
+}
+
+.dial__slider::-webkit-slider-thumb {
+  appearance: none;
+  width: 26px;
+  height: 26px;
+  margin-top: -10px;
+  border-radius: 50%;
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  box-shadow: var(--shadow-card);
+  cursor: pointer;
+}
+
+.dial__slider::-moz-range-track {
+  height: 6px;
+  border-radius: var(--r-pill);
+  background: var(--track);
+}
+
+.dial__slider::-moz-range-progress {
+  height: 6px;
+  border-radius: var(--r-pill);
+  background: var(--sky-deep);
+}
+
+.dial__slider::-moz-range-thumb {
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  box-shadow: var(--shadow-card);
+  cursor: pointer;
+}
+
+.dial__presets {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.dial__preset {
+  min-width: var(--target);
+  min-height: var(--target);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 8px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-pill);
+  font-size: 11px;
+  transition: background-color 150ms ease-out;
+}
+
+@media (hover: hover) {
+  .dial__preset:hover {
+    background: var(--hover-fill);
+  }
+}
+
+.dial__preset[aria-pressed='true'] {
+  background: var(--sky-wash);
+  border-color: var(--sky-border);
+  color: var(--sky-on-wash);
+}
+
+.dial__preset-unit {
+  font-size: 11px;
+  color: var(--ink-2);
+}
+
+/* The segmented mode control. */
+.mode {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+}
+
+.mode__seg {
+  display: flex;
+  width: 100%;
+  max-width: 340px;
+  background: var(--seg-fill);
+  border-radius: var(--r-pill);
+  padding: 3px;
+}
+
+.mode__btn {
+  flex: 1;
+  min-height: var(--target);
+  padding: 8px 10px;
+  border-radius: var(--r-pill);
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--ink-2-deep);
+}
+
+.mode__btn.is-active {
+  background: var(--surface);
+  color: var(--ink);
+  font-weight: 700;
+  box-shadow: var(--shadow-seg);
+}
+
+.mode__hint {
+  margin: 0;
+  font-size: 10px;
+  color: var(--ink-2);
+}
+
+/* Objective chips. */
+.objectives {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+}
+
+.objectives__row {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px;
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: var(--target);
+  padding: 9px 15px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-pill);
+  font-size: 13.5px;
+  font-weight: 600;
+  background: var(--surface);
+  transition: background-color 150ms ease-out;
+}
+
+@media (hover: hover) {
+  .chip:not(:disabled):hover {
+    background: var(--hover-fill);
+  }
+}
+
+.chip:disabled {
+  color: var(--ink-disabled);
+  cursor: default;
+}
+
+.chip:disabled .dot {
+  background: var(--ink-disabled);
+}
+
+.chip__soon {
+  font-size: 10px;
+  font-weight: 400;
+}
+
+.chip--fastest.is-pressed {
+  background: var(--sky-wash);
+  border-color: var(--sky-border);
+  color: var(--sky-on-wash);
+}
+
+.chip--scenic.is-pressed {
+  background: var(--mint-wash);
+  border-color: var(--mint-border);
+  color: var(--mint-on-wash);
+}
+
+.chip--accessible.is-pressed {
+  background: var(--lilac-wash);
+  border-color: var(--lilac-border);
+  color: var(--lilac-on-wash);
+}
+
+/* Departure. */
+.departure {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+}
+
+.departure__row {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: var(--target);
+  padding: 8px 14px;
+  font-size: 14px;
+  font-weight: 600;
+  border-radius: var(--r-pill);
+}
+
+.departure__hours {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 7px;
+}
+
+.departure__hour {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-height: var(--target);
+  padding: 8px 13px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-pill);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.departure__hour[aria-pressed='true'] {
+  background: var(--amber-wash);
+  border-color: var(--amber-border);
+  color: var(--amber-on-wash);
+}
+
+.departure__hour--dark {
+  color: var(--ink-2);
+}
+
+.departure__moon {
+  font-size: 11px;
+}
+
+/* --------------------------------------------------- place field + rows */
+
+.place {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 100%;
+}
+
+.place__field {
+  display: flex;
+  align-items: center;
+  background: var(--input-fill);
+  border-radius: var(--r-input);
+  padding-left: 15px;
+}
+
+.place__magnifier {
+  color: var(--ink-3);
+  display: inline-flex;
+  flex: none;
+}
+
+.place__input {
+  flex: 1;
+  min-height: var(--target);
+  min-width: 0;
+  border: 0;
+  background: none;
+  padding: 13px 12px;
+  font-size: 15px;
+  font-weight: 500;
+  caret-color: var(--sky-deep);
+}
+
+.place__input:focus-visible {
+  outline: none;
+}
+
+.place__field:focus-within {
+  outline: 2px solid var(--sky-deep);
+  outline-offset: 2px;
+}
+
+.place__input::placeholder {
+  color: var(--ink-2-deep);
+}
+
+.place__locate {
+  min-width: var(--target);
+  min-height: var(--target);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 12px;
+  color: var(--sky-deep);
+  font-size: 13px;
+  font-weight: 600;
+  flex: none;
+}
+
+.place__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.place__row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: var(--target);
+  padding: 9px 2px;
+  border-bottom: 1px solid var(--hairline);
+  cursor: pointer;
+}
+
+.place__row:last-child {
+  border-bottom: 0;
+}
+
+.place__row.is-active {
+  background: var(--hover-fill);
+  border-radius: var(--r-chip);
+}
+
+.place__circle {
+  width: 30px;
+  height: 30px;
+  flex: none;
+  border-radius: 50%;
+  background: var(--input-fill);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.place__circle--top {
+  background: var(--mint-wash);
+}
+
+.place__circle .dot {
+  width: 8px;
+  height: 8px;
+}
+
+.place__name {
+  display: flex;
+  flex-direction: column;
+  font-size: 15px;
+  font-weight: 600;
+  min-width: 0;
+}
+
+.place__sub {
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--ink-2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.place__hint {
+  margin: 0;
+  font-size: 10.5px;
+  color: var(--ink-2);
+}
+
+/* The full-surface mobile search screen. */
+.search {
+  position: absolute;
+  inset: 0;
+  z-index: 52;
+  background: var(--surface);
+  display: flex;
+  flex-direction: column;
+  padding: calc(var(--safe-top) + 12px) calc(var(--safe-right) + 16px)
+    calc(var(--safe-bottom) + 12px) calc(var(--safe-left) + 16px);
+}
+
+.search__bar {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+}
+
+.search__field {
+  flex: 1;
+  min-width: 0;
+}
+
+.search__cancel {
+  min-height: var(--target);
+  display: inline-flex;
+  align-items: center;
+  padding: 10px 12px;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--sky-deep);
+  flex: none;
+}
+
+.search__footer {
+  margin-top: auto;
+  font-size: 9.5px;
+  color: var(--ink-2);
+  text-align: center;
+}
+
+/* ------------------------------------------------- the mobile bottom sheet */
+
+/* `min-height: 0` is not a floor — it is what lets the sheet shrink at all —
+ * and `.sheet` itself is the scroll container, with the grabber sticky at its
+ * top. Both properties, and max-height, are pinned by contract test. */
+.sheet {
+  position: absolute;
+  z-index: 40;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  min-height: 0;
+  max-height: calc(100dvh - var(--safe-top) - 8px);
+  overflow-y: auto;
+  background: var(--surface);
+  border-radius: var(--r-sheet) var(--r-sheet) 0 0;
+  box-shadow: var(--shadow-sheet);
+  padding: 0 calc(var(--safe-right) + 22px) calc(var(--safe-bottom) + 44px)
+    calc(var(--safe-left) + 22px);
+}
+
+.sheet__grabber-hit {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  display: flex;
+  /* The pill sits at the sheet's stated 9px top pad; the row below it stays
+   * the full 44px hit target. */
+  align-items: flex-start;
+  padding-top: 9px;
+  justify-content: center;
+  width: 100%;
+  min-height: var(--target);
+  background: var(--surface);
+  touch-action: none;
+  cursor: grab;
+}
+
+.sheet__grabber {
+  width: 40px;
+  height: 4.5px;
+  border-radius: var(--r-pill);
+  background: var(--grabber);
+}
+
+.sheet__body {
+  padding-top: 2px;
+}
+
+/* ------------------------------------------------------------ follow mode */
+
+/* A flex column over the whole map: the banner and any barrier card stack at
+ * the top, the provenance line and the dock sit at the bottom, and the empty
+ * middle passes every touch through to the map — pointer-events none on the
+ * layer, auto on its children, is what keeps the map pannable between them. */
+.follow {
+  position: absolute;
+  inset: 0;
+  z-index: 45;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: calc(var(--safe-top) + 16px) calc(var(--safe-right) + 16px)
+    calc(var(--safe-bottom) + 16px) calc(var(--safe-left) + 16px);
+  pointer-events: none;
+}
+
+.follow > * {
+  pointer-events: auto;
+}
+
+/* The next-turn banner. */
+.follow__banner {
+  background: var(--surface);
+  border-radius: var(--r-banner);
+  box-shadow: var(--shadow-float);
+  padding: 14px 16px;
+}
+
+.follow__banner-main {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.follow__tile {
+  width: 56px;
+  height: 56px;
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--sky-wash);
+  color: var(--sky-on-wash);
+  border-radius: 16px;
+}
+
+.follow__arrow {
+  font-size: 32px;
+}
+
+.follow__banner-body {
+  min-width: 0;
+}
+
+.follow__distance {
+  margin: 0;
+  font-size: 27px;
+  font-weight: 700;
+  line-height: 1.1;
+}
+
+.follow__instruction {
+  margin: 2px 0 0;
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 1.3;
+}
+
+.follow__then {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 11px;
+  padding-top: 11px;
+  border-top: 1px solid var(--hairline);
+}
+
+.follow__then-word {
+  font-size: 10px;
+  color: var(--ink-2);
+}
+
+.follow__then-arrow {
+  font-size: 14px;
+  color: var(--ink-2);
+}
+
+.follow__then-text {
+  font-size: 12.5px;
+  color: var(--ink-2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Barrier ahead: the amber card below the banner. */
+.follow__barrier {
+  display: flex;
+  align-items: center;
+  gap: 13px;
+  background: var(--amber-wash);
+  border-radius: var(--r-dock);
+  box-shadow: var(--shadow-float);
+  padding: 13px 16px;
+  color: var(--amber-on-wash);
+}
+
+.follow__barrier-circle {
+  width: 42px;
+  height: 42px;
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--surface);
+  border-radius: 50%;
+}
+
+.follow__barrier-body {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.follow__barrier-title {
+  font-size: 15.5px;
+  font-weight: 800;
+}
+
+.follow__barrier-text {
+  font-size: 12.5px;
+  line-height: 1.4;
+}
+
+/* Off route: the banner becomes an ink card. */
+.follow__off {
+  background: var(--ink);
+  color: var(--on-dark);
+  border-radius: var(--r-banner);
+  box-shadow: var(--shadow-float);
+  padding: 16px 18px;
+}
+
+.follow__off-title {
+  margin: 0;
+  font-size: 17px;
+  font-weight: 800;
+}
+
+.follow__off-body {
+  margin: 6px 0 0;
+  font-size: 13.5px;
+  opacity: 0.78;
+  line-height: 1.45;
+}
+
+.follow__rule {
+  border: 0;
+  border-top: 1px solid var(--hairline);
+  margin: 11px 0;
+}
+
+.follow__rule--dark {
+  border-top-color: var(--hairline-on-dark);
+}
+
+.follow__off-foot {
+  margin: 0;
+  font-size: 10px;
+  opacity: 0.55;
+}
+
+/* The dock. */
+.follow__dock {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  background: var(--surface);
+  border-radius: var(--r-dock);
+  box-shadow: var(--shadow-float);
+  padding: 13px 13px 13px 18px;
+}
+
+.follow__dock-main {
+  min-width: 0;
+  flex: 1;
+}
+
+.follow__dock-headline {
+  margin: 0;
+  font-size: 17px;
+  font-weight: 800;
+}
+
+.follow__dock-sub {
+  margin: 3px 0 0;
+  font-size: 11px;
+  color: var(--ink-2);
+}
+
+.follow__end {
+  flex: none;
+  min-height: var(--target);
+  min-width: 64px;
+  padding: 10px 20px;
+  background: var(--rose-wash);
+  color: var(--rose-on-wash);
+  font-size: 14px;
+  font-weight: 700;
+  border-radius: var(--r-pill);
+}
+
+/* The provenance line, centered above the dock. `margin-top: auto` is what
+ * pushes it and the dock to the foot of the column. */
+.follow__provenance {
+  margin: auto 0 0;
+  align-self: center;
+  font-size: 9px;
+  color: var(--ink);
+  opacity: 0.7;
+  white-space: nowrap;
+  order: 8;
+}
+
+.follow__dock {
+  order: 9;
+}
+
+/* Arrival. */
+.follow__arrival-wrap {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: var(--scrim);
+  overflow-y: auto;
+}
+
+.follow__arrival {
+  width: min(330px, 100%);
+  background: var(--surface);
+  border-radius: var(--r-sheet);
+  box-shadow: var(--shadow-modal);
+  padding: 26px 24px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: 10px;
+}
+
+.follow__arrival-circle {
+  width: 52px;
+  height: 52px;
+  border-radius: 50%;
+  background: var(--mint-wash);
+  color: var(--mint-on-wash);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.follow__arrival-title {
+  margin: 0;
+  font-size: 24px;
+  font-weight: 800;
+  letter-spacing: -0.4px;
+}
+
+.follow__arrival-stats {
+  margin: 0;
+  font-size: 12.5px;
+  color: var(--ink-2);
+}
+
+.follow__arrival .follow__rule {
+  width: 100%;
+  margin: 6px 0;
+}
+
+.follow__arrival-note {
+  margin: 0;
+  font-size: 12.5px;
+  color: var(--ink-2);
+  line-height: 1.5;
+}
+
+.follow__done {
+  width: 100%;
+  margin-top: 6px;
+  padding: 13px;
+  border-radius: var(--r-input);
+}
+
+.follow__arrival .report__open {
+  min-height: var(--target);
+  display: inline-flex;
+  align-items: center;
+  color: var(--sky-link);
+  font-size: 13.5px;
+  font-weight: 600;
+}
+
+/* Full-screen and above every other layer while a phone is being walked
+ * with. The stage is already full-viewport at every width; this pin is what
+ * guarantees no sheet or banner ever paints over the walk. */
+.stage--following {
+  z-index: 30;
+}
+
+/* --------------------------------------------------------- report barrier */
+
+.report {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  text-align: left;
+}
+
+.report__title {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.report__lede,
+.report__warn {
+  margin: 0;
+  font-size: 12.5px;
+  color: var(--ink-2);
+  line-height: 1.5;
+}
+
+.report__warn {
+  background: var(--amber-wash);
+  color: var(--amber-on-wash);
+  border-radius: var(--r-chip);
+  padding: 10px 12px;
 }
 
 .field {
@@ -855,1780 +2378,151 @@ h3 {
 }
 
 .field__label {
+  font-size: 12.5px;
   font-weight: 600;
-  font-size: 0.875rem;
-}
-
-.field__hint {
-  color: var(--ink-2);
-  font-size: var(--t-small);
-  margin: 0;
-}
-
-.field__error {
-  color: var(--warn-ink);
-  font-size: var(--t-small);
-  margin: 0;
-  font-weight: 600;
-}
-
-input[type='text'],
-input[type='search'],
-select {
-  font: inherit;
-  color: var(--ink);
-  background: var(--raised);
-  border: 1px solid var(--rule-strong);
-  border-radius: var(--r-sm);
-  padding: 10px var(--s3);
-  min-height: var(--target);
-  width: 100%;
-}
-
-select {
-  /* A native select is keyboard- and screen-reader-correct for free. */
-  min-height: var(--target);
-}
-
-.button {
-  font: inherit;
-  font-weight: 600;
-  color: var(--ink);
-  background: var(--raised);
-  border: 1px solid var(--rule-strong);
-  border-radius: var(--r-sm);
-  min-height: var(--target);
-  min-width: var(--target);
-  padding: 10px var(--s4);
-  cursor: pointer;
-}
-.button:hover {
-  background: var(--sunken);
-}
-.button--primary {
-  background: var(--brand);
-  color: var(--brand-on);
-  border-color: var(--brand);
-}
-.button--primary:hover {
-  background: var(--brand-hover);
-  border-color: var(--brand-hover);
-}
-
-.place-row {
-  display: flex;
-  gap: var(--s2);
-  align-items: flex-start;
-}
-.place-row > :first-child {
-  flex: 1;
-  min-width: 0;
-}
-
-/* place suggestions */
-
-.suggestions {
-  list-style: none;
-  margin: var(--s1) 0 0;
-  padding: 0;
-  border: 1px solid var(--rule-strong);
-  border-radius: var(--r-sm);
-  background: var(--raised);
-  max-height: 260px;
-  overflow-y: auto;
-}
-
-.suggestions__item {
-  padding: var(--s3);
-  min-height: var(--target);
-  display: flex;
-  align-items: center;
-  cursor: pointer;
-  font-size: var(--t-body);
-  border-bottom: 1px solid var(--rule);
-}
-.suggestions__item:last-child {
-  border-bottom: 0;
-}
-.suggestions__item[aria-selected='true'] {
-  background: var(--brand-tint);
-  box-shadow: inset 3px 0 0 var(--accent);
-}
-
-/* time dial */
-
-.dial__readout {
-  display: flex;
-  align-items: baseline;
-  gap: 6px;
-  margin: 0;
-}
-.dial__value {
-  font-family: var(--font-display);
-  font-size: 2.25rem;
-  line-height: 1;
-  font-variant-numeric: tabular-nums;
-}
-.dial__unit {
-  font-family: var(--font-body);
-  font-size: 1rem;
-  color: var(--ink-2);
-}
-.dial__mode {
-  color: var(--ink-2);
-  font-size: 0.875rem;
-}
-
-input[type='range'] {
-  width: 100%;
-  height: var(--target);
-  margin: 0;
-  accent-color: var(--accent);
-  cursor: pointer;
-}
-
-.dial__ticks {
-  display: flex;
-  justify-content: space-between;
-  color: var(--ink-2);
-  font-size: var(--t-micro);
-  font-variant-numeric: tabular-nums;
-}
-
-/* objective chips */
-
-fieldset.chips {
-  border: 0;
-  padding: 0;
-  margin: 0;
-  min-width: 0;
-}
-fieldset.chips legend {
-  font-weight: 600;
-  font-size: 0.875rem;
-  padding: 0;
-  margin-bottom: var(--s2);
-}
-.chips__row {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--s2);
-}
-.chip {
-  gap: var(--s2);
-  padding: var(--s2) var(--s4);
-  font-size: 0.875rem;
-}
-/* Selection is fill + border + weight + this glyph. The glyph exists only when
-   pressed; a permanent check that merely changed colour would make selection a
-   colour-only signal. */
-.chip__check {
-  color: var(--ok-ink);
-  font-weight: 700;
-}
-/* One dash swatch at three sizes, in four places, all fed by the same
-   swatchBackground(). The sizes differ and stay differing; what was duplicated
-   is the rounding and the refusal to flex. */
-.chip__swatch,
-.legend__line,
-.route__pattern,
-.detail__pattern {
-  border-radius: 2px;
-  flex: none;
-}
-
-.chip__swatch {
-  width: 20px;
-  height: 4px;
-}
-
-/* ---------------------------------------------------------------- banner */
-
-.banner {
-  border: 1px solid var(--rule-strong);
-  border-inline-start-width: 4px;
-  border-radius: var(--r-sm);
-  background: var(--raised);
-  padding: var(--s3) var(--s4);
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: var(--s2) var(--s4);
-}
-.banner--warn {
-  background: var(--warn-ground);
-  border-color: var(--warn-rule);
-  color: var(--warn-ink);
-}
-.banner__text {
-  margin: 0;
-  flex: 1;
-  min-width: 12rem;
-}
-/* One meter, three uses: the rail's per-score bar, the detail panel's, and the
-   banner's progress. All three were separate copies of "a rounded sunken track
-   with an accent fill clipped inside it", and the first two render *the same
-   three scores* from an identical row shape at two different bar heights.
-
-   The heights stay different — 5px in the rail, 6px in the detail panel and the
-   banner — because that is a real design decision about density, and this
-   refactor changes no rendering. What it removes is the three copies of how a
-   track and a fill are built. */
-.metric__track,
-.scorelist__track,
-.banner__progress {
-  border-radius: 3px;
-  background: var(--sunken);
-  overflow: hidden;
-}
-.metric__fill,
-.scorelist__fill,
-.banner__bar {
-  height: 100%;
-  background: var(--accent);
-}
-
-.banner__progress {
-  width: 100%;
-  height: 6px;
-}
-.banner__bar {
-  transition: width 250ms ease;
-}
-
-/* ------------------------------------------------------------------- map */
-
-/* The map fills the stage rather than sizing itself. On desktop the stage is a
-   grid column with a bounded height; on mobile it is a fixed band above the
-   panel. Either way the map is told its size rather than deciding it. */
-.map {
-  position: absolute;
-  inset: 0;
-  overflow: hidden;
-  background: var(--sunken);
-}
-/* MapLibre adds .maplibregl-map to whatever element it is handed, and that
-   class sets `position: relative` — which overrides the `position: absolute`
-   here, so `inset: 0` stops sizing the element and it collapses to zero height.
-   The explicit 100% holds under either position value. Symptom when this is
-   wrong: the canvas keeps its initial height inside a taller container and
-   leaves a band of empty grey, but only above the 860px breakpoint, because
-   below it the container is 300px and coincidentally matches. */
-.map__canvas {
-  position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 100%;
-}
-.map__fallback {
-  position: absolute;
-  inset: 0;
-  display: grid;
-  place-items: center;
-  padding: var(--s6);
-  text-align: center;
-  color: var(--ink-2);
-}
-
-/* MapLibre's own NavigationControl ships 29px buttons and no useful labels, so
-   the controls are ours. Being ours also puts them last in the DOM inside the
-   stage — and the stage comes after the panel — so a keyboard user reaching the
-   routes never traverses zoom buttons first (§9). */
-.map__controls {
-  position: absolute;
-  top: var(--s3);
-  /* The stage's trailing edge is the viewport's at every width. This moves the
-     cluster; it never resizes the 44px buttons. */
-  inset-inline-end: calc(var(--s3) + var(--safe-right));
-  z-index: 5;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
-/* Back to the walker, and only offered once the camera has been taken away
-   from them.
-   Top-centre, on the same row as the Stop button at the leading edge and the
-   zoom cluster at the trailing one, so the three never collide. The sheet is
-   bottom-anchored and its height varies with the instruction, so anything
-   positioned from the bottom edge would sometimes land on top of it. */
-.map__recentre {
-  position: absolute;
-  z-index: 31;
-  top: var(--s3);
-  inset-inline-start: 50%;
-  transform: translateX(-50%);
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  min-height: var(--target);
-  padding: var(--s2) var(--s4);
-  border: 1px solid var(--rule-strong);
-  border-radius: var(--r-pill);
-  background: var(--raised);
-  color: var(--ink);
-  font: inherit;
-  font-weight: 600;
-  cursor: pointer;
-  box-shadow: var(--shadow-2);
-}
-.map__recentre:hover {
-  background: var(--sunken);
-  border-color: var(--accent);
-}
-.map__ctrl {
-  display: grid;
-  place-items: center;
-  width: var(--target);
-  height: var(--target);
-  padding: 0;
-  border: 1px solid var(--rule-strong);
-  border-radius: var(--r-sm);
-  background: var(--raised);
-  color: var(--ink);
-  font: inherit;
-  font-size: 1.125rem;
-  font-weight: 600;
-  cursor: pointer;
-  box-shadow: var(--shadow-1);
-}
-.map__ctrl:hover {
-  background: var(--sunken);
-  border-color: var(--accent);
-}
-
-/* Legend, bottom-left. Hidden below 900px — there the rail is the legend. */
-.legend {
-  position: absolute;
-  inset-block-end: calc(var(--s3) + var(--safe-bottom));
-  /* inset-inline-start needs nothing: the stage's leading edge is interior at
-     every width where the legend renders — it is display:none below 900px. */
-  inset-inline-start: var(--s3);
-  z-index: 5;
-  padding: var(--s2) var(--s3);
-  background: var(--raised);
-  border: 1px solid var(--rule);
-  border-radius: var(--r-md);
-  box-shadow: var(--shadow-1);
-  font-size: var(--t-small);
-}
-.legend__row {
-  display: flex;
-  align-items: center;
-  gap: var(--s2);
-  margin: 0;
-}
-.legend__row + .legend__row {
-  margin-top: var(--s1);
-}
-.legend__row.is-selected {
-  font-weight: 700;
-}
-.legend__line {
-  display: inline-block;
-  width: 28px;
-  height: 3px;
-}
-.legend__pattern {
-  color: var(--ink-2);
-}
-
-.marker {
-  display: grid;
-  place-items: center;
-  width: 28px;
-  height: 28px;
-  border-radius: 50%;
-  background: var(--brand);
-  color: var(--brand-on);
-  font-weight: 700;
-  font-size: var(--t-small);
-  border: 2px solid var(--raised);
-  box-shadow: var(--shadow-1);
-}
-/* 14px circle, 3px --raised ring, a ✕ glyph. Barriers are the one thing on
-   this map a user must not miss, so they keep the strongest treatment and stay
-   DOM markers with a real aria-label rather than becoming a paint layer. */
-.marker--blocker {
-  width: 20px;
-  height: 20px;
-  background: var(--warn-ink);
-  color: var(--raised);
-  border: 3px solid var(--raised);
-  font-size: 0.6875rem;
-}
-
-/* ------------------------------------------------------------------ rail */
-
-.rail {
-  display: flex;
-  flex-direction: column;
-  gap: var(--s2);
-  list-style: none;
-  margin: var(--s3) 0 0;
-  padding: 0;
-}
-
-/* One button, only phrasing content inside it. The 4px edge is a grid column
-   rather than an absolutely-positioned bar so it is full height whatever the
-   row contains. */
-.route {
-  display: grid;
-  grid-template-columns: 4px minmax(0, 1fr);
-  gap: var(--s3);
-  width: 100%;
-  padding: 0;
-  border: 1px solid var(--rule);
-  border-radius: var(--r-md);
-  background: var(--raised);
-  color: var(--ink);
-  font: inherit;
-  text-align: start;
-  cursor: pointer;
-  overflow: hidden;
-}
-.route:hover {
-  border-color: var(--rule-strong);
-  box-shadow: var(--shadow-1);
-}
-.route[aria-pressed='true'] {
-  border-color: var(--accent);
-  box-shadow: 0 0 0 1px var(--accent), var(--shadow-1);
-  transition: box-shadow 120ms ease;
-}
-
-.route__edge {
-  display: block;
-  align-self: stretch;
-}
-
-.route__body {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  min-width: 0;
-  padding: var(--s3) var(--s3) var(--s3) 0;
-}
-
-.route__top {
-  display: flex;
-  align-items: baseline;
-  gap: var(--s2);
-  min-width: 0;
-}
-.route__name {
-  font-family: var(--font-display);
-  font-size: var(--t-h3);
-  color: var(--ink);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.route__dur {
-  margin-inline-start: auto;
-  font-family: var(--font-display);
-  font-size: var(--t-metric);
-  line-height: 1;
-  white-space: nowrap;
-}
-.route__dur-unit {
-  font-family: var(--font-body);
-  font-size: 0.9375rem;
-  color: var(--ink-2);
-}
-/* A blocked route's duration is not a promise, so it does not read as one. */
-.route--blocked .route__dur {
-  color: var(--ink-2);
-}
-
-.route__sub {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-size: var(--t-small);
-  color: var(--ink-2);
-  min-width: 0;
-}
-.route__pattern {
-  display: inline-block;
-  width: 26px;
-  height: 3px;
-}
-
-.badge {
-  flex: none;
-  padding: 2px var(--s2);
-  border-radius: var(--r-pill);
-  font-size: var(--t-micro);
-  font-weight: 600;
-  border: 1px solid transparent;
-}
-.badge--showing {
-  background: var(--brand-tint);
-  color: var(--ok-ink);
-  border-color: var(--accent);
-}
-.badge--blocked {
-  background: var(--warn-ground);
-  color: var(--warn-ink);
-  border-color: var(--warn-rule);
-}
-
-/* three aligned score meters — the thing that makes rows comparable */
-
-.route__scores {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: var(--s2);
-  margin-top: 2px;
-}
-.metric {
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-  min-width: 0;
-}
-.metric__head {
-  display: flex;
-  justify-content: space-between;
-  gap: var(--s1);
-  font-size: var(--t-micro);
-  color: var(--ink-2);
-}
-.metric__none {
-  font-style: italic;
-  text-align: end;
-}
-
-/* "not measured" is ~78px at --t-micro and a score column is 114px at the
-   panel's widest and ~98px at its narrowest, so it cannot share a line with
-   the label. It wraps — and a wrapped head made that one row taller than the
-   others, which breaks the alignment the rail exists to provide.
-   The fix reserves the second line across the WHOLE rail rather than on the
-   row that needs it, so every row grows together and the three tracks stay on
-   one horizontal line. When no route has an unmeasured score, nothing matches
-   and the head stays the single tight row §4.6 specifies. */
-.rail:has(.metric__none) .metric__head {
-  /* Two lines at the inherited 1.5 line-height. Setting this in `em` keeps it
-     tied to --t-micro rather than to a pixel guess. */
-  min-height: 3em;
-  align-items: flex-start;
-}
-.metric__track {
-  display: block;
-  height: 5px;
-}
-.metric__fill {
-  display: block;
-  border-radius: 3px;
-}
-/* A null score and a 0 score are different statements and must never render
-   alike. `0` gets a real, empty track; `null` gets this hatch and the words
-   "not measured" where the percentage would be. */
-.metric__track--hatched {
-  background-image: repeating-linear-gradient(
-    45deg,
-    var(--rule-strong) 0 2px,
-    transparent 2px 5px
-  );
-}
-
-/* verification meter */
-
-.verify {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-size: var(--t-micro);
-  min-width: 0;
-}
-.verify__track {
-  display: flex;
-  gap: 2px;
-  flex: none;
-}
-.verify__seg {
-  display: block;
-  width: 12px;
-  height: 6px;
-  border-radius: 2px;
-  background: var(--sunken);
-  box-shadow: inset 0 0 0 1px var(--rule);
-}
-.verify--ok .verify__seg.is-on {
-  background: var(--ok-ink);
-  box-shadow: none;
-}
-.verify--warn .verify__seg.is-on {
-  background: var(--warn-ink);
-  box-shadow: none;
-}
-.verify__text {
-  color: var(--ink-2);
-  min-width: 0;
-}
-/* Weight and a glyph as well as the colour — a thin verification score is the
-   most important thing on the row and cannot be a hue alone. */
-.verify--warn .verify__text {
-  color: var(--warn-ink);
-  font-weight: 600;
-}
-.verify__glyph {
-  margin-inline-end: 3px;
-}
-
-/* skeletons — hold the row height so the layout never jumps */
-
-.route--skeleton {
-  cursor: default;
-}
-.route--skeleton .route__edge {
-  background: var(--sunken);
-}
-.sk {
-  display: block;
-  border-radius: var(--r-sm);
-  background: var(--sunken);
-}
-.sk--title {
-  height: 22px;
-  width: 60%;
-}
-.sk--sub {
-  height: 14px;
-  width: 80%;
-}
-.sk--scores {
-  height: 26px;
-}
-.sk--verify {
-  height: 14px;
-  width: 70%;
-}
-
-/* ---------------------------------------------------------------- detail */
-
-.detail {
-  display: flex;
-  flex-direction: column;
-  gap: var(--s4);
-  margin-top: var(--s3);
-  padding: var(--s5);
-  background: var(--raised);
-  border: 1px solid var(--rule);
-  border-radius: var(--r-lg);
-  box-shadow: var(--shadow-1);
-}
-
-.detail__head {
-  display: flex;
-  align-items: baseline;
-  gap: var(--s2);
-  flex-wrap: wrap;
-}
-.detail__pattern {
-  width: 26px;
-  height: 3px;
-  align-self: center;
-}
-.detail__title {
-  font-size: var(--t-h2);
-  margin: 0;
-}
-.detail__figures {
-  margin: 0 0 0 auto;
-  color: var(--ink-2);
-}
-
-.detail__narration {
-  font-family: var(--font-display);
-  font-size: var(--t-h3);
-  line-height: 1.55;
-  margin: 0;
-}
-.detail__narration--pending {
-  color: var(--ink-2);
-  font-style: italic;
-}
-
-.detail__section {
-  display: flex;
-  flex-direction: column;
-  gap: var(--s2);
-}
-.detail__h {
-  font-family: var(--font-body);
-  font-size: var(--t-micro);
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  color: var(--ink-2);
-  margin: 0;
-}
-.detail__pattern-note {
-  margin: 0;
-  font-size: var(--t-micro);
-  color: var(--ink-2);
-}
-
-.stops {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  list-style: none;
-  margin: 0;
-  padding: 0;
-}
-.stop {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 6px var(--s3);
-  border: 1px solid var(--rule);
-  border-radius: var(--r-pill);
-  background: var(--sunken);
-  font-size: var(--t-small);
-}
-
-.note {
-  padding: var(--s3);
-  border: 1px solid var(--rule);
-  border-radius: var(--r-sm);
-  background: var(--sunken);
-  font-size: var(--t-small);
-}
-.note--warn {
-  background: var(--warn-ground);
-  border-color: var(--warn-rule);
-  color: var(--warn-ink);
-}
-.note__title {
-  margin: 0;
-  font-weight: 600;
-}
-.note__sub {
-  margin: var(--s1) 0 0;
-  color: var(--ink-2);
-}
-.note--warn .note__sub {
-  color: inherit;
-}
-
-.blockers__list {
-  margin: var(--s2) 0 0;
-  padding-inline-start: 18px;
-  font-size: var(--t-small);
-}
-.blockers__list li + li {
-  margin-top: var(--s1);
-}
-
-.link-button {
-  align-self: flex-start;
-  margin-top: var(--s2);
-  min-height: var(--target);
-  padding: var(--s2) 0;
-  background: none;
-  border: 0;
-  color: inherit;
-  font: inherit;
-  font-size: var(--t-small);
-  font-weight: 600;
-  text-decoration: underline;
-  text-underline-offset: 3px;
-  cursor: pointer;
-}
-
-/* full-width score meters in the detail panel */
-
-.scorelist {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  margin: 0;
-}
-.scorelist__row {
-  display: grid;
-  grid-template-columns: 5.5rem minmax(0, 1fr) 2.5rem;
-  align-items: center;
-  gap: var(--s2);
-  font-size: var(--t-small);
-}
-.scorelist dt,
-.scorelist dd {
-  margin: 0;
-}
-.scorelist__track {
-  height: 6px;
-}
-.scorelist__fill {
-  display: block;
-  border-radius: 3px;
-}
-.scorelist__value {
-  text-align: end;
-}
-/* Spans the bar and the number: "not measured" is a sentence, not a value. */
-.scorelist__unmeasured {
-  grid-column: 2 / -1;
-  color: var(--ink-2);
-  font-style: italic;
-}
-
-
-/* -------------------------------------------------------- climb profile */
-
-/* Route.elevation has been on every response since the launch branch and
-   nothing read it. The stretches marked here are the same gradient the
-   accessible preset refuses to cross — the threshold arrives on the wire as
-   `limit_pct`, so the drawing cannot drift from the verdict. */
-.profile {
-  display: flex;
-  flex-direction: column;
-  gap: var(--s2);
-}
-
-.profile__svg {
-  width: 100%;
-  height: 72px;
-  display: block;
-  background: var(--sunken);
-  border: 1px solid var(--rule);
-  border-radius: var(--r-sm);
-}
-
-.profile__line {
-  fill: none;
-  stroke: var(--accent);
-  stroke-width: 1.5px;
-  stroke-linejoin: round;
-}
-
-.profile__fill-top {
-  stop-color: var(--brand-tint);
-  stop-opacity: 0.9;
-}
-.profile__fill-bottom {
-  stop-color: var(--brand-tint);
-  stop-opacity: 0.15;
-}
-
-/* Tint AND hatch. A tinted rectangle is colour as the only differentiator,
-   which this design system does not allow anywhere else either — the null
-   score track above solves the same problem the same way. */
-.profile__steep {
-  fill: var(--warn-ground);
-  opacity: 0.75;
-}
-.profile__hatch-line {
-  stroke: var(--warn-rule);
-  stroke-width: 1.5px;
-}
-
-.profile__axis {
-  display: flex;
-  justify-content: space-between;
-  font-size: var(--t-micro);
-  color: var(--ink-2);
-}
-
-.profile__summary {
-  font-size: var(--t-small);
-  color: var(--ink);
-  margin: 0;
-}
-
-.profile__warn {
-  font-size: var(--t-small);
-  color: var(--warn-ink);
-  margin: 0;
-}
-
-
-/* ------------------------------------------------------ report a barrier */
-
-/* The only control in the application that publishes anything. It is collapsed
-   until asked for, and the warning sits above the button rather than below it. */
-.report__open {
-  width: 100%;
-  min-height: var(--target);
-}
-
-.report {
-  display: flex;
-  flex-direction: column;
-  gap: var(--s3);
-  padding: var(--s4);
-  background: var(--sunken);
-  border: 1px solid var(--rule);
-  border-radius: var(--r-md);
-}
-
-.report__title {
-  font: var(--t-h3);
-  margin: 0;
-}
-
-.report__lede {
-  font-size: var(--t-small);
-  color: var(--ink-2);
-  margin: 0;
 }
 
 .report__select,
 .report__text {
-  width: 100%;
+  border: 1px solid var(--border);
+  border-radius: var(--r-chip);
+  background: var(--surface);
+  padding: 10px 12px;
+  font-size: 14px;
   min-height: var(--target);
-  padding: var(--s2) var(--s3);
-  font: inherit;
-  color: var(--ink);
-  background: var(--paper);
-  border: 1px solid var(--rule-strong);
-  border-radius: var(--r-sm);
-}
-
-.report__text {
-  resize: vertical;
 }
 
 .report__range {
-  width: 100%;
+  accent-color: var(--sky-deep);
   min-height: var(--target);
-}
-
-/* Warning colours, and a rule down the side so it is not colour alone. */
-.report__warn {
-  font-size: var(--t-small);
-  color: var(--warn-ink);
-  background: var(--warn-ground);
-  border-inline-start: 3px solid var(--warn-rule);
-  border-radius: var(--r-sm);
-  padding: var(--s3);
-  margin: 0;
 }
 
 .report__actions {
   display: flex;
-  gap: var(--s3);
-  flex-wrap: wrap;
-}
-
-.report__actions .button {
-  min-height: var(--target);
-}
-
-.report__status:empty {
-  display: none;
+  gap: 8px;
 }
 
 .report__status {
-  font-size: var(--t-small);
-  color: var(--ink);
   margin: 0;
+  font-size: 12.5px;
+  color: var(--ink-2);
 }
 
+/* ------------------------------------------------------ motion, sparse */
 
-/* ----------------------------------------------------------- responsive */
-
-/* Below 900px the map moves ABOVE the panel and the page scrolls as one
-   document rather than the panel scrolling inside a fixed frame.
-   Why the map goes on top: the trip bar and the first route row have to be
-   reachable by thumb. A 36vh map above them keeps the answer visible while
-   leaving the controls in the lower two-thirds of the screen (§3). */
-@media (max-width: 899px) {
-  .app {
-    height: auto;
-    min-height: 100vh;
-    min-height: 100dvh;
+@keyframes pulse {
+  0%,
+  100% {
+    opacity: 1;
   }
-  .layout {
-    grid-template-columns: 1fr;
-  }
-  .stage {
-    order: -1;
-    height: max(230px, 36vh);
-  }
-  /* Both axes, both elements, and all four in longhand. This is the trap
-     written out in CSS Overflow 3: when one axis is not `visible` the other
-     computes to `auto`, so an override that names only `overflow-y` leaves the
-     element a scroll container on the axis nobody mentioned. `.panel` already
-     demonstrated it — with `overflow-y: auto` and no `overflow-x`, the computed
-     `overflow-x` on desktop is `auto`. Below 900px the document scrolls as one
-     and neither of these may be a scroller on either axis. */
-  .panel {
-    overflow-y: visible;
-    overflow-x: visible;
-    border-inline-end: 0;
-  }
-  .panel__scroll {
-    overflow-y: visible;
-    overflow-x: visible;
-    /* `flex: 1 1 0` is right in a column of definite height and wrong in one of
-       indefinite height, which is what `.panel` is here — `.app` is
-       `height: auto` below this width. A basis of 0 in an auto-height container
-       asks the browser to size the container from an item that has declared it
-       wants nothing. Nothing flexes on this side of the breakpoint: the
-       document scrolls and both children take their content height. */
-    flex: none;
-  }
-
-  /* The skip link is the first focusable element in the app and it points at
-     `#results`, which has no rule of its own. Below 900px the *document* is the
-     scroller, so pressing Tab then Enter on load put `#results` at y = 0 —
-     underneath an opaque bar 56px tall, or up to 115px with the safe-area inset
-     on an iPhone 15 Pro. Measured before this line existed: `#results` landed
-     at y = -0.2 with the topbar's bottom edge at 56.
-     `grep -rn "scroll-margin\|scroll-padding" frontend/` returned zero matches.
-
-     Here rather than in `:root` because this is a property of the mobile scroll
-     arrangement, and it belongs beside the other decision that arrangement
-     makes. Above 900px `.panel__scroll` is the scroller and it already starts
-     below the topbar, so there is nothing for the document to compensate for. */
-  html {
-    scroll-padding-top: var(--topbar-h);
-  }
-  /* The rail is the legend at this width, and the map is only 36vh — a card
-     sitting in the corner of it would cover a third of the route. */
-  .legend {
-    display: none;
-  }
-  .topbar__tagline {
-    display: none;
-  }
-  /* This shorthand-free override lands after the base rule and would otherwise
-     delete its --safe-right. `top` stays as-is: at this width the stage sits
-     below the topbar in document flow, so its top edge is already past the
-     inset. */
-  .map__controls {
-    top: var(--s2);
-    inset-inline-end: calc(var(--s2) + var(--safe-right));
-  }
-  .ribbon {
-    font-size: var(--t-micro);
+  50% {
+    opacity: 0.35;
   }
 }
 
-/* Two segments side by side stop fitting a place name here. */
-@media (max-width: 379px) {
-  .tripbar__grid {
-    grid-template-columns: 1fr;
+/* Sheets and banners arrive with a 220ms ease-out translate+fade; nothing
+ * else moves. The reduced-motion block below flattens all of it. */
+@keyframes rise-in {
+  from {
+    opacity: 0;
+    transform: translateY(14px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
   }
 }
 
-@media (max-width: 420px) {
-  /* The shorthand lands after the base rule and resets all four sides, so the
-     safe-area longhands have to be restated or they are silently deleted here.
-     inline-end is unconditional: this width is always single-column. */
-  .panel {
-    padding: var(--s3);
-    padding-inline-start: calc(var(--s3) + var(--safe-left));
-    padding-inline-end: calc(var(--s3) + var(--safe-right));
-    padding-bottom: calc(var(--s3) + var(--safe-bottom));
+@keyframes drop-in {
+  from {
+    opacity: 0;
+    transform: translateY(-14px);
   }
-  .dial__ticks {
-    font-size: 0.6875rem;
+  to {
+    opacity: 1;
+    transform: none;
   }
-  .firstrun__card {
-    padding: var(--s6) var(--s4);
-  }
+}
+
+.sheet,
+.follow__dock,
+.rail--row,
+.follow__arrival {
+  animation: rise-in 220ms ease-out;
+}
+
+.follow__banner,
+.follow__off,
+.follow__barrier,
+.status,
+.capsule-wrap {
+  animation: drop-in 220ms ease-out;
 }
 
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
   *::after {
-    animation-duration: 0.001ms !important;
-    animation-iteration-count: 1 !important;
-    transition-duration: 0.001ms !important;
-    scroll-behavior: auto !important;
+    animation: none !important;
+    transition: none !important;
   }
 }
 
-/* ------------------------------------------------------------- departure */
+/* --------------------------------------------------------- small screens */
 
-.departure {
-  flex: none;
-  display: flex;
-  flex-direction: column;
-  gap: var(--s2);
-  padding: var(--s3) var(--s4);
-  background: var(--raised);
-  border: 1px solid var(--rule);
-  border-radius: var(--r-md);
-}
-.departure__head {
-  margin: 0;
-  font-size: var(--t-body);
-}
-.departure__daylight {
-  margin: 0;
-  font-size: var(--t-small);
-  color: var(--ink-2);
-  font-variant-numeric: tabular-nums;
-}
-.departure__hours {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-}
-.hour {
-  gap: var(--s1);
-  min-width: var(--target);
-  padding: var(--s2) var(--s3);
-  font-size: var(--t-small);
-  font-variant-numeric: tabular-nums;
-}
-/* Out-of-daylight hours carry the moon as well as the darker fill. Tint alone
-   would make daylight a colour-only signal, which the project forbids. */
-.hour--dark {
-  background: var(--sunken);
-  color: var(--ink-2);
-}
-.hour__moon {
-  font-size: 0.875rem;
-  line-height: 1;
+/* The card row cannot be a row on anything narrower than three cards. The
+ * desktop layer only renders at 1024px and up, so this only tunes the row
+ * against narrow desktop windows. */
+@media (max-width: 1240px) {
+  .rail--row .card {
+    width: 260px;
+  }
 }
 
-/* The daylight guard sits inside the detail panel and stacks its one action
-   underneath the sentence. */
-.note .link-button {
-  margin-top: var(--s1);
-}
-
-/* ----------------------------------------------------------------- steps */
-
-.steps {
-  border: 1px solid var(--rule);
-  border-radius: var(--r-sm);
-  background: var(--sunken);
-}
-.steps__summary {
-  display: flex;
-  align-items: center;
-  min-height: var(--target);
-  padding: var(--s2) var(--s3);
-  font-size: var(--t-small);
-  font-weight: 600;
-  cursor: pointer;
-  border-radius: var(--r-sm);
-}
-.steps__list {
-  margin: 0;
-  padding: 0 var(--s3) var(--s3) var(--s6);
-  display: flex;
-  flex-direction: column;
-  gap: var(--s2);
-}
-.step {
-  padding: var(--s2);
-  border-radius: var(--r-sm);
-}
-/* Hovering or focusing a step highlights that stretch on the map. A state
-   change rather than motion, so reduced-motion does not suppress it. */
-.step:hover,
-.step:focus-visible {
-  background: var(--brand-tint);
-}
-.step__text {
-  margin: 0;
-  font-size: var(--t-small);
-}
-.step__meta {
-  margin: 2px 0 0;
-  font-size: var(--t-micro);
-  color: var(--ink-2);
-}
-/* The barrier sits inside the step a walker would meet it on. That placement
-   is the point of the feature: a barrier in a separate list is something you
-   read about, and a barrier in step seven is something you meet. */
-.step__barrier {
-  margin-top: 6px;
-  font-size: var(--t-micro);
-}
-
-/* ---------------------------------------------------------------- follow */
-
-/* Fills the stage. Above 900px the stage is a column beside a panel that stays
-   usable, so this is an overlay; below it the stage itself goes full-screen
-   while following (see the end of this file) and this fills the viewport.
-   Either way the map is *inside* the layer rather than behind it, which is what
-   lets the focus trap contain the sheet without taking the map away — §6.7
-   amended rather than contradicted. */
-.follow {
-  position: absolute;
-  inset: 0;
-  z-index: 30;
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: var(--s2);
-  padding: var(--s3);
-  padding-inline-end: calc(var(--s3) + var(--safe-right));
-  /* Unconditional now. Above 900px the stage reaches the bottom of the
-     viewport; below it the layer is full-screen and reaches it too. There is no
-     longer a width at which the sheet is nowhere near the home indicator. */
-  padding-bottom: calc(var(--s3) + var(--safe-bottom));
-  pointer-events: none;
-}
-.follow > * {
-  pointer-events: auto;
-}
-
-/* First in the DOM and therefore first in the tab order, always visible, and
-   comfortably over the 44px floor. Getting out has to be one tap however lost
-   you are. */
-.follow__exit {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  min-height: var(--target);
-  padding: var(--s2) var(--s4);
-  border: 1px solid var(--rule-strong);
-  border-radius: var(--r-pill);
-  background: var(--raised);
-  color: var(--ink);
-  font: inherit;
-  font-weight: 600;
-  cursor: pointer;
-  box-shadow: var(--shadow-1);
-}
-.follow__exit:hover {
-  background: var(--sunken);
-  border-color: var(--accent);
-}
-
-.follow__alert {
-  align-self: stretch;
-  padding: var(--s3);
-  background: var(--warn-ground);
-  border: 1px solid var(--warn-rule);
-  border-radius: var(--r-md);
-  color: var(--warn-ink);
-  font-size: var(--t-small);
-  font-weight: 600;
-  box-shadow: var(--shadow-1);
-}
-.follow__alert--soft {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--s3);
-}
-/* Two children, and the split is the whole point. The assertive region holds
-   the barrier's identity and no number; the counting-down distance sits beside
-   it in an ordinary element. With the number inside the alert, one 200 m
-   approach interrupted 21 times in metric and 54 in imperial. */
-.follow__alert-say {
-  margin: 0;
-}
-.follow__alert-dist {
-  margin: 4px 0 0;
-  font-weight: 400;
-}
-
-/* Not an alert. A rejected fix can come and go with the signal, and an
-   assertive announcement per flicker is worse than the silence it replaces. */
-.follow__signal {
-  align-self: stretch;
-  margin: 0;
-  padding: var(--s2) var(--s3);
-  background: var(--raised);
-  border: 1px solid var(--rule-strong);
-  border-radius: var(--r-md);
-  color: var(--ink-2);
-  font-size: var(--t-small);
-  box-shadow: var(--shadow-1);
-}
-
-/* Sized by its content, with a ceiling and a scrollbar, never by a floor.
- *
- * `min-height: 30vh` failed in both directions at once. Upward: 12 + 44 + 8 +
- * 30vh exceeds the `max(230px, 36vh)` band for every viewport height between
- * 553px and 1067px, so the sheet hung past the stage on every phone in portrait
- * — measured +23.98px on an iPhone SE, +13.36px at 390x844, +2.56px on an iPad.
- * Downward: an explicit min-height overrides `min-height: auto`, which is the
- * thing that stops a flex item shrinking below its own content, so at 844x390
- * the sheet was given 154px to hold 170px of text and clipped the rest with no
- * way to reach it.
- *
- * `min-height: 0` and `overflow-y: auto` together are the fix for the second
- * half: the sheet may shrink, and when it does the text scrolls instead of
- * disappearing. `max-height: 100%` keeps it inside the layer's content box.
- * The element carries `tabindex="0"` in the JSX so that a scrollable region is
- * keyboard-reachable — `scrollable-region-focusable` is a wcag2a rule the gate
- * runs, and in the ordinary state every child of this sheet is a paragraph. */
-.sheet {
-  margin-top: auto;
-  align-self: stretch;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  min-height: 0;
-  max-height: 100%;
-  overflow-y: auto;
-  padding: var(--s5);
-  background: var(--raised);
-  border: 1px solid var(--rule);
-  border-radius: var(--r-lg) var(--r-lg) var(--r-md) var(--r-md);
-  box-shadow: var(--shadow-2);
-}
-.sheet__step {
-  margin: 0;
-  font-family: var(--font-display);
-  font-size: var(--t-h3);
-}
-
-/* The banner: glyph, distance, street. The three things a turn instruction is
-   made of, in the order the eye wants them. */
-.sheet__banner {
-  display: flex;
-  align-items: center;
-  gap: var(--s3);
-}
-.sheet__glyph {
-  flex: none;
-  font-size: 2.25rem;
-  color: var(--accent);
-}
-.sheet__banner-body {
-  min-width: 0;
-}
-.sheet__instruction {
-  margin: 0;
-  font-family: var(--font-display);
-  font-size: var(--t-h3);
-  line-height: 1.15;
-}
-/* The step you are inside, demoted to a line of prose under the turn ahead.
-   This is the text that used to be the largest thing on the screen, naming the
-   turn already taken. */
-.sheet__now {
-  margin: 0;
-  font-size: var(--t-small);
-  color: var(--ink-2);
-}
-.sheet__progress {
-  margin: 2px 0;
-}
-.sheet__arrival {
-  display: flex;
-  align-items: center;
-  gap: var(--s3);
-  margin: 0;
-  font-family: var(--font-display);
-  font-size: var(--t-h2);
-  color: var(--accent);
-}
-.sheet__finish {
-  align-self: stretch;
-  justify-content: center;
-  margin-top: var(--s2);
-}
-.sheet__metric {
-  margin: 0;
-  font-family: var(--font-display);
-  font-size: var(--t-metric);
-  line-height: 1.1;
-}
-.sheet__metric-unit {
-  font-family: var(--font-body);
-  font-size: var(--t-small);
-  color: var(--ink-2);
-}
-.sheet__row {
-  margin: 0;
-  font-size: var(--t-small);
-  color: var(--ink-2);
-}
-.sheet__privacy {
-  margin: auto 0 0;
-  padding-top: var(--s3);
-  border-top: 1px solid var(--rule);
-  font-size: var(--t-micro);
-  color: var(--ink-2);
-}
-
-.detail__actions {
-  display: flex;
-  flex-direction: column;
-  gap: var(--s2);
-  align-items: flex-start;
-}
-.detail__actions .button--primary:disabled {
-  opacity: 0.55;
-  cursor: not-allowed;
-}
-
-/* --------------------------------------------------------------- offline */
-
-/* Volume rises with age. Colour is never the only signal — the tiers differ by
-   wording and by a ⚠ glyph as well as by tint. Zero new colour tokens. */
-.offline {
-  display: flex;
-  flex-direction: column;
-  gap: var(--s1);
-  flex: none;
-  padding: var(--s2) var(--s4);
-  padding-inline: calc(var(--s4) + var(--safe-left)) calc(var(--s4) + var(--safe-right));
-  background: var(--sunken);
-  border-bottom: 1px solid var(--rule-strong);
-  font-size: var(--t-small);
-}
-.offline--amber,
-.offline--loud {
-  background: var(--warn-ground);
-  color: var(--warn-ink);
-  border-bottom-color: var(--warn-rule);
-}
-.offline--loud {
-  border-bottom-width: 2px;
-}
-.offline__headline {
-  margin: 0;
-  font-weight: 600;
-}
-.offline__detail {
-  margin: 0;
-  color: var(--ink-2);
-}
-.offline--amber .offline__detail,
-.offline--loud .offline__detail {
-  color: inherit;
-}
-.offline__icon {
-  font-size: 1rem;
-  line-height: 1;
-}
-
-.badge--cached {
-  background: var(--sunken);
-  border: 1px solid var(--rule-strong);
-  color: var(--ink-2);
-}
-.badge--cached-amber,
-.badge--cached-loud {
-  background: var(--warn-ground);
-  border-color: var(--warn-rule);
-  color: var(--warn-ink);
-}
-.badge--cached-loud {
-  font-weight: 700;
-}
-
-.detail__cached .note__title {
-  font-weight: 600;
-}
-
-/* ------------------------------------------------------- take it with you */
-
-.takeaway {
-  display: flex;
-  flex-direction: column;
-  gap: var(--s2);
-  padding-top: var(--s3);
-  border-top: 1px solid var(--rule);
-}
-.takeaway__row {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--s2);
-}
-/* .button sets min-height and min-width, but an <a> is inline and min-height
-   does not apply to it. This is what makes the two handoff links 44px tall
-   rather than about 20. */
-.takeaway__row .button {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  text-decoration: none;
-}
-.takeaway__note {
-  margin: 0;
-  font-size: var(--t-small);
-  color: var(--ink-2);
-}
-.takeaway__warn {
-  display: flex;
-  flex-direction: column;
-  gap: var(--s2);
-  padding: var(--s3);
-  background: var(--warn-ground);
-  border: 1px solid var(--warn-rule);
-  border-radius: var(--r-sm);
-  color: var(--warn-ink);
-  font-size: var(--t-small);
-}
-/* Without this the flex display beats `hidden` and the disclosure never closes. */
-.takeaway__warn[hidden] {
-  display: none;
-}
-.takeaway__warn p {
-  margin: 0;
-}
-
+/* Screen-hidden, print-only provenance. The print block below turns it on. */
 .printsheet {
   display: none;
 }
 
-/* ----------------------------------------------------------------- share */
-
-.share {
-  display: flex;
-  flex-direction: column;
-  gap: var(--s2);
-  align-items: flex-start;
-  margin-top: var(--s4);
-}
-.share__status {
-  margin: 0;
-  font-size: var(--t-small);
-  color: var(--ink-2);
-}
-/* Nothing to say yet, so nothing takes up room. */
-.share__status:empty {
-  display: none;
-}
-.share__url {
-  align-self: stretch;
-  min-height: var(--target);
-  font-family: var(--font-mono);
-  font-size: var(--t-small);
-}
-
-/* ----------------------------------------------------------------- units */
-
-/* Two independent choices, each its own fieldset so a screen reader is told
-   they are two questions. Everything else is .chips / .chip, unchanged. */
-.units {
-  display: flex;
-  flex-direction: column;
-  gap: var(--s3);
-}
-
-/* ------------------------------------------------------------- safe area */
-
-/* The rules from here to the end of the file are at the END of it, not in the
-   responsive block above, and that is not tidiness. `.follow`, `.sheet` and
-   `.map__recentre` are all declared after that block, so
-   `@media (max-width: 899px) { .follow { … } }` placed up there would LOSE to
-   them — equal specificity, later source wins, media queries contribute none.
-   It would fail silently and look fine on every desktop. The full-screen follow
-   block below is the largest thing that would break that way, which is why it
-   is here rather than beside the other `max-width: 899px` rules. */
-
-/* Below 900px the panel is the only column, so its trailing edge is the
-   viewport's. Above it, the stage is. */
-@media (max-width: 899px) {
-  .panel {
-    padding-inline-end: calc(var(--s4) + var(--safe-right));
-  }
-}
-
-/* -------------------------------------------------- follow, full screen */
-
-/* Below 900px, while following and only while following, the stage leaves the
-   document and becomes the viewport.
- *
- * The old arrangement put the sheet inside a `max(230px, 36vh)` band at the top
- * of a document that kept scrolling underneath it, which fails three ways at
- * once. The sheet does not fit the band on any phone in portrait. The map above
- * it gets a 64px strip on every viewport, because 12 + 44 + 8 are three fixed
- * pixel values that do not scale. And "Start this route" is at the far end of a
- * panel below that band, so opening follow mode meant a 1338px scroll jump at
- * 390x844.
- *
- * The class is on `.stage` rather than on `.follow`, and that is the load-
- * bearing part: the MAP is inside the stage, so it comes full-screen too. The
- * focus trap can then contain the whole layer without making the map
- * unreachable, which is what §6.7 asks for and what a trap around the sheet
- * alone would have reversed. MapLibre is never unmounted and the
- * single-instance rule holds.
- *
- * `.stage` is NOT resized outside this state: gate check 5 asserts
- * `stage.bottom <= panel.top + 2` at 390x844 on an ordinary load, and that stays
- * true because an ordinary load never carries this class.
- *
- * z-index 45 sits above `.topbar` at 40 — a full-screen layer that renders
- * under the topbar is not full-screen — and below `.skip-link` at 100, which
- * must stay reachable. */
-@media (max-width: 899px) {
-  .stage--following {
-    position: fixed;
-    inset: 0;
-    z-index: 45;
-    /* The responsive block sets `height: max(230px, 36vh)`. Left alone it would
-       hold the fixed layer to a band at the top of the screen. */
-    height: auto;
-    order: 0;
-  }
-  /* dvh, not vh. `.app` has used dvh since the safe-area work; these two had
-     been left on plain vh, which on iOS measures the viewport with the URL bar
-     retracted and so overstates the height by about 60px exactly when the bar
-     is showing. */
-  .stage--following .follow {
-    max-height: 100dvh;
-    /* The layer now starts at the top of the screen rather than below the
-       topbar, so it owns the top inset for the first time. Scoped here and not
-       made unconditional: above 900px the stage still sits below `.topbar`,
-       which already consumes `--safe-top`, and adding it again there would
-       indent the sheet by a notch that is not in front of it. */
-    padding-top: calc(var(--s3) + var(--safe-top));
-  }
-  /* The controls were unreachable in follow mode: z-index 5 against the
-     overlay's 30, with `document.elementFromPoint` at their own centre
-     returning a span from inside the sheet. Raised above the overlay, and given
-     the top inset for the same reason the layer needs it. */
-  .stage--following .map__controls {
-    top: calc(var(--s2) + var(--safe-top));
-    z-index: 35;
-  }
-  .stage--following .map__recentre {
-    top: calc(var(--s3) + var(--safe-top));
-  }
-}
-
-/* MapLibre's compact attribution button. attributionControl is on, and this
-   file has no other .maplibregl-* rule at all, so the button sits in the literal
-   corner of the stage — which above 900px is the corner of the viewport.
-   Padding on the container, not margin: MapLibre gives its own children
-   `margin: 0 10px 10px 0`, and a margin here would replace that rather than add
-   to it. Physical sides, to match MapLibre's own physical class names. */
-.map .maplibregl-ctrl-bottom-right {
-  padding-right: var(--safe-right);
-}
-@media (min-width: 900px) {
-  .map .maplibregl-ctrl-bottom-right,
-  .map .maplibregl-ctrl-bottom-left {
-    padding-bottom: var(--safe-bottom);
-  }
-}
-
-/* PROBE — to exercise any of this on a machine that reports no insets, which is
-   every desktop browser and every headless Chrome:
- *
- *   const r = document.documentElement.style
- *   r.setProperty('--safe-top', '59px');   r.setProperty('--safe-right', '0px')
- *   r.setProperty('--safe-bottom', '34px'); r.setProperty('--safe-left', '0px')
- *
- * (iPhone 15 Pro portrait. Landscape, notch to the left: 0/59/21/59.)
- * Every rule above reads the token, never env() directly, precisely so this
- * substitution is faithful. It proves the arithmetic and the stacking. It
- * cannot prove the UA reports the right numbers — only a device can. */
-
 /* ------------------------------------------------------------------ print */
 
-/* One sheet: the numbers, the coverage sentence, the barriers, the directions,
-   the provenance block. The map is dropped — a WebGL canvas prints as a grey
-   rectangle at best — and this is only possible because the rail and the detail
-   have always been a complete text substitute for it.
-
-   Everything hidden below is chrome. Nothing hidden below is content: .ribbon,
-   .banner--warn, .rail and the About disclosure all stay, because each carries
-   something the reader needs rather than something they clicked. */
+/* Paper gets the route detail and nothing else. The sheet is deliberately NOT
+ * hidden wholesale: on a phone the detail lives inside it, and hiding the
+ * container would print a blank page — only its chrome goes. */
 @media print {
-  /* Both selectors, or a dark-theme user prints near-white ink on white paper —
-     the theme attribute is still set while printing. */
-  :root,
-  [data-theme='dark'] {
-    color-scheme: light;
-    --paper: var(--print-paper);
-    --raised: var(--print-paper);
-    --sunken: var(--print-paper);
-    --rule: var(--print-rule);
-    --rule-strong: var(--print-ink);
-    --ink: var(--print-ink);
-    --ink-2: var(--print-ink);
-    --warn-ground: var(--print-paper);
-    --warn-rule: var(--print-ink);
-    --warn-ink: var(--print-ink);
-    --shadow-1: none;
-    --shadow-2: none;
-  }
-
-  @page {
-    margin: 14mm;
-  }
-
-  .topbar,
-  .skip-link,
-  .tripbar,
-  .departure,
   .stage,
-  .takeaway,
-  .share,
-  .panel__spacer,
-  .map__controls,
-  .legend {
+  .capsule-wrap,
+  .rail--row,
+  .status,
+  .ribbon,
+  .skip-link,
+  .sheet__grabber-hit,
+  .exports__row,
+  .map-attribution {
     display: none !important;
   }
 
-  .app {
-    height: auto;
-    display: block;
-  }
-  .layout {
-    display: block;
-  }
-  .panel {
+  .sheet {
+    position: static;
+    max-height: none;
     overflow: visible;
-    border-inline-end: 0;
+    box-shadow: none;
+    height: auto !important;
+  }
+
+  .detail-scrim {
+    position: static;
+    background: none;
     padding: 0;
   }
 
+  .detail--modal {
+    box-shadow: none;
+    max-height: none;
+    overflow: visible;
+  }
+
   .printsheet {
     display: block;
-    margin-top: var(--s4);
-    border-top: 2px solid var(--print-ink);
-    padding-top: var(--s3);
-  }
-  .printsheet__h {
-    margin: 0 0 var(--s1);
-    font-size: var(--t-micro);
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
-  }
-  .printsheet__note {
-    margin: 0;
-    font-size: var(--t-small);
-  }
-  .printsheet__stamp {
-    margin: var(--s1) 0 0;
-    font-size: var(--t-micro);
-  }
-
-  /* Backgrounds are not printed by default, so a tinted warning would come out
-     as plain text. Weight and a rule carry it instead — the same reason the
-     on-screen warn tier carries a glyph as well as a hue. */
-  .note--warn,
-  .banner--warn {
-    border: 2px solid var(--print-ink);
-    font-weight: 600;
-  }
-
-  .route,
-  .note,
-  .detail__section,
-  .step,
-  .printsheet {
-    break-inside: avoid;
-  }
-
-  .verify__seg {
-    box-shadow: inset 0 0 0 1px var(--print-ink);
-  }
-  .verify__seg.is-on {
-    background: var(--print-ink);
-    print-color-adjust: exact;
-  }
-
-  /* A printed link that only says "here" is a dead end on paper. */
-  a::after {
-    content: ' (' attr(href) ')';
-    font-size: 9pt;
-    word-break: break-all;
-  }
-  /* Except the credits, which are five links inside one sentence. */
-  .about a::after {
-    content: '';
   }
 }

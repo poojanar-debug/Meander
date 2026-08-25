@@ -3,14 +3,21 @@ import { fileURLToPath } from 'node:url'
 
 import { describe, expect, it } from 'vitest'
 
-// No em dash in text a user reads.
+// Every em dash a user reads is one the design put there.
 //
-// The repo has thousands of them and they stay: comments explain *why* at the
-// point of the trade-off, and that is the house voice. This suite is about the
-// 1.5% of them that reach a screen — 53 source lines at the time it was
-// written — and it exists because that subset is invisible to every other check
-// in the build. A dash added to a JSX string is a passing build, a green suite
-// and a green gate.
+// This suite used to ban the em dash from user-visible text outright. The
+// 2026 redesign reversed the premise: its approved copy carries em dashes as
+// prose ("kept in its slot — tap a blocker to see it on the map") and its
+// stated rule makes the em dash the unknown placeholder ("unknown renders as
+// —"). What survives the reversal is the gate's actual job: a dash that
+// *drifts into* a screen string uninvited is still invisible to every other
+// check in the build — a passing build, a green suite and a green gate.
+//
+// So the scan stays, and the judgment moves into APPROVED_COPY below: every
+// dash-carrying line must match a sentence the design wrote. Adding new copy
+// with a dash means adding it there, which is a deliberate act with a diff a
+// reviewer sees — exactly what the old blanket ban bought, without lying
+// about the copy the app actually ships.
 //
 // The scan blanks comments before looking, so prose *about* dashes can neither
 // satisfy nor break it. That is not a nicety: this file's own header would
@@ -117,6 +124,32 @@ const NOT_USER_VISIBLE = [
   "console.warn('Meander: map could not start",
 ]
 
+/**
+ * The dashes the design wrote. A dash-carrying line passes only when it
+ * contains one of these substrings — each one a sentence (or the placeholder
+ * declaration) from the approved 2026 copy, quoted from the spec rather than
+ * paraphrased. A new dash anywhere else is still a failure.
+ */
+const APPROVED_COPY = [
+  // The unknown placeholder, by stated rule: unknown renders as the em dash.
+  "UNKNOWN = '—'",
+  // Plan and search surfaces.
+  'Optimise for — up to 3',
+  'searches are your own words — never stored, never sent to analytics',
+  // Result cards.
+  'Step-free as far as the data goes — it covers',
+  'kept in its slot — tap a blocker to see it on the map',
+  '{typeLabel(blocker.type)} — {blocker.description}',
+  // Detail.
+  ' — limit ',
+  ' — {reason}',
+  // Follow mode.
+  'position never leaves this phone — no network in follow mode',
+  'no recalculation in follow mode — your position never leaves this phone',
+  ' — it is about ',
+  'Nothing was uploaded — this walk exists only',
+]
+
 /** `<!-- -->`, newlines kept, for the two shipped HTML files. */
 function blankHtmlComments(src) {
   return src.replace(/<!--[\s\S]*?-->/g, (m) => m.replace(/[^\n]/g, ' '))
@@ -135,6 +168,7 @@ function userVisibleDashes(rel) {
     .map((line, i) => [i + 1, line, raw[i]])
     .filter(([, line]) => DASHES.test(line))
     .filter(([, , original]) => !NOT_USER_VISIBLE.some((allowed) => original.includes(allowed)))
+    .filter(([, , original]) => !APPROVED_COPY.some((allowed) => original.includes(allowed)))
     .map(([n, , original]) => `${rel}:${n}  ${original.trim().slice(0, 100)}`)
 }
 
@@ -156,21 +190,23 @@ const SURFACES = [
   ...libFiles,
 ]
 
-describe('no em dash reaches a screen', () => {
+describe('no unapproved em dash reaches a screen', () => {
   it.each(SURFACES)('%s', (rel) => {
     expect(userVisibleDashes(rel)).toEqual([])
   })
 
-  it('the placeholder is not a dash either', () => {
-    // Five formatters returned a bare em dash for "value unknown". The rule they
-    // enforce is load-bearing and unchanged — an unknown distance must never
-    // render as `0 m` — but the glyph was the very character being removed.
+  it('the placeholder is the em dash, declared once', () => {
+    // The formatters share one constant for "value unknown". The rule it
+    // enforces is load-bearing and has never moved — an unknown distance must
+    // never render as `0 m` — and the glyph is the em dash by the design's
+    // stated rule: unknown renders as —.
     const units = blankComments(readFileSync(`${SRC}lib/units.js`, 'utf8'))
     const format = blankComments(readFileSync(`${SRC}lib/format.js`, 'utf8'))
-    expect(units).toMatch(/export const UNKNOWN = '-'/)
-    // Four numeric slots share one constant; the fifth is prose and says the
-    // word, which is better to hear and safe outside a `.tabular` column.
-    expect(units.match(/return UNKNOWN/g)).toHaveLength(2)
+    expect(units).toMatch(/export const UNKNOWN = '—'/)
+    // Numeric slots share the constant — distance, elevation, and the GPS
+    // accuracy figure; the percentage is prose and says the word, which is
+    // better to hear.
+    expect(units.match(/return UNKNOWN/g)).toHaveLength(3)
     expect(format.match(/UNKNOWN/g)).toHaveLength(3)
     expect(format).toMatch(/return 'Unknown'/)
   })

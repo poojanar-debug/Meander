@@ -1,50 +1,43 @@
-import { OBJECTIVES, swatchBackground } from '../lib/dash.js'
+import { OBJECTIVES } from '../lib/dash.js'
+
+/** The three shipped objectives wear their route accents; the other three are
+ *  real chips in a disabled state so the vocabulary is visible before it is
+ *  available — `· soon` says which side of that line each one is on. */
+const SOON = new Set(['quiet', 'shade', 'air'])
 
 /**
- * The six objective chips. Implements §4.5.
+ * `OPTIMISE FOR — UP TO 3`.
  *
- * Selection is carried four ways — fill, border, font weight and a check glyph
- * — so it survives greyscale and does not depend on anyone perceiving the tint.
- * The glyph exists only when pressed; a permanently visible check that merely
- * changes colour would be the colour-only signal this rule forbids.
- *
- * The swatch reproduces the route's actual dash pattern via swatchBackground(),
- * so the chip and the map line are recognisably the same thing.
+ * The limit is enforced in the reducer and refused out loud in App's handler;
+ * these chips only report state. `aria-pressed` carries the on/off, so the
+ * wash is never the only signal.
  */
-export default function ObjectiveChips({ objectives, theme, onToggle }) {
+export default function ObjectiveChips({ objectives, onToggle }) {
   return (
-    <fieldset className="chips">
-      <legend>What should the routes optimise for?</legend>
-      <div className="chips__row">
+    <div className="objectives">
+      <p className="microlabel" id="objectives-label">
+        Optimise for — up to 3
+      </p>
+      <div className="objectives__row" role="group" aria-labelledby="objectives-label">
         {OBJECTIVES.map((objective) => {
+          const soon = SOON.has(objective.id)
           const pressed = objectives.includes(objective.id)
           return (
             <button
               key={objective.id}
               type="button"
-              className="chip"
+              className={`chip chip--${objective.id}${pressed ? ' is-pressed' : ''}`}
               aria-pressed={pressed}
+              disabled={soon}
               onClick={() => onToggle(objective.id)}
             >
-              <span
-                className="chip__swatch"
-                aria-hidden="true"
-                style={{ background: swatchBackground(objective.id, theme) }}
-              />
+              <span className={`dot dot--${objective.id}`} aria-hidden="true" />
               {objective.label}
-              {pressed && (
-                <span className="chip__check" aria-hidden="true">
-                  ✓
-                </span>
-              )}
-              <span className="visually-hidden">, shown as a {objective.pattern} line</span>
+              {soon && <span className="chip__soon mono"> · soon</span>}
             </button>
           )
         })}
       </div>
-      <p className="field__hint">
-        Up to three at a time. Each one gets its own colour and line pattern on the map.
-      </p>
-    </fieldset>
+    </div>
   )
 }

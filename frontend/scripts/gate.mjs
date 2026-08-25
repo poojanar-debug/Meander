@@ -4,28 +4,25 @@ import { existsSync } from 'node:fs'
 /**
  * Layout and accessibility gate, in a real headless Chrome.
  *
- * **This is a rewrite, not a port.** The version on the branch this comes from
- * selects on `.row__button`, `.sheet__handle`, `.sheet__scroll`, `.card`,
- * `.footer`, `.topbar__origin` and `.controls-sheet__bar` — seven selector
- * families, none of which exist in this frontend. Four of its fourteen checks
- * would find zero elements and pass, and one is literally `check(label, true)`:
- * a pass value of the constant `true`, which cannot fail under any DOM.
- *
- * So the first thing this gate does is prove its own selectors match something.
- * The manifest below is checked before any assertion that depends on it, and a
- * selector matching zero elements is a FAILURE, not a silent skip. That is the
- * whole design: a gate that cannot fail is worse than no gate, because it reads
+ * **Rewritten with the 2026 redesign, not ported** — the same decision the
+ * previous version records in its own header, taken for the same reason. The
+ * selectors this gate depends on are the redesign's: the full-viewport map,
+ * the plan capsule and its popovers at 1024 and up, the bottom sheet below
+ * it, the result cards, the centered detail modal, and follow mode's banner
+ * and dock. A gate that selects on a layout the app no longer has cannot
+ * fail, and a gate that cannot fail is worse than no gate, because it reads
  * as coverage.
  *
- * Two checks from the original are deliberately NOT restored, because they
- * encode a layout this app does not have and would fail correctly-built code:
+ * So the first thing this gate does is prove its own selectors match
+ * something. The manifests below are checked before any assertion that
+ * depends on them, and a selector matching zero elements is a FAILURE, not a
+ * silent skip.
  *
- *   - "the page itself does not scroll at 390x844". Below 899px this app sets
- *     `.app { height: auto }` and `.panel { overflow-y: visible }` on purpose —
- *     the page scrolls as one document. That is the design, written out in the
- *     stylesheet.
- *   - "every route is visible without scrolling". That was a bottom-sheet
- *     contract, and there is no bottom sheet here.
+ * What it drives, per viewport: the plan surface → Use my location → Find
+ * routes → the streamed cards → the route detail → (on a phone) follow mode.
+ * At each stop: every interactive target clears 44x44 in both themes, axe
+ * reports no wcag2a/2aa violations in both themes, nothing scrolls
+ * horizontally at 320 or 390, and there is exactly one polite live region.
  *
  * Usage:  node scripts/gate.mjs [url]        (default http://localhost:4173)
  */
@@ -35,21 +32,28 @@ const CHROME =
   process.env.CHROME_PATH ??
   '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'
 
-// Every selector this gate depends on, and what renders it. If one of these
-// stops matching, the gate fails loudly instead of grading nothing.
-const MANIFEST = [
+// Every selector the PLAN state depends on, and what renders it. The results
+// and follow manifests are separate because their subjects render later — the
+// rule that a zero-match is a failure would otherwise fail every fresh load.
+const PLAN_MANIFEST = [
   ['.app', 'App.jsx — the layout root'],
-  ['.topbar', 'Topbar.jsx'],
-  ['.panel', 'App.jsx — the left column'],
-  ['.panel__scroll', 'App.jsx — the part of it that scrolls'],
-  ['.stage', 'App.jsx — the map column'],
-  ['button.route', 'RouteRow.jsx — a real row, not a skeleton'],
-  ['.route__sub', 'RouteRow.jsx — the distance line'],
-  ['.rail', 'RouteRail.jsx'],
-  ['.detail', 'RouteDetail.jsx'],
-  ['.chip', 'ObjectiveChips.jsx / UnitsControl.jsx'],
-  ['.button', 'shared control class'],
+  ['.stage', 'App.jsx — the map layer'],
+  ['.map', 'MapView.jsx'],
+  ['.sheet', 'Sheet.jsx — the mobile bottom sheet'],
+  ['.plan', 'PlanSheet.jsx'],
+  ['.plan__search-field', 'PlanSheet.jsx — the doorway to place search'],
+  ['[aria-label="Use my location"]', 'PlanSheet.jsx — the location arrow'],
+  ['.dial__slider', 'TimeDial.jsx — the native range input'],
+  ['.mode__seg', 'ModeControl.jsx'],
+  ['.chip', 'ObjectiveChips.jsx'],
   ['[role="status"][aria-live="polite"]', 'App.jsx — the one live region'],
+]
+
+const RESULTS_MANIFEST = [
+  ['button.route', 'RouteRow.jsx — a real card hit area, not a skeleton'],
+  ['.route__sub', 'RouteRow.jsx — the meta line'],
+  ['.card', 'RouteRow.jsx'],
+  ['.rail', 'RouteRail.jsx'],
 ]
 
 const GEO = `Object.defineProperty(navigator,'geolocation',{configurable:true,value:{
@@ -137,6 +141,15 @@ await cdp.send('Page.enable')
 await cdp.send('Runtime.enable')
 await cdp.send('Page.addScriptToEvaluateOnNewDocument', { source: GEO })
 
+async function waitFor(expression, tries = 120, gapMs = 250) {
+  for (let i = 0; i < tries; i += 1) {
+    if (await cdp.evaluate(expression).catch(() => false)) return true
+    await new Promise((r) => setTimeout(r, gapMs))
+  }
+  return false
+}
+
+/** Fresh page at a viewport, sitting on the plan surface. */
 async function load(width, height, mobile) {
   await cdp.send('Emulation.setDeviceMetricsOverride', {
     width,
@@ -145,22 +158,40 @@ async function load(width, height, mobile) {
     mobile,
   })
   await cdp.send('Page.navigate', { url: URL_ })
-  for (let i = 0; i < 120; i += 1) {
-    if ((await cdp.evaluate('document.readyState').catch(() => null)) === 'complete') break
-    await new Promise((r) => setTimeout(r, 100))
-  }
+  await waitFor(`document.readyState === 'complete'`, 120, 100)
   await new Promise((r) => setTimeout(r, 500))
-  // Past the first-run screen, so the panel, rail and detail exist.
-  await cdp.evaluate(
-    `(()=>{const b=[...document.querySelectorAll('button')].find(x=>/use my location/i.test(x.textContent));if(b)b.click()})()`,
-  )
-  for (let i = 0; i < 120; i += 1) {
-    if (await cdp.evaluate(`!!document.querySelector('.route__sub')`)) break
-    await new Promise((r) => setTimeout(r, 250))
+}
+
+/** Plan → origin → Find routes → streamed cards. The capsule keeps its
+ *  locate control behind the origin popover, so the desktop path opens it. */
+async function driveToResults(mobile) {
+  if (!mobile) {
+    await cdp.evaluate(
+      `(()=>{document.querySelector('.capsule__seg--origin')?.click()})()`,
+    )
+    await new Promise((r) => setTimeout(r, 300))
+    await cdp.evaluate(
+      `(()=>{const b=[...document.querySelectorAll('button')].find(x=>/use my location/i.test(x.textContent||''));if(b)b.click()})()`,
+    )
+  } else {
+    await cdp.evaluate(
+      `(()=>{document.querySelector('[aria-label="Use my location"]')?.click()})()`,
+    )
   }
-  // Select a route so the detail panel renders.
-  await cdp.evaluate(`(()=>{const r=document.querySelector('button.route'); if(r) r.click()})()`)
-  await new Promise((r) => setTimeout(r, 400))
+  // The origin lands asynchronously; Find routes is disabled until it does.
+  await waitFor(
+    `!![...document.querySelectorAll('button')].find(x=>/find routes/i.test(x.textContent||'')&&!x.disabled)`,
+    60,
+  )
+  await cdp.evaluate(
+    `(()=>{const b=[...document.querySelectorAll('button')].find(x=>/find routes/i.test(x.textContent||'')&&!x.disabled);if(b)b.click()})()`,
+  )
+  // Wait for the full streamed set, not the first frame: grading one card of
+  // three would call two-thirds of the answer covered when it was absent.
+  const first = await waitFor(`!!document.querySelector('.route__sub')`)
+  if (!first) return false
+  await waitFor(`document.querySelectorAll('button.route').length >= 3`, 60)
+  return true
 }
 
 async function setTheme(theme) {
@@ -168,18 +199,26 @@ async function setTheme(theme) {
   await new Promise((r) => setTimeout(r, 200))
 }
 
+async function countSelectors(manifest) {
+  return cdp.evaluate(
+    `(${JSON.stringify(manifest.map((m) => m[0]))}).map(s => document.querySelectorAll(s).length)`,
+  )
+}
+
+function checkManifest(label, manifest, counts) {
+  let ok = true
+  manifest.forEach(([selector, owner], i) => {
+    if (!check(`[${label}] ${selector} matches something (${owner})`, counts[i] > 0, `${counts[i]} found`)) {
+      ok = false
+    }
+  })
+  return ok
+}
+
 // Clear any service worker and cache left by a previous run, before grading
-// anything.
-//
-// This is not housekeeping. `--user-data-dir` above is a fixed path, so the
-// profile survives between runs, and `sw.js` precaches the shell and serves it
-// **cache-first without revalidating**. A gate run therefore grades whatever
-// build was current the last time this profile was used. Observed: a run
-// straight after a restructure reported `.panel__scroll` matching zero elements
-// while the class was present in the served bundle, because the worker was
-// answering with the previous shell. The manifest caught it — a selector
-// matching nothing is a failure here — but only by accident, and every check
-// after it would have been grading the wrong build.
+// anything. `--user-data-dir` above is a fixed path, so the profile survives
+// between runs, and sw.js serves the shell cache-first without revalidating —
+// an uncleared profile grades whatever build was current last time.
 await cdp.send('Page.navigate', { url: URL_ })
 await new Promise((r) => setTimeout(r, 600))
 await cdp.evaluate(`(async () => {
@@ -189,24 +228,12 @@ await cdp.evaluate(`(async () => {
   await Promise.all(keys.map(k => caches.delete(k)))
   return regs.length })()`).catch(() => null)
 
+// 1. THE PLAN MANIFEST — before anything that depends on it.
 await load(390, 844, true)
-
-// 1. THE MANIFEST — before anything that depends on it.
-const counts = await cdp.evaluate(
-  `(${JSON.stringify(MANIFEST.map((m) => m[0]))}).map(s => document.querySelectorAll(s).length)`,
-)
-let manifestOk = true
-MANIFEST.forEach(([selector, owner], i) => {
-  const n = counts[i]
-  if (!check(`selector ${selector} matches something (${owner})`, n > 0, `${n} found`)) {
-    manifestOk = false
-  }
-})
-
-if (!manifestOk) {
-  console.log('\nThe selector manifest failed. Every check below would be grading nothing,')
-  console.log('so they are not run — that is the difference between this gate and the one')
-  console.log('it replaces.\n')
+const planCounts = await countSelectors(PLAN_MANIFEST)
+if (!checkManifest('plan', PLAN_MANIFEST, planCounts)) {
+  console.log('\nThe plan manifest failed. Every check below would be grading nothing,')
+  console.log('so they are not run.\n')
   for (const [name, ok, detail] of results) {
     console.log(`  ${ok ? 'ok  ' : 'FAIL'}  ${name}${detail ? `   [${detail}]` : ''}`)
   }
@@ -215,49 +242,34 @@ if (!manifestOk) {
   process.exit(1)
 }
 
-// 2. No horizontal scroll at the narrowest supported width.
+// 2. No horizontal scroll at the narrowest supported widths, on the plan.
+const overflowCheck = `(() => {
+  const doc = document.documentElement
+  const wide = [...document.querySelectorAll('*')]
+    .filter(el => el.getBoundingClientRect().right > doc.clientWidth + 1)
+    .slice(0, 5)
+    .map(el => el.className?.baseVal ?? el.className ?? el.tagName)
+  return { scrollW: doc.scrollWidth, clientW: doc.clientWidth, wide } })()`
+
 for (const width of [320, 390]) {
   await load(width, 844, true)
-  const overflow = await cdp.evaluate(`(() => {
-    const doc = document.documentElement
-    const wide = [...document.querySelectorAll('*')]
-      .filter(el => el.getBoundingClientRect().right > doc.clientWidth + 1)
-      .slice(0, 5)
-      .map(el => el.className || el.tagName)
-    return { scrollW: doc.scrollWidth, clientW: doc.clientWidth, wide } })()`)
+  const overflow = await cdp.evaluate(overflowCheck)
   check(
-    `no horizontal scroll at ${width}px`,
+    `[plan] no horizontal scroll at ${width}px`,
     overflow.scrollW <= overflow.clientW + 1,
     `${overflow.scrollW} vs ${overflow.clientW}${overflow.wide.length ? ` — ${overflow.wide.join(', ')}` : ''}`,
   )
 }
 
-// 3. Every interactive target clears 44x44, in both themes.
+// 3. Every interactive target clears 44x44.
 //
-// Everything collapsible is opened first. A control behind a closed drawer
-// measures 0x0 and is filtered out as "not rendered", so a gate that does not
-// expand them silently exempts every control the user has to open something to
-// reach — which on this app is most of them.
-// The trip-bar segments are mutually exclusive — opening one closes the last —
-// so they cannot all be open at once and are swept one at a time instead.
-const openDetails = `(() => { for (const d of document.querySelectorAll('details')) d.open = true; return true })()`
-const disclosures = `(() => [...document.querySelectorAll('[aria-expanded]')].length)()`
-
-// Hoisted to module scope rather than declared inside the theme loop below,
-// which is where it used to live. A function declared in that loop body is
-// reachable from nowhere else in the file, and the one screen this gate had
-// never swept — follow mode, section 7 — needs exactly this measurement. The
-// alternative was a second copy of the WCAG 2.5.8 exemption logic, and two
-// copies of an accessibility rule drift apart silently.
+// The WCAG 2.5.8 inline exemption is implemented by its definition rather
+// than by an ancestor class: a link is exempt when the element containing it
+// also holds text of its own — the map attribution's sentence — and not when
+// its container holds nothing but links.
 async function sweep() {
   return cdp.evaluate(`(() => {
     const sel = 'button:not([disabled]), a[href], input, select, [role="option"]'
-    // WCAG 2.2 SC 2.5.8 exempts a target that is "in a sentence or its size is
-    // otherwise constrained by the line-height of non-target text". Implemented
-    // by that definition rather than by an ancestor class: a link is exempt when
-    // the element containing it also holds text of its own. That covers the
-    // credits sentence in About and MapLibre's attribution strip, and does not
-    // cover a link styled as a button, whose container holds nothing but links.
     const inlineInProse = (el) => {
       if (el.tagName !== 'A') return false
       const parent = el.parentElement
@@ -276,13 +288,12 @@ async function sweep() {
       .slice(0, 8) })()`)
 }
 
-// Open every disclosure in turn and union the offenders, so a control only
-// reachable behind an open drawer is still measured.
-async function sweepEveryDisclosure(theme) {
-  await cdp.evaluate(openDetails)
-  await new Promise((r) => setTimeout(r, 250))
-  const passes = await cdp.evaluate(disclosures)
-  check(`[${theme}] there are disclosures to sweep`, passes > 0, `${passes}`)
+/** Open everything openable on the current screen, then sweep: <details>
+ *  unfold, and every collapsed [aria-expanded] disclosure is clicked in turn
+ *  so a control only reachable behind one is still measured. */
+async function sweepWithDisclosures() {
+  await cdp.evaluate(`(() => { for (const d of document.querySelectorAll('details')) d.open = true; return true })()`)
+  const passes = await cdp.evaluate(`[...document.querySelectorAll('[aria-expanded]')].length`)
   const small = []
   for (let pass = 0; pass <= passes; pass += 1) {
     if (pass > 0) {
@@ -300,221 +311,156 @@ async function sweepEveryDisclosure(theme) {
   return small
 }
 
-await load(390, 844, true)
-for (const theme of ['light', 'dark']) {
-  await setTheme(theme)
-  const small = await sweepEveryDisclosure(theme)
-  check(`[${theme}] every target clears 44x44`, small.length === 0, small.slice(0, 6).join('; '))
-}
-
-// 4. axe-core, both themes. Injected from the installed package rather than a CDN.
 const axeSource = await import('node:fs').then((fs) =>
   fs.readFileSync(new URL('../node_modules/axe-core/axe.min.js', import.meta.url), 'utf8'),
 )
-for (const theme of ['light', 'dark']) {
-  await setTheme(theme)
+
+async function axeViolations() {
   await cdp.evaluate(axeSource)
-  const violations = await cdp.evaluate(`(async () => {
+  return cdp.evaluate(`(async () => {
     const r = await axe.run(document, { runOnly: { type: 'tag', values: ['wcag2a','wcag2aa'] } })
     return r.violations.map(v => \`\${v.id} (\${v.nodes.length})\`) })()`)
-  check(`[${theme}] axe reports no wcag2a/2aa violations`, violations.length === 0, violations.join('; '))
 }
 
-// 5. The two-column layout above the breakpoint, one column below it.
-//
-// Two of these checks changed subject when the trip bar came out of the
-// scrollport, and are renamed to say what they now measure. The scroller used
-// to be `.panel` itself with a sticky `.tripbar` as its first child; it is now
-// `.panel__scroll`, a sibling below the bar. The old assertions would have gone
-// green against `.panel` on the day the restructure was reverted, which is the
-// wrong way round for a gate.
-await load(1200, 900, false)
-const desktop = await cdp.evaluate(`(() => {
-  const cs = (s) => getComputedStyle(document.querySelector(s))
-  const layout = cs('.layout')
-  const panel = document.querySelector('.panel').getBoundingClientRect()
-  const stage = document.querySelector('.stage').getBoundingClientRect()
-  const bar = document.querySelector('.tripbar').getBoundingClientRect()
-  const scroller = document.querySelector('.panel__scroll').getBoundingClientRect()
-  return { columns: layout.gridTemplateColumns, sideBySide: stage.left >= panel.right - 2,
-           scrollScrolls: cs('.panel__scroll').overflowY,
-           panelScrolls: cs('.panel').overflowY,
-           // The bar sits above the scrolling area rather than inside it, which
-           // is the whole point: an open drawer must shorten the scrollport,
-           // not freeze the top of it.
-           barAbove: bar.bottom <= scroller.top + 2,
-           barEdge: cs('.tripbar').borderBottomWidth } })()`)
-check('the panel and the stage sit side by side above 900px', desktop.sideBySide, desktop.columns)
-check(
-  'the scrolling area below the trip bar is the scrolling column above 900px',
-  desktop.scrollScrolls === 'auto' && desktop.panelScrolls !== 'auto',
-  `.panel__scroll ${desktop.scrollScrolls}, .panel ${desktop.panelScrolls}`,
-)
-check('the trip bar sits outside the scrolling area', desktop.barAbove, `edge ${desktop.barEdge}`)
-// A pinned element with no edge against a same-coloured field is why the scroll
-// read as broken rather than as pinned. `.topbar` has always had this border.
-check('the trip bar has a bottom edge', parseFloat(desktop.barEdge) > 0, desktop.barEdge)
-
-await load(390, 844, true)
-const mobile = await cdp.evaluate(`(() => {
-  const cs = (s) => getComputedStyle(document.querySelector(s))
-  const panel = document.querySelector('.panel').getBoundingClientRect()
-  const stage = document.querySelector('.stage').getBoundingClientRect()
-  return { stacked: stage.bottom <= panel.top + 2,
-           // Both axes of both elements. Per CSS Overflow 3, when one axis is
-           // not visible the other computes to auto — so an override naming
-           // only overflow-y leaves a scroll container on the axis nobody
-           // mentioned, and the document would gain a nested scroller on every
-           // phone. That is a behaviour break, not a failed assertion.
-           axes: [cs('.panel').overflowY, cs('.panel').overflowX,
-                  cs('.panel__scroll').overflowY, cs('.panel__scroll').overflowX],
-           scrollPaddingTop: cs('html').scrollPaddingTop } })()`)
-check('the stage sits above the panel below 900px', mobile.stacked)
-// Deliberately asserting the design rather than the original gate's premise:
-// below the breakpoint the document scrolls as one, by design.
-check(
-  'neither the panel nor its scroller scrolls independently below 900px',
-  mobile.axes.every((v) => v === 'visible'),
-  mobile.axes.join(' / '),
-)
-// The skip link is the first focusable element in the app and points at
-// `#results`, which has no rule of its own. Without this the document scrolls
-// it to y = 0, under an opaque bar 56px tall.
-check(
-  'the document scroller clears the topbar',
-  mobile.scrollPaddingTop !== 'auto' && parseFloat(mobile.scrollPaddingTop) >= 56,
-  mobile.scrollPaddingTop,
-)
-
-// 6. The route list is a complete text substitute for the map.
-const substitute = await cdp.evaluate(`(() => {
-  const rows = [...document.querySelectorAll('button.route')]
-  return { rows: rows.length,
-           allNamed: rows.every(r => (r.textContent || '').trim().length > 20),
-           liveRegions: document.querySelectorAll('[role="status"][aria-live="polite"]').length } })()`)
-check('every route row carries its own text', substitute.rows > 0 && substitute.allNamed, `${substitute.rows} rows`)
-check('there is exactly one polite live region', substitute.liveRegions === 1, `${substitute.liveRegions}`)
-
-// 7. FOLLOW MODE — the screen nothing automated had ever entered.
-//
-// Until this section existed, follow mode was the only user-facing screen in
-// the app with no coverage of any kind: `gate.mjs` reached it through neither
-// of its two entry points (it is not a `<details>` and carries no
-// `aria-expanded`), and the 16 vitest files render no components at all. So
-// `.follow` had never been through axe and never been through the 44x44 sweep,
-// and the sheet had been overflowing its own container on every phone in
-// portrait since it was written.
-//
-// Measured at e6ed697, before the fix, in this browser: the sheet's bottom edge
-// lands 13.36px past `.stage` at 390x844 (iPhone SE +23.98, 13 mini +15.28,
-// Pixel 7 +9.11, iPad portrait +2.56), and `.panel`'s padding below 420px is
-// var(--s3) = 12px, not the 16px it is above that width — so the spill clears
-// the padding and overlaps the first `.seg` by 1.36px. The map above the sheet
-// gets a 64px strip on every viewport, because `padding-top` 12 + exit 44 +
-// gap 8 are all fixed pixels and none of them scale.
-//
-// `.follow` and `.sheet` are deliberately NOT in the top-level MANIFEST. The
-// rule stated at the head of this file is that a selector matching zero
-// elements is a failure rather than a skip, and those two match zero elements
-// on every load that has not entered follow mode — putting them up there would
-// fail every normal pass.
-const FOLLOW_MANIFEST = [
-  ['.follow', 'FollowMode.jsx — the overlay'],
-  ['.sheet', 'FollowMode.jsx — the instruction sheet'],
-]
-
-// The button is in `.detail__actions`, deep inside `.panel` and below a stage
-// more than a viewport tall on a phone, so it has to be scrolled to before it
-// can be clicked. `scrollIntoView` first is not cosmetic: it is how a thumb
-// reaches it, and clicking from scrollY 0 would measure a state no user is in.
-async function enterFollow() {
-  const clicked = await cdp.evaluate(`(() => {
-    const b = [...document.querySelectorAll('button')]
-      .find(x => /start this route/i.test(x.textContent || ''))
-    if (!b) return 'absent'
-    if (b.disabled) return 'disabled'
-    b.scrollIntoView({ block: 'center' })
-    b.click()
-    return 'clicked' })()`)
-  for (let i = 0; i < 40; i += 1) {
-    if (await cdp.evaluate(`!!document.querySelector('.follow')`)) return clicked
-    await new Promise((r) => setTimeout(r, 100))
-  }
-  return clicked
-}
-
-await load(390, 844, true)
-const entered = await enterFollow()
-const followCounts = await cdp.evaluate(
-  `(${JSON.stringify(FOLLOW_MANIFEST.map((m) => m[0]))}).map(s => document.querySelectorAll(s).length)`,
-)
-let followOk = true
-FOLLOW_MANIFEST.forEach(([selector, owner], i) => {
-  if (!check(`[follow] ${selector} matches something (${owner})`, followCounts[i] > 0, `${followCounts[i]} found, entry: ${entered}`)) {
-    followOk = false
-  }
-})
-
-if (followOk) {
-  // The overflow that put this section here. Asserted against `.follow`'s
-  // content box rather than the stage's border box so the check keeps meaning
-  // the same thing after the overlay becomes `position: fixed` below 900px:
-  // in both layouts the question is whether the sheet fits the layer that owns
-  // it. `.follow` staying inside the viewport is the second half of that — a
-  // fixed layer taller than the screen is the same defect one level up.
-  const geom = await cdp.evaluate(`(() => {
-    const follow = document.querySelector('.follow')
-    const sheet = document.querySelector('.sheet')
-    const cs = getComputedStyle(follow)
-    const fb = follow.getBoundingClientRect(), sb = sheet.getBoundingClientRect()
-    const contentBottom = fb.bottom - parseFloat(cs.paddingBottom)
-    return {
-      spill: +(sb.bottom - contentBottom).toFixed(2),
-      belowViewport: +(fb.bottom - innerHeight).toFixed(2),
-      strip: +(sb.top - fb.top).toFixed(2),
-      // scrollHeight past clientHeight means flex-shrink squeezed the sheet
-      // below its own text, which an explicit min-height permits because it
-      // overrides the min-height:auto that would otherwise floor it.
-      clipped: sheet.scrollHeight > sheet.clientHeight + 1,
-      clip: sheet.scrollHeight + ' content vs ' + sheet.clientHeight + ' box' } })()`)
-  check(
-    '[follow] the sheet fits inside the follow layer',
-    geom.spill <= 1 && geom.belowViewport <= 1,
-    `sheet overhangs by ${geom.spill}px, layer past viewport by ${geom.belowViewport}px, map strip ${geom.strip}px`,
-  )
-  check('[follow] the sheet is not squeezed below its own content', !geom.clipped, geom.clip)
-
-  const followOverflow = await cdp.evaluate(`(() => {
-    const doc = document.documentElement
-    const wide = [...document.querySelectorAll('*')]
-      .filter(el => el.getBoundingClientRect().right > doc.clientWidth + 1)
-      .slice(0, 5).map(el => el.className || el.tagName)
-    return { scrollW: doc.scrollWidth, clientW: doc.clientWidth, wide } })()`)
-  check(
-    '[follow] no horizontal scroll at 390px',
-    followOverflow.scrollW <= followOverflow.clientW + 1,
-    `${followOverflow.scrollW} vs ${followOverflow.clientW}${followOverflow.wide.length ? ` — ${followOverflow.wide.join(', ')}` : ''}`,
-  )
-
+/** The full accessibility pass for whatever screen is up: target sizes and
+ *  axe, in both themes — the dark block restates the light palette by design,
+ *  and this is what proves that stays true. */
+async function a11yPass(label) {
   for (const theme of ['light', 'dark']) {
     await setTheme(theme)
-    const small = await sweep()
-    check(`[follow][${theme}] every target clears 44x44`, small.length === 0, small.slice(0, 6).join('; '))
-    await cdp.evaluate(axeSource)
-    const violations = await cdp.evaluate(`(async () => {
-      const r = await axe.run(document, { runOnly: { type: 'tag', values: ['wcag2a','wcag2aa'] } })
-      return r.violations.map(v => \`\${v.id} (\${v.nodes.length})\`) })()`)
-    check(`[follow][${theme}] axe reports no wcag2a/2aa violations`, violations.length === 0, violations.join('; '))
+    const small = await sweepWithDisclosures()
+    check(`[${label}][${theme}] every target clears 44x44`, small.length === 0, small.slice(0, 6).join('; '))
+    const violations = await axeViolations()
+    check(`[${label}][${theme}] axe reports no wcag2a/2aa violations`, violations.length === 0, violations.join('; '))
   }
-
-  // Counted in this pass too, deliberately. The check in section 6 cannot see a
-  // live region rendered inside FollowMode, because the gate never got here —
-  // so "exactly one" was only ever an assertion about the screens it visited.
-  // DESIGN-HANDOFF §6.7 asks for one voice; this is where that is now checked.
-  const followLive = await cdp.evaluate(
+  await setTheme('light')
+  const live = await cdp.evaluate(
     `document.querySelectorAll('[role="status"][aria-live="polite"]').length`,
   )
-  check('[follow] there is still exactly one polite live region', followLive === 1, `${followLive}`)
+  check(`[${label}] exactly one polite live region`, live === 1, `${live}`)
+}
+
+// The plan, graded where it loads.
+await load(390, 844, true)
+await a11yPass('plan')
+
+// 4. THE RESULTS — driven, then graded.
+await load(390, 844, true)
+const arrived = await driveToResults(true)
+check('[results] the stream delivers cards', arrived)
+const resultCounts = await countSelectors(RESULTS_MANIFEST)
+const resultsOk = checkManifest('results', RESULTS_MANIFEST, resultCounts)
+
+if (resultsOk) {
+  const substitute = await cdp.evaluate(`(() => {
+    const rows = [...document.querySelectorAll('button.route')]
+    return { rows: rows.length,
+             allNamed: rows.every(r => (r.textContent || '').trim().length > 20) } })()`)
+  check('[results] every card carries its own text', substitute.rows > 0 && substitute.allNamed, `${substitute.rows} cards`)
+
+  const overflow = await cdp.evaluate(overflowCheck)
+  check(
+    '[results] no horizontal scroll at 390px',
+    overflow.scrollW <= overflow.clientW + 1,
+    `${overflow.scrollW} vs ${overflow.clientW}${overflow.wide.length ? ` — ${overflow.wide.join(', ')}` : ''}`,
+  )
+
+  // The sheet is the results' home below 1024 and must behave like one:
+  // inside the viewport, scrolling internally rather than growing the page.
+  const sheet = await cdp.evaluate(`(() => {
+    const el = document.querySelector('.sheet')
+    if (!el) return null
+    const r = el.getBoundingClientRect()
+    return { bottom: +(r.bottom - innerHeight).toFixed(2),
+             overflowY: getComputedStyle(el).overflowY } })()`)
+  check('[results] the sheet stays inside the viewport', sheet && sheet.bottom <= 1, `overhang ${sheet?.bottom}px`)
+  check('[results] the sheet scrolls internally', sheet?.overflowY === 'auto', sheet?.overflowY)
+
+  await a11yPass('results')
+}
+
+// 5. THE DETAIL, mobile: one tap on a card selects and opens it.
+await load(390, 844, true)
+await driveToResults(true)
+await cdp.evaluate(`(()=>{document.querySelector('button.route')?.click()})()`)
+const detailUp = await waitFor(`!!document.querySelector('.detail--sheet')`, 40, 100)
+check('[detail] tapping a card opens the detail sheet', detailUp)
+if (detailUp) {
+  await a11yPass('detail')
+}
+
+// 6. THE DESKTOP LAYOUT at 1200: capsule, card row, modal.
+await load(1200, 900, false)
+const capsule = await cdp.evaluate(`!!document.querySelector('.capsule')`)
+check('[desktop] the plan capsule renders at 1200px', capsule)
+if (capsule) {
+  const arrived = await driveToResults(false)
+  check('[desktop] the stream delivers cards', arrived)
+  if (arrived) {
+    const row = await cdp.evaluate(`(() => {
+      const cards = [...document.querySelectorAll('.rail--row .card')]
+      if (cards.length < 2) return { cards: cards.length, sideBySide: false }
+      const [a, b] = cards.map(c => c.getBoundingClientRect())
+      return { cards: cards.length, sideBySide: b.left >= a.right - 2 } })()`)
+    check('[desktop] the cards sit in a row', row.sideBySide, `${row.cards} cards`)
+
+    // First click selects; a second on the selected card opens the modal.
+    await cdp.evaluate(`(()=>{document.querySelector('button.route')?.click()})()`)
+    await new Promise((r) => setTimeout(r, 300))
+    await cdp.evaluate(`(()=>{document.querySelector('button.route')?.click()})()`)
+    const modal = await waitFor(`!!document.querySelector('.detail--modal')`, 40, 100)
+    check('[desktop] the selected card opens the centered modal', modal)
+    if (modal) {
+      const scrimmed = await cdp.evaluate(`!!document.querySelector('.detail-scrim')`)
+      check('[desktop] the modal sits over a scrim', scrimmed)
+      const violations = await axeViolations()
+      check('[desktop][modal] axe reports no wcag2a/2aa violations', violations.length === 0, violations.join('; '))
+    }
+  }
+}
+
+// 7. FOLLOW MODE — entered from the mobile detail, graded like every screen.
+//
+// `.follow` is deliberately NOT in the top-level manifests: it matches zero
+// elements on every load that has not entered follow mode, and the rule here
+// is that a zero-match is a failure rather than a skip.
+const FOLLOW_MANIFEST = [
+  ['.follow', 'FollowMode.jsx — the overlay'],
+  ['.follow__dock', 'FollowMode.jsx — the dock'],
+  ['.follow__provenance', 'FollowMode.jsx — the privacy line'],
+]
+
+await load(390, 844, true)
+await driveToResults(true)
+await cdp.evaluate(`(()=>{document.querySelector('button.route')?.click()})()`)
+await waitFor(`!!document.querySelector('.detail--sheet')`, 40, 100)
+await cdp.evaluate(
+  `(()=>{const b=[...document.querySelectorAll('button')].find(x=>/start follow mode/i.test(x.textContent||''));if(b){b.scrollIntoView({block:'center'});b.click()}})()`,
+)
+const followUp = await waitFor(`!!document.querySelector('.follow')`, 40, 100)
+const followCounts = await countSelectors(FOLLOW_MANIFEST)
+const followOk = checkManifest('follow', FOLLOW_MANIFEST, followCounts)
+check('[follow] entered from the detail', followUp)
+
+if (followOk) {
+  const geom = await cdp.evaluate(`(() => {
+    const follow = document.querySelector('.follow')
+    const dock = document.querySelector('.follow__dock')
+    const fb = follow.getBoundingClientRect(), db = dock.getBoundingClientRect()
+    return {
+      belowViewport: +(fb.bottom - innerHeight).toFixed(2),
+      dockInside: db.bottom <= fb.bottom + 1 && db.top >= fb.top - 1 } })()`)
+  check('[follow] the layer fits the viewport', geom.belowViewport <= 1, `past viewport by ${geom.belowViewport}px`)
+  check('[follow] the dock sits inside the layer', geom.dockInside)
+
+  const overflow = await cdp.evaluate(overflowCheck)
+  check(
+    '[follow] no horizontal scroll at 390px',
+    overflow.scrollW <= overflow.clientW + 1,
+    `${overflow.scrollW} vs ${overflow.clientW}${overflow.wide.length ? ` — ${overflow.wide.join(', ')}` : ''}`,
+  )
+
+  await a11yPass('follow')
 }
 
 // ------------------------------------------------------------------- report

@@ -1,5 +1,13 @@
 # Meander — design handoff
 
+> **Superseded for presentation, 2026-08-25.** The screens, palette, type and layout below were
+> replaced wholesale by [`DESIGN-2026.md`](DESIGN-2026.md), which is now the specification for
+> everything visual. What survives from this document unchanged: §0's non-negotiables, the wire
+> contract, and the behavioural engines (departure window, daylight, steps, follow mode) — the
+> 2026 spec restates and keeps all of them. Section references to this file in older code
+> comments and `PROGRESS.md` entries describe the build as it was then, and remain correct as
+> history.
+
 **Version** 1.0 · 2026-08-06
 **Scope** Full frontend redesign of `frontend/` + four new features — best departure window,
 daylight window (sunrise and sunset), turn-by-turn steps, live follow mode. Four more features are

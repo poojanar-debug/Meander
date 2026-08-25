@@ -249,7 +249,7 @@ async function load(url, { width = 390, height = 844, mobile = true } = {}) {
 // a check that finds zero elements and passes reads as coverage.
 const MANIFEST = [
   ['.app', 'App.jsx — the layout root'],
-  ['.topbar', 'Topbar.jsx'],
+  ['.sheet', 'Sheet.jsx — the mobile bottom sheet (this gate runs at 390px)'],
   ['[role="status"][aria-live="polite"]', 'App.jsx — the one live region'],
 ]
 
@@ -289,8 +289,19 @@ check(
 
 // -------------------------------------- 3. the route request, from this origin
 
+// The 2026 plan surface: the location arrow carries an aria-label rather than
+// text, and nothing fetches until Find routes is pressed — the nonce is only
+// bumped by the two buttons that actually ask.
 await cdp.evaluate(
-  `(()=>{const b=[...document.querySelectorAll('button')].find(x=>/use my location/i.test(x.textContent)); if(b) b.click()})()`,
+  `(()=>{document.querySelector('[aria-label="Use my location"]')?.click()})()`,
+)
+await waitFor(
+  cdp,
+  `!![...document.querySelectorAll('button')].find(x=>/find routes/i.test(x.textContent||'')&&!x.disabled)`,
+  20000,
+)
+await cdp.evaluate(
+  `(()=>{const b=[...document.querySelectorAll('button')].find(x=>/find routes/i.test(x.textContent||'')&&!x.disabled);if(b)b.click()})()`,
 )
 const gotRoutes = await waitFor(cdp, `!!document.querySelector('.route__sub')`, 60000)
 check('routes arrive in the browser from the Pages origin', gotRoutes, gotRoutes ? '' : 'timed out')
@@ -298,52 +309,29 @@ check('routes arrive in the browser from the Pages origin', gotRoutes, gotRoutes
 const routeCount = await cdp.evaluate(`document.querySelectorAll('button.route').length`)
 check('three routes rendered', routeCount === 3, `${routeCount} rendered`)
 
-// ------------------------------- 3b. the panel's scroll arrangement, deployed
+// ---------------------------- 3b. the sheet's scroll arrangement, deployed
 //
-// This file had no reference to `.panel`, `.tripbar` or sticky positioning at
-// all — 26 checks against a deployed build, none of them about the structure
-// the panel is made of. The offline gate now guards the restructure that took
-// the trip bar out of the scrollport; if that is worth guarding there it is
-// worth guarding against what is actually served, where a stale CSS asset or a
-// half-deployed build would show up as exactly this shape and nothing else
-// would notice.
-//
-// Checked at 390x844, which is where this gate already runs, so both the panel
-// and its scroller are in their mobile arrangement: the document scrolls as one
-// and neither may be a scroll container on either axis.
+// The redesign's mobile layout is a full-viewport map with a bottom sheet that
+// scrolls internally — the page itself never scrolls. A stale CSS asset or a
+// half-deployed build shows up as exactly this shape breaking, and nothing
+// else would notice: the offline gate covers the built output, this covers
+// what is actually served.
 const structure = await cdp.evaluate(`(() => {
-  const panel = document.querySelector('.panel')
-  const scroll = document.querySelector('.panel__scroll')
-  const bar = document.querySelector('.tripbar')
-  if (!panel || !scroll || !bar) {
-    return { present: false, missing: [!panel && '.panel', !scroll && '.panel__scroll', !bar && '.tripbar'].filter(Boolean) }
-  }
-  const cs = (e) => getComputedStyle(e)
+  const sheet = document.querySelector('.sheet')
+  if (!sheet) return { present: false }
+  const cs = getComputedStyle(sheet)
+  const r = sheet.getBoundingClientRect()
   return {
     present: true,
-    axes: [cs(panel).overflowY, cs(panel).overflowX, cs(scroll).overflowY, cs(scroll).overflowX],
-    barAbove: bar.getBoundingClientRect().bottom <= scroll.getBoundingClientRect().top + 2,
-    barEdge: cs(bar).borderBottomWidth,
-    scrollPaddingTop: cs(document.documentElement).scrollPaddingTop,
+    overflowY: cs.overflowY,
+    inViewport: r.bottom <= innerHeight + 1,
+    appOverflow: getComputedStyle(document.querySelector('.app')).overflow,
   } })()`)
-check(
-  'the panel, its scroller and the trip bar are all served',
-  structure.present,
-  structure.present ? '' : `missing ${structure.missing.join(', ')}`,
-)
+check('the sheet is served', structure.present, structure.present ? '' : '.sheet matched nothing')
 if (structure.present) {
-  check(
-    'the deployed panel does not scroll independently at 390px',
-    structure.axes.every((v) => v === 'visible'),
-    structure.axes.join(' / '),
-  )
-  check('the deployed trip bar sits above the scroller', structure.barAbove)
-  check('the deployed trip bar has a bottom edge', parseFloat(structure.barEdge) > 0, structure.barEdge)
-  check(
-    'the deployed document scroller clears the topbar',
-    parseFloat(structure.scrollPaddingTop) >= 56,
-    structure.scrollPaddingTop,
-  )
+  check('the deployed sheet scrolls internally', structure.overflowY === 'auto', structure.overflowY)
+  check('the deployed sheet stays inside the viewport', structure.inViewport)
+  check('the deployed app layer does not scroll', structure.appOverflow === 'hidden', structure.appOverflow)
 }
 
 // ------------------------------------------------------ 4. SSE actually streams
@@ -461,14 +449,11 @@ check('the permalink renders the app, not a 404 page', permaRendered, '')
 // for two saved sets, and for a set that is never labelled with anything. Three
 // promises, three checks.
 
-// Two permalinks rather than two clicks of "use my location": the request body
-// is then deterministic and reproducible across a reload, which is what makes
-// the offline replay below testable at all.
-// `min`, not `minutes`: permalink.js:80 writes `min`, and an unrecognised key
-// is ignored rather than rejected — so `minutes=45` decoded to the default and
-// P1 and P2 were the same search. The check below proves they differ now.
+// A permalink rather than a click of "use my location": the request body is
+// then deterministic and reproducible across a reload. `min`, not `minutes`:
+// permalink.js writes `min`, and an unrecognised key is ignored rather than
+// rejected, which once made two "different" searches the same one.
 const P1 = `${SITE}/?from=${LAT},${LON}&min=30&mode=foot`
-const P2 = `${SITE}/?from=${LAT},${LON}&min=45&mode=foot`
 
 /** Every saved entry, across every results bucket, with its age stamp. */
 const savedState = () =>
@@ -583,145 +568,29 @@ gradeOrSkip(
     `${withoutConsent.buckets.length} bucket(s)`,
 )
 
-// --- a route is saved when the user consents --------------------------------
-
-const pressedYes = await pressConsent('Yes, keep them')
-check('the consent control is on the page and records a yes', pressedYes === 'clicked', pressedYes)
-
-const consented = await searchAndSettle(P1)
-const bodyP1 = consented.body
-const afterFirst = await savedState()
-gradeOrSkip(
+// --- the consent flow has no control in the 2026 design ---------------------
+//
+// The redesign ships no settings surface, so the "keep the last routes" chips
+// are not in the DOM anywhere and consent can never be granted from the
+// screen. The store, its grid-keyed fingerprint and its unit tests all remain
+// below the presentation layer — client.js still replays a saved set when the
+// network fails — but with nothing able to write one, every promise past
+// "nothing is stored unasked" is ungradable against a deployment. Skipped by
+// name rather than deleted, so the day a consent control returns these say so
+// instead of silently not existing. pressConsent above is kept for that day.
+void pressConsent
+for (const name of [
   'a route is actually saved when the user consents',
-  [consented],
-  pressedYes === 'clicked' && afterFirst.entries.length === 1,
-  pressedYes !== 'clicked'
-    ? `not graded: the "Yes" chip was ${pressedYes}, so nothing was ever consented to`
-    : afterFirst.entries.length
-      ? `${afterFirst.entries.length} entry at ${afterFirst.entries[0].key} in ${afterFirst.entries[0].bucket}`
-      : `consent granted, search completed, ${afterFirst.buckets.length} results bucket(s), nothing stored`,
-)
-
-// --- only the most recent set is kept ---------------------------------------
-
-const second = await searchAndSettle(P2)
-const bodyP2 = second.body
-const afterSecond = await savedState()
-
-// Before grading "only the most recent", prove there were two. The store keys
-// on the request body, so if these two links decode to the same body then a
-// single stored entry means nothing was ever replaced. That is not theoretical:
-// the first version used `minutes=30` and `minutes=45`, permalink.js:80 writes
-// `min`, an unrecognised key is ignored rather than rejected, and both links
-// decoded to the same default. One entry, two "searches", nothing proved.
-const twoSearches = !!bodyP1 && !!bodyP2 && bodyP1 !== bodyP2
-gradeOrSkip(
   'the two searches are actually different requests',
-  [consented, second],
-  twoSearches,
-  twoSearches ? `${bodyP1.length}B vs ${bodyP2.length}B, differing` : `identical bodies: ${bodyP1 ?? 'none'}`,
-)
-
-gradeOrSkip(
   'only the most recent set is kept, after a second search',
-  [consented, second],
-  twoSearches && afterSecond.entries.length === 1 && afterSecond.buckets.length === 1,
-  !twoSearches
-    ? 'not graded: the two searches sent the same body'
-    : `${afterSecond.entries.length} entr${afterSecond.entries.length === 1 ? 'y' : 'ies'} across ` +
-      `${afterSecond.buckets.length} bucket(s): ${afterSecond.buckets.join(', ')}`,
-)
-
-// --- it is labelled with its age --------------------------------------------
-
-const stamp = afterSecond.entries[0]?.cachedAt
-const stampAge = stamp ? Date.now() - new Date(stamp).valueOf() : null
-gradeOrSkip(
   'the saved set is stamped with the time it was written',
-  [consented, second],
-  stampAge !== null && Number.isFinite(stampAge) && stampAge >= 0 && stampAge < 15 * 60_000,
-  stamp ? `X-Meander-Cached ${stamp} (${Math.round((stampAge ?? 0) / 1000)}s ago)` : 'no stamp',
-)
-
-// --- the reload with no network, which is what the feature is for -----------
-
-await cdp.send('Network.emulateNetworkConditions', {
-  offline: true,
-  latency: 0,
-  downloadThroughput: -1,
-  uploadThroughput: -1,
-})
-await cdp.send('Page.navigate', { url: P2 })
-await waitFor(cdp, `document.readyState === 'complete'`, 20000)
-const replayed = await routesOnScreen(30000)
-gradeOrSkip('the saved set comes back on a reload with no network', [consented, second], replayed, '')
-
-// The age has to be on the screen, not only in a header. Two renderers claim to
-// show it — the pill under the top bar and the badge on the row — and the label
-// has to carry an actual age rather than an empty element.
-const label = await cdp.evaluate(`
-  (() => {
-    const bar = document.querySelector('.offline')
-    const badge = document.querySelector('.badge--cached')
-    return {
-      bar: bar ? bar.textContent.replace(/\\s+/g, ' ').trim() : null,
-      badge: badge ? badge.textContent.replace(/\\s+/g, ' ').trim() : null,
-    }
-  })()`)
-gradeOrSkip(
+  'the saved set comes back on a reload with no network',
   'the replayed set is labelled as saved, with its age, on screen',
-  [consented, second],
-  !!(label.bar && label.badge && /\d|just now|moment/i.test(`${label.bar} ${label.badge}`)),
-  `pill: ${label.bar ?? 'absent'} · badge: ${label.badge ?? 'absent'}`,
-)
-
-// The older search must be gone rather than merely not shown. Still offline, so
-// this costs no rate-limit token. Graded only if something was stored at all —
-// "nothing replayed" out of an empty store is not evidence of anything, and is
-// exactly how the previous version of this section passed while broken.
-await cdp.send('Page.navigate', { url: P1 })
-await waitFor(cdp, `document.readyState === 'complete'`, 20000)
-const olderCameBack = await routesOnScreen(12000)
-gradeOrSkip(
   'the search before it is gone, not merely hidden',
-  [consented, second],
-  twoSearches && afterSecond.entries.length === 1 && !olderCameBack,
-  !twoSearches || afterSecond.entries.length !== 1
-    ? `not graded: ${afterSecond.entries.length} entries stored from ` +
-      `${twoSearches ? 'two' : 'one'} distinct search(es), so a miss proves nothing`
-    : olderCameBack
-      ? 'the previous search still replays — two sets are reachable'
-      : 'no replay, as promised',
-)
-
-// --- choosing "No" deletes it immediately -----------------------------------
-
-// Still offline, deliberately: deletion is local, and doing it here needs no
-// further route request. Back on P2 so the panel — and therefore About — is on
-// screen. No reload between the press and the count: "immediately" is the claim.
-await cdp.send('Page.navigate', { url: P2 })
-await waitFor(cdp, `document.readyState === 'complete'`, 20000)
-await routesOnScreen(30000)
-const beforeRevoke = await savedState()
-const revoked = await pressConsent('No')
-await sleep(1500)
-const afterRevoke = await savedState()
-gradeOrSkip(
-  'choosing “No” deletes the saved set immediately, without a reload',
-  [consented, second],
-  revoked === 'clicked' && beforeRevoke.entries.length === 1 && afterRevoke.entries.length === 0,
-  revoked !== 'clicked'
-    ? `not graded: the "No" chip was ${revoked}`
-    : `${beforeRevoke.entries.length} entry before, ${afterRevoke.entries.length} after, ` +
-      `${afterRevoke.buckets.length} bucket(s) left`,
-)
-
-await cdp.send('Network.emulateNetworkConditions', {
-  offline: false,
-  latency: 0,
-  downloadThroughput: -1,
-  uploadThroughput: -1,
-})
+  'choosing \u201cNo\u201d deletes the saved set immediately, without a reload',
+]) {
+  skip(name, 'no consent control exists in the 2026 design, so nothing can be stored to grade')
+}
 
 // --------------------------------------------- 6c. an offline permalink
 
@@ -839,19 +708,33 @@ const metresApart = (a, b) =>
 const pressLocate = () =>
   cdp.evaluate(`
     (() => {
-      const find = () => [...document.querySelectorAll('button')].find((b) =>
-        /use my location/i.test(b.textContent || ''))
+      const find = () =>
+        document.querySelector('[aria-label="Use my location"]') ||
+        [...document.querySelectorAll('button')].find((b) =>
+          /use my location/i.test(b.textContent || ''))
       let b = find()
       if (!b) {
-        // On the full layout it lives inside the "from" drawer. Opening it is a
-        // click on the segment that labels it; a closed drawer still renders.
-        const seg = [...document.querySelectorAll('button')].find((x) =>
-          /starting point|^from$/i.test((x.textContent || '').trim()))
-        if (seg) seg.click()
+        // On the desktop capsule it lives inside the origin popover. Opening
+        // it is a click on the origin segment; a closed popover still renders
+        // the segment.
+        document.querySelector('.capsule__seg--origin')?.click()
         b = find()
       }
       if (!b) return 'no-button'
       if (b.disabled) return 'disabled'
+      b.click()
+      return 'clicked'
+    })()`)
+
+/** Press the primary action. In this design nothing fetches until it is
+ *  pressed — the nonce is bumped only by Find routes, Try again, and an
+ *  arriving permalink. */
+const pressFind = () =>
+  cdp.evaluate(`
+    (() => {
+      const b = [...document.querySelectorAll('button')].find(
+        (x) => /find routes/i.test(x.textContent || '') && !x.disabled)
+      if (!b) return 'no-button'
       b.click()
       return 'clicked'
     })()`)
@@ -914,126 +797,16 @@ await cdp.send('Network.emulateNetworkConditions', {
   uploadThroughput: -1,
 })
 
-// (ii) The rounded key. One online geolocated search, saved, then replayed
-// offline from a fix a few metres away — and refused from one 200 m away.
-await resetStore()
-await geo(LAT, LON)
-await cdp.send('Page.navigate', { url: `${SITE}/` })
-await waitFor(cdp, `document.readyState === 'complete'`, 20000)
-await sleep(1200)
-const locatedFresh = await pressLocate()
-const geoRendered = await routesOnScreen(60000)
-await sleep(2500)
-const geoRun = { status: lastRouteStatus }
-
-// Consent has to be granted after the panel exists, which needs a search first.
-const geoConsent = await pressConsent('Yes, keep them')
-await sleep(800)
-// Re-run the same search so it is stored under consent rather than before it.
-// No navigate, so the stub installed above is still the one answering.
-await pressLocate()
-await routesOnScreen(60000)
-await sleep(2500)
-const geoSaved = await savedState()
-const geoRun2 = { status: lastRouteStatus }
-
-gradeOrSkip(
-  'a search started from the device is saved, which it never was before',
-  [geoRun, geoRun2],
-  locatedFresh === 'clicked' && geoConsent === 'clicked' && geoSaved.entries.length === 1,
-  locatedFresh !== 'clicked'
-    ? `not graded: the locate button was ${locatedFresh}`
-    : geoConsent !== 'clicked'
-      ? `not graded: the consent chip was ${geoConsent}`
-      : `${geoSaved.entries.length} entry in ${geoSaved.buckets.length} bucket(s)`,
-)
-
-/** Reload with no network, take a fix `metres` from the saved one, and press. */
-const replayFrom = async (metres, bearingDeg) => {
-  const dLat = (metres * Math.cos((bearingDeg * Math.PI) / 180)) / 111320
-  const dLon =
-    (metres * Math.sin((bearingDeg * Math.PI) / 180)) / (111320 * Math.cos((LAT * Math.PI) / 180))
-  await cdp.send('Network.emulateNetworkConditions', {
-    offline: true,
-    latency: 0,
-    downloadThroughput: -1,
-    uploadThroughput: -1,
-  })
-  // Installed before the navigate: addScriptToEvaluateOnNewDocument applies to
-  // the next document, not the current one.
-  await geo(LAT + dLat, LON + dLon)
-  await cdp.send('Page.navigate', { url: `${SITE}/` })
-  await waitFor(cdp, `document.readyState === 'complete'`, 20000)
-  await sleep(1200)
-
-  // Read back what the page will actually report. A stub that failed to install
-  // would otherwise make the 200 m check pass for the wrong reason — no
-  // position, no search, no replay, graded green. `movedBy` is asserted by the
-  // caller, so this cannot be believed without being checked.
-  const reported = await fixOnPage()
-  const movedBy = reported ? metresApart({ lat: LAT, lon: LON }, reported) : null
-
-  const pressed = await pressLocate()
-  const rendered = await routesOnScreen(20000)
-  await sleep(1500)
-  const badge = await cdp.evaluate(
-    `!!document.querySelector('.badge--cached') || !!document.querySelector('.offline')`,
-  )
-  await cdp.send('Network.emulateNetworkConditions', {
-    offline: false,
-    latency: 0,
-    downloadThroughput: -1,
-    uploadThroughput: -1,
-  })
-  return { pressed, rendered, badge, movedBy }
-}
-
-// Five metres, due east — the narrow axis, where a 4 dp square is only 6.9 m
-// wide at this latitude and plain rounding would lose the match about two
-// times in three.
-const near = await replayFrom(5, 90)
-gradeOrSkip(
+// (ii) The rounded key: saving a geolocated search and replaying it from a
+// fix a few metres away needs a stored set, which needs consent — see the 6b
+// note. Ungradable until a consent control exists again.
+for (const name of [
+  'a geolocated search is saved under the rounded key',
   'a fix five metres from the saved one replays it, with no network',
-  [geoRun, geoRun2],
-  geoSaved.entries.length === 1 &&
-    near.pressed === 'clicked' &&
-    near.movedBy !== null &&
-    Math.abs(near.movedBy - 5) < 1 &&
-    near.rendered &&
-    near.badge,
-  geoSaved.entries.length !== 1
-    ? 'not graded: nothing was stored, so a replay proves nothing'
-    : near.pressed !== 'clicked'
-      ? `not graded: the locate button was ${near.pressed}`
-      : near.movedBy === null
-        ? 'not graded: the page reported no position at all'
-        : `the page reported a fix ${near.movedBy.toFixed(1)} m away · ` +
-          `rendered=${near.rendered} labelled-as-saved=${near.badge}`,
-)
-
-// Two hundred metres. Far enough to be a different corner of the park, and the
-// negative half of the claim: the widening must not have become a wildcard.
-const far = await replayFrom(200, 90)
-gradeOrSkip(
   'a fix two hundred metres away does not replay it',
-  [geoRun, geoRun2],
-  geoSaved.entries.length === 1 &&
-    far.pressed === 'clicked' &&
-    far.movedBy !== null &&
-    Math.abs(far.movedBy - 200) < 5 &&
-    !far.rendered,
-  geoSaved.entries.length !== 1
-    ? 'not graded: nothing was stored, so a miss proves nothing'
-    : far.pressed !== 'clicked'
-      ? `not graded: the locate button was ${far.pressed}`
-      : far.movedBy === null
-        ? 'not graded: the page reported no position at all'
-        : far.rendered
-          ? `a walk saved ${far.movedBy.toFixed(0)} m away came back — the match is too wide`
-          : `the page reported a fix ${far.movedBy.toFixed(1)} m away · no replay, as promised`,
-)
-
-await resetStore()
+]) {
+  skip(name, 'no consent control exists in the 2026 design, so nothing can be stored to grade')
+}
 
 // --------------------------------------------- 7. the service worker registers
 
@@ -1091,8 +864,14 @@ await cdp.send('Network.emulateNetworkConditions', {
 collecting = true
 await load(`${SITE}/`)
 await cdp.evaluate(
-  `(()=>{const b=[...document.querySelectorAll('button')].find(x=>/use my location/i.test(x.textContent)); if(b) b.click()})()`,
+  `(()=>{document.querySelector('[aria-label="Use my location"]')?.click()})()`,
 )
+await waitFor(
+  cdp,
+  `!![...document.querySelectorAll('button')].find(x=>/find routes/i.test(x.textContent||'')&&!x.disabled)`,
+  20000,
+)
+await pressFind()
 await waitFor(cdp, `!!document.querySelector('.route__sub')`, 60000)
 await sleep(2500)
 const found = await cdp.evaluate(`window.__cspViolations`)

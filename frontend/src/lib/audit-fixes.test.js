@@ -87,12 +87,15 @@ describe('the consent sweep runs on every boot', () => {
 })
 
 describe('exports are in the units the user chose', () => {
-  it('threads units from App to the file on disk', () => {
+  it('threads units from the detail to the file on disk', () => {
     // `fmtDist(route.distance_m)` with one argument falls back to METRIC_24,
     // and the prop never arrived — so a user in miles got GPX, GeoJSON and a
-    // printed sheet in metres while every number on screen was in feet.
-    expect(code('App.jsx')).toMatch(/<TakeItWithYou[\s\S]{0,200}units=\{state\.units\}/)
-    expect(code('components/TakeItWithYou.jsx')).toMatch(/units/)
+    // printed sheet in metres while every number on screen was in feet. The
+    // export surface is ExportPills now (TakeItWithYou before the redesign);
+    // the symptom guarded is the same.
+    expect(code('components/RouteDetail.jsx')).toMatch(/<ExportPills[\s\S]{0,200}units=\{units\}/)
+    expect(code('components/ExportPills.jsx')).toMatch(/downloadGpx\(route, \{ origin, dest \}, units\)/)
+    expect(code('components/ExportPills.jsx')).toMatch(/downloadGeoJson\(route, units\)/)
     const exp = code('lib/export.js')
     expect(exp).toMatch(/provenanceNote\(route, units = METRIC_24\)/)
     expect(exp).toMatch(/fmtDist\(route\.distance_m, units\)/)

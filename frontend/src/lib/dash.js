@@ -6,63 +6,69 @@
  * list, so the routes stay distinguishable in greyscale and to anyone who does
  * not perceive the hue difference.
  *
- * Every colour here is a **graphic**, never text on paper. `fastest` at 3.34:1
- * against --paper clears the 3:1 threshold WCAG sets for graphical objects but
- * not the 4.5:1 it sets for text, so a route's name is always drawn in --ink
- * and the colour appears only as a line, an edge bar, a swatch or a legend key.
+ * Every colour here is a **graphic**, never text on a surface: route colours
+ * clear WCAG's 3:1 threshold for graphical objects but are not held to the
+ * 4.5:1 it sets for text, so a route's name is always drawn in --ink and the
+ * colour appears only as a line, a dot or a fill.
  *
  * The dash arrays are unchanged from the original build — the patterns already
- * worked, and they are what makes the map survive greyscale. Only the hues
- * moved, to DESIGN-HANDOFF §2.3.
+ * worked, and they are what makes the map survive greyscale. The hues have
+ * moved twice since: to DESIGN-HANDOFF §2.3, and then to the 2026 redesign's
+ * accent families (docs/DESIGN-2026.md).
  */
 
-/** Mirrors the --route-* custom properties in styles.css. Both are §2.3. */
+/** Mirrors the --route-* custom properties in styles.css.
+ *
+ * The 2026 redesign commits to one look, so `colorDark` restates `color`
+ * rather than carrying a second palette — the field stays because the shape
+ * of this table is pinned by dash-palette.test.js, which holds both values
+ * against both `:root` blocks in the stylesheet. */
 export const OBJECTIVES = [
   {
     id: 'fastest',
     label: 'Fastest',
-    color: '#C2703D',
-    colorDark: '#E8A46F',
+    color: '#4E7FBE',
+    colorDark: '#4E7FBE',
     dash: [1, 0],
     pattern: 'solid',
   },
   {
     id: 'scenic',
     label: 'Scenic',
-    color: '#2F7D53',
-    colorDark: '#6FC38E',
+    color: '#3FA284',
+    colorDark: '#3FA284',
     dash: [3, 2],
     pattern: 'dashed',
   },
   {
     id: 'accessible',
     label: 'Accessible',
-    color: '#5B6ECF',
-    colorDark: '#95A4F0',
+    color: '#886AAA',
+    colorDark: '#886AAA',
     dash: [1, 2],
     pattern: 'dotted',
   },
   {
     id: 'quiet',
     label: 'Quiet',
-    color: '#8A5CB4',
-    colorDark: '#C2A0E8',
+    color: '#6975B5',
+    colorDark: '#6975B5',
     dash: [6, 3],
     pattern: 'long dash',
   },
   {
     id: 'shade',
     label: 'Shade',
-    color: '#1E7A78',
-    colorDark: '#63C4BE',
+    color: '#008C8D',
+    colorDark: '#008C8D',
     dash: [5, 2, 1, 2],
     pattern: 'dash-dot',
   },
   {
     id: 'air',
     label: 'Clean air',
-    color: '#B0455F',
-    colorDark: '#EE8AA0',
+    color: '#B87252',
+    colorDark: '#B87252',
     dash: [2, 2],
     pattern: 'fine dash',
   },
@@ -73,8 +79,8 @@ export const DASH = Object.fromEntries(OBJECTIVES.map((o) => [o.id, o]))
 const FALLBACK = {
   id: 'unknown',
   label: 'Route',
-  color: '#55645A',
-  colorDark: '#9BAEA1',
+  color: '#77756C',
+  colorDark: '#77756C',
   dash: [1, 0],
   pattern: 'solid',
 }

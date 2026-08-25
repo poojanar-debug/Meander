@@ -177,9 +177,9 @@ export function verificationTier(confidence, scoringMethod) {
   }
   // Same answer as placeholder, for the same reason: an unknown coverage was
   // filling one segment and reading "Barely verified", which is a measurement
-  // this route does not have. VerificationMeter already suppresses the
-  // percentage for a non-number confidence — it knew the difference before this
-  // function did.
+  // this route does not have. The meter component that consumed this suppressed
+  // the percentage for a non-number confidence before this function did; the
+  // rule now lives here, where every consumer inherits it.
   if (!measured(confidence)) {
     return { filled: 0, word: 'Not measured', tone: 'warn' }
   }

@@ -26,6 +26,17 @@ createRoot(document.getElementById('root')).render(
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 
 async function setOrigin() {
+  // The plan surfaces differ by width, but both carry a combobox once their
+  // origin editor is open: the capsule's origin segment on desktop, the
+  // full-surface search screen on a phone. Open whichever is present first.
+  const opener = [...document.querySelectorAll('button')].find(
+    (b) =>
+      b.classList.contains('capsule__seg--origin') ||
+      b.classList.contains('plan__search-field'),
+  )
+  opener?.click()
+  await sleep(200)
+
   const input = document.querySelector('input[role="combobox"]')
   if (!input) return false
   const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set
@@ -40,17 +51,20 @@ async function setOrigin() {
   input.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }))
   await sleep(60)
   input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))
+  await sleep(200)
+
+  // Picking a place fills the plan; the explicit primary action asks.
+  const find = [...document.querySelectorAll('button')].find(
+    (b) => /find routes/i.test(b.textContent || '') && !b.disabled,
+  )
+  find?.click()
   return true
 }
 
-// `.card` is the pre-redesign row, `button.route` the rail row that replaces it
-// in phase 4. Matching both means this harness keeps working across the change
-// rather than silently auditing an empty page — which would pass.
-//
-// `button.route` and not `.route`: the loading skeletons carry the same class
-// on a <div>, so the looser selector was satisfied by three placeholders and
-// the audit ran against a half-streamed result.
-const ROW_SELECTOR = 'button.route, .card'
+// `button.route` is the card's hit area, and not the bare `.route` class: the
+// loading skeletons are cards too, so a looser selector would be satisfied by
+// three placeholders and the audit would run against a half-streamed result.
+const ROW_SELECTOR = 'button.route'
 
 async function waitForRoutes() {
   for (let i = 0; i < 120; i += 1) {

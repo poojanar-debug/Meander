@@ -133,12 +133,13 @@ describe('the sheet is sized by its content', () => {
 
 describe('the breakpoint is written once', () => {
   it('shares one constant between the stylesheet and the modal decision', () => {
-    // A literal 899 typed a second time in a component is how a layer becomes
-    // modal on one side of a breakpoint while the layout stays two-column on
-    // the other, which is a state with no way out.
-    expect(read('lib/media.js')).toMatch(/MOBILE_LAYOUT = '\(max-width: 899px\)'/)
+    // A literal 1023 typed a second time in a component is how a layer becomes
+    // modal on one side of a breakpoint while the layout stays desktop on the
+    // other, which is a state with no way out. The value moved from 899 when
+    // the 2026 redesign set its breakpoint at 1024; the invariant did not.
+    expect(read('lib/media.js')).toMatch(/MOBILE_LAYOUT = '\(max-width: 1023px\)'/)
     const app = read('App.jsx')
     expect(app).toMatch(/useMatchMedia\(MOBILE_LAYOUT\)/)
-    expect(app).not.toMatch(/max-width:\s*899px/)
+    expect(app).not.toMatch(/max-width:\s*1023px/)
   })
 })

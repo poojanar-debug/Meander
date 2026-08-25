@@ -108,9 +108,18 @@ export function useFollowTracking(route) {
   const [fix, setFix] = useState(null)
   const [error, setError] = useState(null)
   const [offRoute, setOffRoute] = useState(false)
+  const [offRouteSince, setOffRouteSince] = useState(null)
   const [poorSignal, setPoorSignal] = useState(false)
+  // The rejected fix's own ± figure. `fix` only ever holds accepted readings,
+  // so without this the visible rejection the accuracy gate promises would
+  // have no number to show — "waiting for signal" with nothing to say how far
+  // off the signal is.
+  const [poorAccuracyM, setPoorAccuracyM] = useState(null)
   const [arrived, setArrived] = useState(false)
   const [alerted, setAlerted] = useState(null)
+  // When this walk started being followed, for the arrival card's elapsed
+  // time — measured locally, like everything else here.
+  const [startedAt, setStartedAt] = useState(null)
 
   const offRouteState = useRef(null)
   const arrivedRef = useRef(false)
@@ -132,9 +141,11 @@ export function useFollowTracking(route) {
         const accuracyM = typeof pos.coords?.accuracy === 'number' ? pos.coords.accuracy : null
         if (accuracyM != null && accuracyM > ACCURACY_LIMIT_M) {
           setPoorSignal(true)
+          setPoorAccuracyM(accuracyM)
           return
         }
         setPoorSignal(false)
+        setPoorAccuracyM(null)
         setFix({
           lon: pos.coords.longitude,
           lat: pos.coords.latitude,
@@ -159,13 +170,19 @@ export function useFollowTracking(route) {
   // Leaving follow mode has to leave nothing behind, or reopening it shows the
   // last walk's progress for one frame before the first fix lands.
   useEffect(() => {
-    if (active) return
+    if (active) {
+      setStartedAt(Date.now())
+      return
+    }
     setFix(null)
     setError(null)
     setOffRoute(false)
+    setOffRouteSince(null)
     setPoorSignal(false)
+    setPoorAccuracyM(null)
     setArrived(false)
     setAlerted(null)
+    setStartedAt(null)
     offRouteState.current = null
     arrivedRef.current = false
   }, [active])
@@ -297,11 +314,13 @@ export function useFollowTracking(route) {
     if (arrived) {
       offRouteState.current = null
       setOffRoute(false)
+      setOffRouteSince(null)
       return
     }
     const next = trackOffRoute(offRouteState.current, at.offRouteM, Date.now())
     offRouteState.current = next
     setOffRoute(next.offRoute)
+    setOffRouteSince(next.since)
   }, [at?.offRouteM, at, arrived, active])
 
   // --- barriers ------------------------------------------------------------
@@ -345,8 +364,13 @@ export function useFollowTracking(route) {
     progress,
     error,
     offRoute,
+    // When the current off-route run began, or null. Only meaningful while
+    // offRoute is true — the banner uses it to say how long.
+    offRouteSince,
     poorSignal,
+    poorAccuracyM,
     arrived,
+    startedAt,
     stepIndex,
     currentStep,
     nextStep,

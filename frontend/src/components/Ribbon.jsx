@@ -23,9 +23,6 @@ export default function Ribbon({ routes }) {
     // by landmark navigation instead of being loose content between the topbar
     // and the main element. role="note" is not a landmark and did not do this.
     <section className="ribbon" aria-label="Data source">
-      <span className="ribbon__icon" aria-hidden="true">
-        ⚠
-      </span>
       <span>
         Demonstration data: routes come from fixtures, not live routing. Do not follow them.
       </span>

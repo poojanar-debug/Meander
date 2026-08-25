@@ -1,43 +1,23 @@
-import { fmtDist } from '../lib/format.js'
+import { useState } from 'react'
 
-/**
- * GraphHopper's terse instruction, rewritten as a sentence.
- *
- * The router says "Turn left onto Green Path". The narration elsewhere in this
- * app is written for a human by a human, and a step list that reads
- * `TURN_LEFT · 400m` next to it looks like a different product. So the distance
- * is folded into the sentence — "Turn left onto Green Path and follow it for
- * 400 m" — rather than being stacked beside it as a datum.
- *
- * Nothing is invented. Every word except the connective comes from the router;
- * where it gives no street name, the sentence simply does not name one.
- */
+import { fmtDist } from '../lib/format.js'
+import { BlockerIcon } from './Icons.jsx'
+
 /**
  * Below this, a distance is not worth saying and cannot be said honestly.
  *
- * `formatDistance` rounds to the nearest 10 m below 1 km, so anything under 5 m
- * renders as **"0 m"** — and under 1.524 m as "0 ft" — producing "follow it for
- * 0 m" in the step list. The threshold was 1 m, which let 1 to 4 m through into
- * exactly that sentence.
- *
- * Fixed at the call site rather than in `formatDistance`, which `units.test.js`
- * pins byte-for-byte over every integer metre from 0 to 200,000 and which is
- * right to keep saying 0 for a number that rounds to 0. What is wrong is asking
- * it about a distance nobody needs to be told.
+ * `formatDistance` rounds to the nearest 10 m below 1 km, so anything under
+ * 5 m renders as **"0 m"** — and under 1.524 m as "0 ft" — which tells someone
+ * to travel no distance at all. Fixed at the call site rather than in
+ * `formatDistance`, which `units.test.js` pins byte-for-byte over every
+ * integer metre from 0 to 200,000 and which is right to keep saying 0 for a
+ * number that rounds to 0. What is wrong is asking it about a distance nobody
+ * needs to be told: under this floor the row simply carries no distance.
  */
 const WORTH_SAYING_M = 5
 
-function sentence(step, units) {
-  const text = step.text.trim().replace(/\.$/, '')
-  const far = step.distance_m >= WORTH_SAYING_M
-
-  // An arrival instruction has no distance and needs no "and follow it for".
-  if (!far) return `${text}.`
-  const followable = /\bonto\b|\balong\b|\bon\b/i.test(text)
-  return followable
-    ? `${text} and follow it for ${fmtDist(step.distance_m, units)}.`
-    : `${text}, then continue for ${fmtDist(step.distance_m, units)}.`
-}
+/** How many rows show before the footer link unfolds the rest. */
+const FOLDED_COUNT = 5
 
 /**
  * Which barriers fall on which step.
@@ -78,59 +58,64 @@ function barriersByStep(steps, blockers, geometry) {
 }
 
 /**
- * Turn-by-turn directions. Implements §6.4.
+ * Turn-by-turn: numbered rows — a sky-wash index circle, the router's
+ * instruction, the distance on the right — with a barrier chip indented under
+ * any step that carries one. The list folds after five rows; the footer link
+ * names how many more there are.
  *
- * Collapsed by default: the rail and the detail panel answer "which route", and
- * this answers "how do I walk it", which is a question you only ask once you
- * have chosen.
+ * Hover and focus highlight the matching stretch on the map. That is a state
+ * change rather than motion, so prefers-reduced-motion does not suppress it.
  */
 export default function StepList({ route, units, onHighlight }) {
+  const [unfolded, setUnfolded] = useState(false)
   const steps = route?.steps ?? []
 
   if (steps.length === 0) {
     return (
-      <p className="field__hint">
-        Step-by-step directions are not available for this route.
-      </p>
+      <p className="steps__absent">Step-by-step directions are not available for this route.</p>
     )
   }
 
   const barriers = barriersByStep(steps, route.blockers, route.geometry)
+  const shown = unfolded ? steps : steps.slice(0, FOLDED_COUNT)
+  const hidden = steps.length - shown.length
 
   return (
-    <details className="steps">
-      <summary className="steps__summary">
-        Directions · {steps.length} step{steps.length === 1 ? '' : 's'}
-      </summary>
+    <div className="steps">
       <ol className="steps__list">
-        {steps.map((step, i) => (
+        {shown.map((step, i) => (
           <li
             key={`${i}-${step.text}`}
             className="step"
-            // Hover and focus highlight the matching stretch on the map. This is
-            // a state change rather than motion, so prefers-reduced-motion does
-            // not suppress it.
             onMouseEnter={() => onHighlight?.(step.interval)}
             onMouseLeave={() => onHighlight?.(null)}
             onFocus={() => onHighlight?.(step.interval)}
             onBlur={() => onHighlight?.(null)}
             tabIndex={0}
           >
-            <p className="step__text">{sentence(step, units)}</p>
-            {step.street_name && (
-              <p className="step__meta">
-                {step.street_name}
-                {step.distance_m >= 1 && ` · ${fmtDist(step.distance_m, units)}`}
-              </p>
-            )}
+            <span className="step__row">
+              <span className="step__index mono" aria-hidden="true">
+                {i + 1}
+              </span>
+              <span className="step__text">{step.text}</span>
+              {step.distance_m >= WORTH_SAYING_M && (
+                <span className="step__dist mono">{fmtDist(step.distance_m, units)}</span>
+              )}
+            </span>
             {barriers.get(i)?.map((b, j) => (
-              <p className="note note--warn step__barrier" key={`${b.type}-${j}`}>
-                <strong>{b.type}:</strong> {b.description}
-              </p>
+              <span className="step__barrier" key={`${b.type}-${j}`}>
+                <BlockerIcon type={b.type} size={14} />
+                <span>{b.description}</span>
+              </span>
             ))}
           </li>
         ))}
       </ol>
-    </details>
+      {hidden > 0 && (
+        <button type="button" className="steps__more" onClick={() => setUnfolded(true)}>
+          {hidden} more step{hidden === 1 ? '' : 's'}
+        </button>
+      )}
+    </div>
   )
 }

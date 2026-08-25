@@ -1,246 +1,325 @@
-import { useState } from 'react'
+import { useEffect, useRef } from 'react'
 
-import { styleFor, swatchBackground } from '../lib/dash.js'
-import {
-  SCORING_METHOD_LABEL,
-  confidenceSentence,
-  fmtDist,
-  fmtDur,
-  fmtPct,
-  restStopName,
-} from '../lib/format.js'
-import { cachedNotice } from '../lib/offline.js'
+import { MODE_NOUN, confidenceSentence, fmtDist, fmtDur } from '../lib/format.js'
+import { UNKNOWN, formatElevation } from '../lib/units.js'
+import { bestWindowStat, BestWindow } from './DepartureStrip.jsx'
 import ElevationProfile from './ElevationProfile.jsx'
-import ReportBarrier from './ReportBarrier.jsx'
+import ExportPills from './ExportPills.jsx'
+import StepList from './StepList.jsx'
+import { ChevronRightIcon, CloseIcon } from './Icons.jsx'
 
-function CachedNote({ ageMs }) {
-  const { tier, headline, detail } = cachedNotice(ageMs)
+/** The design's method line, always visible near the scores. Lowercase mono,
+ *  matching how the wire value reads; an unrecognised method renders as
+ *  itself rather than as a guess. */
+const METHOD_LINE = {
+  clip: 'scored from street-level imagery · cached, never live',
+  geometry_only: 'scored from route shape only · no imagery available here',
+  placeholder: 'placeholder values · not a measurement',
+}
+
+const SCORE_ROWS = [
+  ['scenic', 'scenic', 'mint'],
+  ['air', 'air', 'sky'],
+  ['shade', 'shade', 'lilac'],
+]
+
+/** `bench` → Bench, `drinking water` → Water, `toilets` → Toilets: the short
+ *  pill vocabulary. An unknown amenity keeps its own name, made readable. */
+function restPillLabel(type) {
+  const t = String(type ?? '').toLowerCase()
+  if (t === 'bench') return 'Bench'
+  if (t === 'drinking water' || t === 'drinking_water' || t === 'fountain') return 'Water'
+  if (t === 'toilets') return 'Toilets'
+  const readable = t.replace(/_/g, ' ')
+  return readable.charAt(0).toUpperCase() + readable.slice(1)
+}
+
+/** The score bars: 58px label, 6px track, accent fill, mono value. A null
+ *  score renders no bar at all — an empty track would claim a measurement of
+ *  zero, and "not measured" is a different statement. While the enrichment
+ *  pass is still running the rows are skeletons instead: "being checked" and
+ *  "not measured" are different statements too. */
+function ScoreBars({ scores, scoringMethod, pending = false }) {
   return (
-    <div className={tier === 'quiet' ? 'note detail__cached' : 'note note--warn detail__cached'}>
-      <p className="note__title">{headline}</p>
-      {detail && <p className="note__sub">{detail}</p>}
+    <div className="scores">
+      {SCORE_ROWS.map(([key, label, accent]) => {
+        const value = scores?.[key]
+        const known = !pending && typeof value === 'number'
+        return (
+          <p className="scores__row" key={key}>
+            <span className="scores__label">{label}</span>
+            {pending ? (
+              <span className="scores__track card__skeleton-bar" aria-hidden="true" />
+            ) : known ? (
+              <span className="scores__track" aria-hidden="true">
+                <span
+                  className={`scores__fill scores__fill--${accent}`}
+                  style={{ width: `${Math.round(value * 100)}%` }}
+                />
+              </span>
+            ) : (
+              <span className="scores__unmeasured mono">not measured</span>
+            )}
+            <span className="scores__value mono">
+              {known ? Math.round(value * 100) : UNKNOWN}
+            </span>
+          </p>
+        )
+      })}
+      {pending ? (
+        <p className="scores__method mono">Checking surfaces, air and rest stops</p>
+      ) : (
+        scoringMethod && (
+          <p className="scores__method mono">{METHOD_LINE[scoringMethod] ?? scoringMethod}</p>
+        )
+      )}
     </div>
   )
 }
 
-const SCORE_ROWS = [
-  { key: 'scenic', label: 'Scenic' },
-  { key: 'air', label: 'Clean air' },
-  { key: 'shade', label: 'Shade' },
-]
-
-/** §8: 20+ barriers would bury the panel, so the first eight show and the rest
- *  go behind a disclosure. Every one still gets a map marker. */
-const BARRIERS_SHOWN = 8
-
-function Barriers({ blockers }) {
-  const [expanded, setExpanded] = useState(false)
-  const shown = expanded ? blockers : blockers.slice(0, BARRIERS_SHOWN)
-  const hidden = blockers.length - shown.length
-
+/** The lilac coverage card: the server's sentence verbatim, and the one-line
+ *  reminder of what unknown does not mean. */
+function CoverageCard({ route }) {
+  const { text } = confidenceSentence(route.confidence, route.scoring_method, route.confidence_note)
   return (
-    <>
-      <ul className="blockers__list">
-        {shown.map((b, i) => (
-          <li key={`${b.type}-${b.lat}-${b.lon}-${i}`}>
-            <strong>{b.type}:</strong> {b.description}
-          </li>
-        ))}
-      </ul>
-      {hidden > 0 && (
-        <button type="button" className="link-button" onClick={() => setExpanded(true)}>
-          and {hidden} more
-        </button>
-      )}
-    </>
+    <div className="coverage">
+      <p className="coverage__text">{text}</p>
+      <p className="coverage__sub mono">unknown never counts as safe</p>
+    </div>
+  )
+}
+
+/** Rest stops as mint pills — or the honest sentence when the data is null
+ *  (could not look) or empty (looked, found none). The two are different
+ *  answers and never render alike; "still being checked" is a third. */
+function RestPills({ restStops, units, pending = false }) {
+  if (pending) {
+    return <p className="rests__absent">Rest stops are still being checked.</p>
+  }
+  if (restStops == null) {
+    return (
+      <p className="rests__absent">
+        Rest stops were not checked for this route. That is not the same as there being none.
+      </p>
+    )
+  }
+  if (restStops.length === 0) {
+    return <p className="rests__absent">No rest stops found along this route.</p>
+  }
+  return (
+    <ul className="rests">
+      {restStops.map((stop, i) => (
+        <li className="rests__pill" key={`${stop.type}-${i}`}>
+          {restPillLabel(stop.type)}
+          {typeof stop.at_m === 'number' && (
+            <span className="mono"> · {fmtDist(stop.at_m, units)}</span>
+          )}
+        </li>
+      ))}
+    </ul>
+  )
+}
+
+function StatusChip({ route, isLoop }) {
+  const shape = `${isLoop ? 'loop' : 'one way'} ${MODE_NOUN[route.mode] ?? route.mode}`
+  const ok = route.status === 'ok'
+  return (
+    <span className={`detail__chip mono ${ok ? 'detail__chip--mint' : 'detail__chip--rose'}`}>
+      {route.status} · {shape}
+    </span>
   )
 }
 
 /**
- * Everything about the selected route, and only the selected route.
- * Implements §4.8.
+ * One route, in full. Two skins over the same content: the desktop modal —
+ * scrimmed map behind, 880px, two columns — and the mobile expanded sheet,
+ * one column with the follow button on top.
  *
- * The split with RouteRow is the whole redesign in one idea: the rail carries
- * what compares (uniform, aligned, four facts), the detail carries what
- * explains (variable length, prose, barrier lists). Putting both in every card
- * is what made the old build read as a data dump.
- *
- * The blocked notice is placed **above** Along the way rather than at the end,
- * because it changes whether any of the rest matters.
+ * Everything here renders what the wire said or says that it cannot: the
+ * narration block vanishes when narration is null (with its credit line, so
+ * the credit never outlives the thing it credits), the coverage sentence is
+ * the server's, and a blocked route's status_note renders verbatim.
  */
 export default function RouteDetail({
   route,
-  theme,
+  origin,
+  dest,
   units,
-  cacheAgeMs,
-  stepList,
-  takeaway,
+  isLoop,
+  mobile,
+  bestDeparture,
+  reason,
+  onClose,
   onStart,
-  children,
+  onHighlight,
+  onAnnounce,
 }) {
+  const closeRef = useRef(null)
+  const surfaceRef = useRef(null)
+
+  // The desktop modal contract: focus lands on the close control, Escape
+  // closes, Tab cycles inside. The mobile sheet is not a modal — the map
+  // sliver above it stays live — so none of this runs there.
+  useEffect(() => {
+    if (mobile) return undefined
+    closeRef.current?.focus()
+    const onKeyDown = (event) => {
+      if (event.key === 'Escape') {
+        event.preventDefault()
+        onClose()
+        return
+      }
+      if (event.key !== 'Tab') return
+      const layer = surfaceRef.current
+      if (!layer) return
+      const focusable = [
+        ...layer.querySelectorAll(
+          'button:not([disabled]), a[href], input, select, textarea, [tabindex]:not([tabindex="-1"])',
+        ),
+      ].filter((el) => el.offsetWidth > 0 || el.offsetHeight > 0)
+      if (!focusable.length) return
+      const first = focusable[0]
+      const last = focusable[focusable.length - 1]
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault()
+        last.focus()
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault()
+        first.focus()
+      } else if (!layer.contains(document.activeElement)) {
+        event.preventDefault()
+        first.focus()
+      }
+    }
+    document.addEventListener('keydown', onKeyDown)
+    return () => document.removeEventListener('keydown', onKeyDown)
+  }, [mobile, onClose])
+
   if (!route) return null
 
-  const style = styleFor(route.id)
-  const blocked = route.status !== 'ok'
-  const confidence = confidenceSentence(
-    route.confidence,
-    route.scoring_method,
-    route.confidence_note,
+  // "Scenic loop", "Fastest loop" — the label plus the shape, which is how
+  // the mockups title a round trip. A point-to-point keeps the bare label.
+  const title = isLoop ? `${route.label} loop` : route.label
+
+  const stats = [
+    fmtDur(route.duration_min),
+    fmtDist(route.distance_m, units),
+    `${formatElevation(route.elevation?.ascent_m, units)} ${mobile ? 'climb' : 'up'}`,
+  ]
+  const windowStat = bestWindowStat(bestDeparture, units)
+  if (!mobile && windowStat) stats.push(windowStat)
+
+  const stepCount = route.steps?.length ?? 0
+  const barrierCount = route.blockers?.length ?? 0
+  const tbtMeta =
+    `${stepCount} step${stepCount === 1 ? '' : 's'}` +
+    (barrierCount > 0 ? ` · ${barrierCount} barrier${barrierCount === 1 ? '' : 's'}` : '')
+
+  const body = (
+    <>
+      {route.status !== 'ok' && route.status_note && (
+        <p className="detail__blocked-note">{route.status_note}</p>
+      )}
+
+      {route.narration && (
+        <div className="detail__narration-block">
+          <p className="detail__narration">{route.narration}</p>
+          <p className="detail__credit mono">written only from the numbers on this card</p>
+        </div>
+      )}
+    </>
   )
 
-  return (
-    <article className="detail" aria-labelledby="detail-title">
-      <header className="detail__head">
-        <span
-          className="detail__pattern"
-          aria-hidden="true"
-          style={{ background: swatchBackground(route.id, theme) }}
-        />
-        <h3 className="detail__title" id="detail-title">
-          {route.label}
-        </h3>
-        <p className="detail__figures tabular">
-          {fmtDur(route.duration_min)} · {fmtDist(route.distance_m, units)}
+  if (mobile) {
+    return (
+      <div className="detail detail--sheet">
+        <p className="detail__head">
+          <span className={`dot dot--${route.id}`} aria-hidden="true" />
+          <span className="detail__title detail__title--sheet">{title}</span>
         </p>
-      </header>
+        <p className="detail__stats mono">{stats.join(' · ')}</p>
 
-      {/* The one piece of prose a human wrote for a human. It gets the serif
-          and the breathing room (§2.5). */}
-      {route.narration ? (
-        <p className="detail__narration">{route.narration}</p>
-      ) : (
-        <p className="detail__narration detail__narration--pending">
-          Description still being written…
-        </p>
-      )}
+        <button
+          type="button"
+          className="button-sky detail__start"
+          onClick={(event) => onStart(route.id, event.currentTarget)}
+        >
+          Start follow mode
+        </button>
 
-      {blocked && (
-        <div className="note note--warn" role="alert">
-          <p className="note__title">
-            {route.status_note ?? 'This route cannot be completed.'}
-          </p>
-          {route.blockers?.length > 0 && <Barriers blockers={route.blockers} />}
-        </div>
-      )}
+        {body}
 
-      {route.servedFromCache && <CachedNote ageMs={cacheAgeMs} />}
-
-      <section className="detail__section">
-        <h4 className="detail__h">Along the way</h4>
-        {route.rest_stops == null ? (
-          <p className="field__hint">
-            Rest stops could not be checked for this route. That is not the same as there being
-            none.
-          </p>
-        ) : route.rest_stops.length === 0 ? (
-          <p className="field__hint">No rest stops found along this route.</p>
-        ) : (
-          <ul className="stops">
-            {route.rest_stops.map((stop, i) => (
-              <li className="stop" key={`${stop.type}-${stop.lat}-${stop.lon}-${i}`}>
-                <span aria-hidden="true">◦</span>
-                {restStopName(stop.type, 1)} · {fmtDist(stop.at_m, units)}
-              </li>
-            ))}
-          </ul>
-        )}
-      </section>
-
-      <section className="detail__section">
-        <h4 className="detail__h">Climb</h4>
+        <ScoreBars scores={route.scores} scoringMethod={route.scoring_method} pending={Boolean(route.enrichment_pending)} />
+        <CoverageCard route={route} />
         <ElevationProfile profile={route.elevation} units={units} />
-      </section>
+        <RestPills restStops={route.rest_stops} units={units} pending={Boolean(route.enrichment_pending)} />
 
-      <section className="detail__section">
-        <h4 className="detail__h">Directions</h4>
-        {stepList}
-      </section>
+        <BestWindow bestDeparture={bestDeparture} reason={reason} units={units} />
 
-      <section className="detail__section">
-        <h4 className="detail__h">What this route scores</h4>
-        <dl className="scorelist">
-          {SCORE_ROWS.map((row) => {
-            const value = route.scores?.[row.key]
-            const measured = typeof value === 'number'
-            return (
-              <div className="scorelist__row" key={row.key}>
-                <dt>{row.label}</dt>
-                {measured ? (
-                  <>
-                    <dd className="scorelist__track" aria-hidden="true">
-                      <span
-                        className="scorelist__fill"
-                        style={{ width: `${Math.round(value * 100)}%` }}
-                      />
-                    </dd>
-                    <dd className="scorelist__value tabular">{fmtPct(value)}</dd>
-                  </>
-                ) : (
-                  // Spans the bar and the number: "not measured" is a sentence,
-                  // not a value, and must never look like an empty bar.
-                  <dd className="scorelist__unmeasured">not measured</dd>
-                )}
-              </div>
-            )
-          })}
-        </dl>
-      </section>
+        <details className="tbt">
+          <summary className="tbt__summary">
+            <span>Turn-by-turn</span>
+            <span className="tbt__meta mono">{tbtMeta}</span>
+            <ChevronRightIcon size={13} />
+          </summary>
+          <StepList route={route} units={units} onHighlight={onHighlight} />
+        </details>
 
-      {/* The server's sentence, verbatim. The four-segment meter in the rail is
-          a summary of this; it is not a substitute for it, and where the backend
-          supplies confidence_note that text wins. */}
-      <div className={confidence.severity === 'warning' ? 'note note--warn' : 'note'}>
-        <p className="note__title">{confidence.text}</p>
-        <p className="note__sub">
-          {SCORING_METHOD_LABEL[route.scoring_method] ?? route.scoring_method}
-          {route.synthetic_upstream &&
-            ' · Built from demonstration data, not a live routing response. Do not follow it.'}
-        </p>
+        <ExportPills route={route} origin={origin} dest={dest} units={units} onAnnounce={onAnnounce} />
       </div>
+    )
+  }
 
-      {/* Phase-specific extras — the step list and the daylight guard — are
-          injected by App rather than imported here, so this component stays
-          about layout and the phases stay separable. */}
-      {children}
-
-      {/* The one loop that can improve the data underneath the app: a person
-          standing at a barrier the map has never heard of. Collapsed until
-          asked for, because it is also the only thing here that publishes. */}
-      <section className="detail__section">
-        <ReportBarrier route={route} units={units} />
-      </section>
-
-      {/* Still no Save — §6.8 is deferred. Share is no longer here either, but
-          for a different reason now that the app does hold its search in the
-          URL: the link encodes the *search*, not the selected route, so it
-          belongs beside the rail rather than inside one route's detail. */}
-      {onStart && route.steps?.length > 0 && (
-        <div className="detail__actions">
+  return (
+    <div className="detail-scrim">
+      <div
+        className="detail detail--modal"
+        role="dialog"
+        aria-modal="true"
+        aria-label={`${route.label} route detail`}
+        ref={surfaceRef}
+      >
+        <div className="detail__header">
+          <span className={`dot dot--${route.id}`} aria-hidden="true" />
+          <h2 className="detail__title">{title}</h2>
+          <StatusChip route={route} isLoop={isLoop} />
           <button
             type="button"
-            className="button button--primary"
-            disabled={blocked}
-            aria-describedby={blocked ? 'start-blocked' : undefined}
-            // The element is handed over so App can put focus back on it when
-            // follow mode closes. `document.activeElement` is not a substitute:
-            // a touch tap in Safari fires the click without moving focus.
-            onClick={(event) => onStart(route.id, event.currentTarget)}
+            className="detail__close"
+            aria-label="Close route detail"
+            onClick={onClose}
+            ref={closeRef}
           >
-            Start this route
+            <CloseIcon size={14} />
           </button>
-          {blocked && (
-            <p className="field__hint" id="start-blocked">
-              This route cannot be completed, so it cannot be followed.
-            </p>
-          )}
         </div>
-      )}
 
-      {takeaway}
+        <p className="detail__stats mono">{stats.join(' · ')}</p>
 
-      <p className="detail__pattern-note">
-        Drawn as a {style.pattern} line{route.geometry?.length > 1 ? '' : ' (no geometry available)'}.
-      </p>
-    </article>
+        {body}
+
+        <div className="detail__columns">
+          <div className="detail__col">
+            <p className="microlabel">
+              Turn-by-turn · {stepCount} step{stepCount === 1 ? '' : 's'}
+            </p>
+            <StepList route={route} units={units} onHighlight={onHighlight} />
+          </div>
+          <div className="detail__col">
+            <ScoreBars scores={route.scores} scoringMethod={route.scoring_method} pending={Boolean(route.enrichment_pending)} />
+            <CoverageCard route={route} />
+            <ElevationProfile profile={route.elevation} units={units} />
+            <RestPills restStops={route.rest_stops} units={units} pending={Boolean(route.enrichment_pending)} />
+            <ExportPills
+              route={route}
+              origin={origin}
+              dest={dest}
+              units={units}
+              onAnnounce={onAnnounce}
+            />
+          </div>
+        </div>
+      </div>
+    </div>
   )
 }

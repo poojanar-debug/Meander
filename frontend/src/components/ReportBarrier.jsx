@@ -95,7 +95,7 @@ export default function ReportBarrier({ route, units }) {
 
   if (!open) {
     return (
-      <button type="button" className="button report__open" onClick={() => setOpen(true)}>
+      <button type="button" className="report__open" onClick={() => setOpen(true)}>
         Report a barrier on this route
       </button>
     )
@@ -178,12 +178,12 @@ export default function ReportBarrier({ route, units }) {
       <div className="report__actions">
         <button
           type="submit"
-          className="button button--primary"
+          className="button-sky"
           disabled={sending || !description.trim()}
         >
           {sending ? 'Sending…' : 'Send report'}
         </button>
-        <button type="button" className="button" onClick={() => setOpen(false)}>
+        <button type="button" className="pill" onClick={() => setOpen(false)}>
           Cancel
         </button>
       </div>

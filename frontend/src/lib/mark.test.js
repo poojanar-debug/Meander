@@ -24,15 +24,16 @@ const code = (rel) =>
     .replace(/\/\*[\s\S]*?\*\//g, '')
     .replace(/^\s*\/\/.*$/gm, '')
 
-describe('one shape, two renderers', () => {
+describe('one shape, one definition', () => {
   it('is the only place the curve is defined', () => {
-    // If either renderer grows its own copy of the sine, this fails. The
-    // constant 2.15 is the number that would drift first.
+    // If the renderer grows its own copy of the sine, this fails. The
+    // constant 2.15 is the number that would drift first. The in-page wordmark
+    // that was the second renderer left with the 2026 redesign; the icon set
+    // remains, and the day a second consumer returns it must import this
+    // module rather than restate it.
     const icons = readFileSync(new URL('../scripts/make-icons.mjs', SRC), 'utf8')
     expect(icons).toMatch(/import \{ markPoints \} from '\.\.\/src\/lib\/mark\.js'/)
     expect(icons).not.toMatch(/Math\.sin/)
-    expect(read('components/Topbar.jsx')).toMatch(/markPathD/)
-    expect(read('components/Topbar.jsx')).not.toMatch(/Math\.sin/)
   })
 
   it('carries no colour, so it can be imported from a build script', () => {
@@ -66,40 +67,14 @@ describe('one shape, two renderers', () => {
   })
 })
 
-describe('the wordmark resets the app', () => {
-  const app = read('App.jsx')
-
-  it('does not route the reset through withRefetch', () => {
-    // withRefetch bumps `nonce`, and the fetch effect keys on `nonce` alone —
-    // so a reset would immediately re-request the search it just cleared.
-    const body = /case 'reset':\s*\n\s*return ([^\n]*)/.exec(app)?.[1] ?? ''
-    expect(body).toContain('initialState')
-    expect(body).not.toContain('withRefetch')
-  })
-
-  it('keeps the two things that are display preferences and nothing else', () => {
-    const body = /case 'reset':\s*\n\s*return ([^\n]*)/.exec(app)?.[1] ?? ''
-    expect(body).toContain('theme: state.theme')
-    expect(body).toContain('units: state.units')
-    // Anything else preserved would be a search surviving its own clearing.
-    expect(body.match(/state\./g)).toHaveLength(2)
-  })
-
-  it('does the three things a reducer cannot', () => {
-    const handler = /const onReset = useCallback\(\(\) => \{([\s\S]*?)\n  \}, \[/.exec(app)?.[1] ?? ''
-    // A stream in flight would land after the reset and repopulate the rail.
-    expect(handler).toMatch(/abortRef\.current\?\.abort\(\)/)
-    // A debounced announcement would read the previous sentence out afterwards.
-    expect(handler).toMatch(/clearTimeout\(announceTimer\.current\)/)
-    // highlight is local state, outside the reducer entirely.
-    expect(handler).toMatch(/setHighlight\(null\)/)
-  })
-
+describe('nothing resets by reloading', () => {
   it('never reloads the page', () => {
-    // It re-reads the current URL, so a permalinked page reloads straight back
-    // into the search it was asked to clear; it discards an offline-saved
-    // route; and it costs a network round trip in exactly the situation the app
-    // is built to survive without one.
+    // The wordmark reset — and its reducer case — left with the 2026
+    // redesign, but the rule it enforced outlives it: a reload re-reads the
+    // current URL, so a permalinked page would boot straight back into the
+    // search it was asked to clear; it discards an offline-saved route; and
+    // it costs a network round trip in exactly the situation the app is
+    // built to survive without one.
     expect(code('App.jsx')).not.toMatch(/location\.reload/)
   })
 })

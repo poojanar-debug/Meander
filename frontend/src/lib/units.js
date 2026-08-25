@@ -8,8 +8,9 @@
  * that against the raw stored string rather than trusting this paragraph.
  *
  * Deliberately a pure module: no mutable singleton, no listener set, no
- * `useSyncExternalStore`, no React import. Units live in the App reducer next to
- * `theme` and are threaded as a prop.
+ * `useSyncExternalStore`, no React import. Units live in App component state —
+ * outside the reducer, because a display preference must never sit where a
+ * request could key on it — and are threaded as a prop.
  *
  * That is a departure from the branch this is ported from, and it fixes a bug
  * rather than expressing a preference. There, `useUnits()` was subscribed by the
@@ -45,22 +46,18 @@ const IMPERIAL_REGIONS = new Set(['US', 'GB', 'MM', 'LR'])
  * must never render as `0 m`.** A route whose elevation profile is missing has
  * not been measured as flat, and a rest-stop count that could not be checked is
  * not zero rest stops. Everything about this constant is in service of that one
- * sentence; only the glyph moved.
+ * sentence; only the glyph has moved, twice now.
  *
- * It was an em dash. This is the ASCII hyphen instead, because the em dash is
- * the one the app is removing and this is the one place it was typography
- * rather than prose. The word "Unknown" would be better to hear and is what
- * `fmtPct` uses — but these four render into `.tabular` numeric slots
- * (`RouteRow`'s distance line, three `ElevationProfile` axis labels in one row,
- * `RouteDetail`, `FollowMode`, `StepList`, `ReportBarrier`), where seven glyphs
- * where there was one is a horizontal-overflow risk the gate checks at 320px.
- *
- * ⚠ The known cost: a hyphen is thinner than an em dash and can read as a minus
- * sign in a column of numbers. It is accepted here because every one of these
- * slots carries a unit beside it, so "- m" cannot be mistaken for a negative
- * distance the way a bare "-" could.
+ * It is the em dash, by the 2026 redesign's stated rule: "absence of data is
+ * never rendered as a finding — unknown renders as —". The hyphen it briefly
+ * was could be read as a minus sign in a column of numbers; the em dash cannot,
+ * and every slot this reaches sets the mono data face where its width is one
+ * glyph, so the 320px overflow argument for the hyphen no longer applies.
+ * `no-em-dash.test.js` pins this constant as the one *typographic* em dash the
+ * UI renders on purpose, distinct from the approved copy that carries one as
+ * prose.
  */
-export const UNKNOWN = '-'
+export const UNKNOWN = '—'
 
 const M_PER_FOOT = 0.3048
 const M_PER_MILE = 1609.344
@@ -197,6 +194,31 @@ export function fmtClockIn(date, units = METRIC_24) {
     minute: '2-digit',
     hour12: twelve,
   }).format(date)
+}
+
+/**
+ * "10:04 AM" → "10:04 am". The redesign's clocks are lowercase; the meridiem
+ * itself always stays — dawn and dusk read the same without it, which is the
+ * standing objection to a 12-hour clock and the whole answer to it. A no-op
+ * on a 24-hour clock and on null.
+ */
+export function lowerClock(text) {
+  return text == null ? null : text.toLowerCase()
+}
+
+/**
+ * "±9 m", "±31 ft" — a GPS accuracy figure, to the metre.
+ *
+ * Deliberately NOT `formatDistance`: that rounds to the nearest 10 m below a
+ * kilometre, which is right for a route distance and wrong here — the device
+ * reported ±9 m and relabelling it ±10 m both loses the number and rounds in
+ * the flattering direction. Whole metres, no finer: the figure is itself an
+ * estimate, and centimetres would be precision nothing supports.
+ */
+export function formatAccuracy(metres, units = METRIC_24) {
+  if (metres == null || Number.isNaN(metres)) return UNKNOWN
+  if (units.distance !== 'imperial') return `±${Math.round(metres)} m`
+  return `±${Math.round(metres / M_PER_FOOT)} ft`
 }
 
 /**

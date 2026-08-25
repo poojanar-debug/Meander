@@ -1,70 +1,71 @@
-import { waysBack } from '../lib/format.js'
-import RouteRow from './RouteRow.jsx'
-
-/** Holds the row height while a result streams in, so the layout never jumps
- *  (§5, "Slow connection"). Three skeletons, one per objective asked for. */
-function Skeleton() {
-  return (
-    <li>
-      <div className="route route--skeleton" aria-hidden="true">
-        <span className="route__edge" />
-        <span className="route__body">
-          <span className="sk sk--title" />
-          <span className="sk sk--sub" />
-          <span className="sk sk--scores" />
-          <span className="sk sk--verify" />
-        </span>
-      </div>
-    </li>
-  )
-}
+import { DASH } from '../lib/dash.js'
+import RouteRow, { RouteRowSkeleton } from './RouteRow.jsx'
 
 /**
- * The comparison rail. Implements §4.6.
+ * The streaming results: a progress strip while the server is thinking, then
+ * one card per requested objective — real ones as they land, skeletons for
+ * the slots still coming. Route order is the objective order; a blocked route
+ * keeps its slot rather than sinking.
  *
- * Ordering is the reducer's, unchanged: routes sort by the order of
- * `state.objectives`, and the initially selected route is the first with
- * `status === 'ok'`. **Blocked routes are never hidden** — someone needs to be
- * able to see *where* a route fails, not just be told it does, so a blocked
- * route stays in the list and stays selectable.
+ * `progress` is null on a cache hit, and then no strip renders at all: an
+ * instant answer needs no narration of the work it did not do.
+ *
+ * When every arrived route is blocked, the payload's top-level `reason`
+ * renders above the cards, verbatim — the server's sentence, not ours.
  */
 export default function RouteRail({
   routes,
+  objectives,
   selected,
-  theme,
   loading,
-  expected,
+  progress,
+  reason,
+  isLoop,
   units,
-  cacheAgeMs,
+  compact = false,
   onSelect,
+  onBlockerFocus,
 }) {
-  const showSkeletons = loading && routes.length === 0
-
-  if (routes.length === 0 && !showSkeletons) return null
+  const byId = new Map(routes.map((route) => [route.id, route]))
+  const slots = objectives.map((id) => ({ id, route: byId.get(id) ?? null }))
+  const arrived = routes.length > 0
+  const allBlocked = arrived && !loading && routes.every((route) => route.status !== 'ok')
 
   return (
-    <section aria-labelledby="routes-heading">
-      <div className="results-head">
-        <h2 className="results-head__title" id="routes-heading">
-          {showSkeletons ? 'Working out your routes' : waysBack(routes.length)}
-        </h2>
-      </div>
+    <div className={compact ? 'rail rail--sheet' : 'rail rail--row'} id="results">
+      {loading && progress && (
+        <p className="rail__progress">
+          <span className="rail__pulse" aria-hidden="true" />
+          <span className="rail__phase mono">{progress.text}</span>
+          <span className="rail__bar" aria-hidden="true">
+            <span
+              className="rail__bar-fill"
+              style={{ width: `${Math.max(0, Math.min(100, progress.pct ?? 0))}%` }}
+            />
+          </span>
+        </p>
+      )}
 
-      <ul className="rail">
-        {showSkeletons
-          ? Array.from({ length: expected }, (_, i) => <Skeleton key={i} />)
-          : routes.map((route) => (
-              <RouteRow
-                key={route.id}
-                route={route}
-                selected={route.id === selected}
-                theme={theme}
-                units={units}
-                cacheAgeMs={cacheAgeMs}
-                onSelect={onSelect}
-              />
-            ))}
-      </ul>
-    </section>
+      {allBlocked && reason && <p className="rail__reason">{reason}</p>}
+
+      <div className="rail__cards">
+        {slots.map(({ id, route }) =>
+          route ? (
+            <RouteRow
+              key={id}
+              route={route}
+              selected={id === selected}
+              isLoop={isLoop}
+              units={units}
+              compact={compact}
+              onSelect={onSelect}
+              onBlockerFocus={onBlockerFocus}
+            />
+          ) : loading ? (
+            <RouteRowSkeleton key={id} id={id} label={DASH[id]?.label ?? id} />
+          ) : null,
+        )}
+      </div>
+    </div>
   )
 }

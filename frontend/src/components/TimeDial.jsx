@@ -4,87 +4,66 @@ const MIN = 20
 const MAX = 360
 const STEP = 5
 
-/** §4.4. A preset sets the slider value and fires the same `minutes` action, so
- *  it debounces identically — there is no separate code path to keep in step. */
-export const PRESETS = [
-  { minutes: 20, label: '20 min' },
-  { minutes: 35, label: '35 min' },
-  { minutes: 60, label: '1 hr' },
-  { minutes: 120, label: '2 hr' },
-]
+/** The redesign's presets. A preset sets the slider value and fires the same
+ *  `minutes` action, so it debounces identically — there is no separate code
+ *  path to keep in step. */
+export const PRESETS = [20, 45, 90, 180]
 
 /**
- * A native `<input type="range">`, deliberately.
+ * The time budget: `HOW LONG DO YOU HAVE?`, the big mono readout, a native
+ * slider, and the preset chips.
  *
- * Arrow keys, Home, End, Page Up and Page Down all work for free and match what
- * a screen-reader user already expects. A custom radial control would have to
- * reimplement every one of those and would still not match the platform. The
- * one thing added on top is `aria-valuetext`, so the value is announced as
- * "35 minutes, walking" rather than as the bare number "35".
- *
- * The handoff is explicit that this must not become a custom radial control,
- * and this is why.
+ * A native `<input type="range">`, deliberately. Arrow keys, Home, End, Page
+ * Up and Page Down all work for free and match what a screen-reader user
+ * already expects. A custom control would have to reimplement every one of
+ * those and would still not match the platform. The one thing added on top is
+ * `aria-valuetext`, so the value is announced as "35 minutes, walking" rather
+ * than as the bare number "35".
  */
-export default function TimeDial({ minutes, mode, effectiveMode, onChange }) {
+export default function TimeDial({ minutes, effectiveMode, onChange }) {
   const verb = MODE_VERB[effectiveMode] ?? effectiveMode
   const valueText = `${minutes} minutes, ${verb}`
 
   return (
-    <div className="field">
-      <label className="field__label" htmlFor="time-dial">
-        How long have you got?
-      </label>
-
-      <p className="dial__readout" aria-hidden="true">
-        <span className="dial__value tabular">{minutes}</span>
-        <span className="dial__unit">minutes · {verb}</span>
+    <div className="dial">
+      <p className="microlabel" id="time-dial-label">
+        How long do you have?
       </p>
-      <p className="dial__mode" id="time-dial-hint">
-        {mode === 'auto' ? (
-          <>
-            {verb.charAt(0).toUpperCase() + verb.slice(1)}, chosen automatically from your time
-            budget.
-          </>
-        ) : (
-          <>{verb.charAt(0).toUpperCase() + verb.slice(1)}, chosen by you.</>
-        )}
+
+      <p className="dial__readout mono" aria-hidden="true">
+        {minutes} min
       </p>
 
       <input
         id="time-dial"
+        className="dial__slider"
         type="range"
         min={MIN}
         max={MAX}
         step={STEP}
         value={minutes}
+        // WebKit draws the sky fill from this; Firefox uses ::-moz-range-progress.
+        style={{ '--dial-fill': `${((minutes - MIN) / (MAX - MIN)) * 100}%` }}
+        aria-labelledby="time-dial-label"
         aria-valuetext={valueText}
-        aria-describedby="time-dial-hint"
         onChange={(e) => onChange(Number(e.target.value))}
       />
 
-      <div className="dial__ticks" aria-hidden="true">
-        <span>20 min</span>
-        <span>2 hr</span>
-        <span>6 hr</span>
-      </div>
-
-      <div className="presets">
+      <div className="dial__presets">
         {PRESETS.map((preset) => (
           <button
-            key={preset.minutes}
+            key={preset}
             type="button"
-            className="preset"
-            aria-pressed={minutes === preset.minutes}
-            onClick={() => onChange(preset.minutes)}
+            className="dial__preset mono"
+            aria-pressed={minutes === preset}
+            onClick={() => onChange(preset)}
           >
-            {preset.label}
-            {minutes === preset.minutes && (
-              <span className="chip__check" aria-hidden="true">
-                ✓
-              </span>
-            )}
+            {preset}
           </button>
         ))}
+        <span className="dial__preset-unit mono" aria-hidden="true">
+          minutes
+        </span>
       </div>
     </div>
   )

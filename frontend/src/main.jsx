@@ -15,20 +15,16 @@ createRoot(document.getElementById('root')).render(
 
 registerServiceWorker()
 
-// ⚠ **The consent sweep, which backs a privacy promise and was not running.**
+// ⚠ **The consent sweep, which backs a privacy promise.**
 //
 // `offlineStore.js` says of this function: "This runs on every boot, before
 // anything is rendered, so the longest such a route can survive is until the
-// app is next opened." It has seven production call sites and **every one of
-// them is reached only through `OfflineControl` -> `About`** — which `App.jsx`
-// renders only in the non-first-run branch. So on a cold open with no origin,
-// the common case, nothing swept and a saved route outlived a withdrawn
-// consent indefinitely.
-//
-// Called here rather than from an effect in App, so it happens on every boot
-// including the first-run screen, which is the one it was missing. The
-// `if (!value.ready)` guard inside makes the later `useOfflineSetting` call a
-// no-op, so this costs one IndexedDB read and changes nothing else.
+// app is next opened." It once ran only behind a settings disclosure the app
+// no longer has, so on a cold open nothing swept and a saved route outlived a
+// withdrawn consent indefinitely. Called here, it happens on every boot
+// unconditionally — which matters more now that no screen exposes the
+// consent control at all: a flag withdrawn in an earlier build must still be
+// honoured by this one.
 //
 // Deliberately not awaited: a boot must not wait on storage, and the sweep has
 // nothing the first paint needs. Failures are already swallowed inside.

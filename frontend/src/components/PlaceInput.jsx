@@ -2,6 +2,7 @@ import { useEffect, useId, useRef, useState } from 'react'
 
 import { geocode } from '../api/client.js'
 import { GEOLOCATED } from '../lib/permalink.js'
+import { LocationArrowIcon, MagnifierIcon } from './Icons.jsx'
 
 /**
  * How long after the last keystroke the search fires.
@@ -31,8 +32,8 @@ const DEBOUNCE_MS = 500
 /**
  * Queries already answered, so backspacing costs nothing.
  *
- * Module-level rather than per-component on purpose: there are three of these
- * inputs (origin and destination in TripBar, and the one in FirstRun) and they
+ * Module-level rather than per-component on purpose: this combobox mounts in
+ * two places (the capsule popover and the mobile search screen) and both
  * search the same world. Deleting three characters and typing them back is the
  * case this actually serves — the server-side cache exists for the same reason,
  * and neither is really a normalisation win: case-folding the 12-query burst
@@ -75,6 +76,14 @@ export function __resetPlaceCache() {
   lru.clear()
 }
 
+/** "Colombo Fort, Colombo, Sri Lanka" → a name and the part after it, for the
+ *  two-line result row. Nothing is invented: both halves are the geocoder's. */
+function splitPlaceName(name) {
+  const comma = name.indexOf(',')
+  if (comma === -1) return { main: name, sub: null }
+  return { main: name.slice(0, comma), sub: name.slice(comma + 1).trim() }
+}
+
 /**
  * Debounced place search with a proper combobox.
  *
@@ -82,8 +91,24 @@ export function __resetPlaceCache() {
  * arrow keys move a visible highlight without moving DOM focus out of the
  * input — which is what a screen reader expects from a combobox and what the
  * browser's own autofill does.
+ *
+ * Two skins over one engine: the mobile place-search screen renders it
+ * `inline` (the list is part of the page, at most six rows, the top hit
+ * marked in mint), and the desktop capsule popover renders the same combobox
+ * floating. The debounce, the cache and the sentinel skip are identical in
+ * both, which is the point of them living here.
  */
-export default function PlaceInput({ label, placeholder, value, onPick, onClear }) {
+export default function PlaceInput({
+  label,
+  placeholder,
+  value,
+  onPick,
+  onClear,
+  onLocate,
+  locating = false,
+  inline = false,
+  autoFocus = false,
+}) {
   const inputId = useId()
   const listId = `${inputId}-listbox`
   const errorId = `${inputId}-error`
@@ -93,6 +118,9 @@ export default function PlaceInput({ label, placeholder, value, onPick, onClear 
   const [open, setOpen] = useState(false)
   const [active, setActive] = useState(-1)
   const [error, setError] = useState(null)
+  // "Looked, found nothing" is a quiet real answer, not an error — the same
+  // distinction the rest of the app keeps between [] and null.
+  const [noneFound, setNoneFound] = useState(false)
   const [searching, setSearching] = useState(false)
 
   const abortRef = useRef(null)
@@ -124,6 +152,7 @@ export default function PlaceInput({ label, placeholder, value, onPick, onClear 
       setResults([])
       setOpen(false)
       setError(null)
+      setNoneFound(false)
       return undefined
     }
     // Never the sentinel. GEOLOCATED is the name given to a position the
@@ -136,7 +165,8 @@ export default function PlaceInput({ label, placeholder, value, onPick, onClear 
       setResults(remembered)
       setOpen(remembered.length > 0)
       setActive(-1)
-      setError(remembered.length === 0 ? 'No places found for that search.' : null)
+      setError(null)
+      setNoneFound(remembered.length === 0)
       return undefined
     }
 
@@ -155,12 +185,14 @@ export default function PlaceInput({ label, placeholder, value, onPick, onClear 
         setResults(found)
         setOpen(found.length > 0)
         setActive(-1)
-        setError(found.length === 0 ? 'No places found for that search.' : null)
+        setError(null)
+        setNoneFound(found.length === 0)
       } catch (err) {
         // An abort is the expected outcome of typing another character.
         if (err?.name === 'AbortError') return
         setResults([])
         setOpen(false)
+        setNoneFound(false)
         setError(err.message ?? 'Place search failed.')
       } finally {
         setSearching(false)
@@ -178,6 +210,7 @@ export default function PlaceInput({ label, placeholder, value, onPick, onClear 
     setOpen(false)
     setResults([])
     setActive(-1)
+    setNoneFound(false)
     onPick(place)
   }
 
@@ -204,75 +237,113 @@ export default function PlaceInput({ label, placeholder, value, onPick, onClear 
   }
 
   const describedBy = error ? errorId : undefined
+  // At most six rows, by design. The mock already stops there; the live
+  // geocoder is capped here so both behave alike.
+  const shown = results.slice(0, 6)
 
   return (
-    <div className="field">
-      <label className="field__label" htmlFor={inputId}>
-        {label}
-      </label>
-      <div className="place-row">
-        <div>
-          <input
-            id={inputId}
-            type="text"
-            role="combobox"
-            autoComplete="off"
-            placeholder={placeholder}
-            value={query}
-            aria-expanded={open}
-            aria-controls={listId}
-            aria-autocomplete="list"
-            aria-describedby={describedBy}
-            aria-activedescendant={active >= 0 ? `${listId}-${active}` : undefined}
-            onChange={(e) => setQuery(e.target.value)}
-            onKeyDown={onKeyDown}
-          />
-          {open && (
-            <ul className="suggestions" id={listId} role="listbox" aria-label={`${label} suggestions`}>
-              {results.map((place, i) => (
-                <li
-                  key={`${place.lat},${place.lon},${place.name}`}
-                  id={`${listId}-${i}`}
-                  role="option"
-                  aria-selected={i === active}
-                  className="suggestions__item"
-                  onMouseDown={(e) => {
-                    // mousedown, not click: the input's blur would close the
-                    // list before a click ever landed.
-                    e.preventDefault()
-                    choose(place)
-                  }}
-                >
-                  {place.name}
-                </li>
-              ))}
-            </ul>
-          )}
-          {!error && searching && <p className="field__hint">Searching…</p>}
-          {error && (
-            <p className="field__error" id={errorId} role="alert">
-              {error}
-            </p>
-          )}
-        </div>
-        {value && (
+    <div className={inline ? 'place place--inline' : 'place'}>
+      <div className="place__field">
+        <span className="place__magnifier" aria-hidden="true">
+          <MagnifierIcon size={16} />
+        </span>
+        <input
+          id={inputId}
+          className="place__input"
+          type="text"
+          role="combobox"
+          autoComplete="off"
+          // eslint-disable-next-line jsx-a11y/no-autofocus
+          autoFocus={autoFocus}
+          placeholder={placeholder}
+          aria-label={label}
+          value={query}
+          aria-expanded={open}
+          aria-controls={listId}
+          aria-autocomplete="list"
+          aria-describedby={describedBy}
+          aria-activedescendant={active >= 0 ? `${listId}-${active}` : undefined}
+          onChange={(e) => setQuery(e.target.value)}
+          onKeyDown={onKeyDown}
+        />
+        {value ? (
           <button
             type="button"
-            className="button"
+            className="place__locate"
             onClick={() => {
               skipNextSearch.current = true
               setQuery('')
               setResults([])
               setOpen(false)
               setError(null)
-              onClear()
+              setNoneFound(false)
+              onClear?.()
             }}
           >
             Clear
             <span className="visually-hidden"> {label.toLowerCase()}</span>
           </button>
+        ) : (
+          onLocate && (
+            <button
+              type="button"
+              className="place__locate place__locate--arrow"
+              onClick={onLocate}
+              disabled={locating}
+              aria-label="Use my location"
+            >
+              <LocationArrowIcon size={16} />
+            </button>
+          )
         )}
       </div>
+
+      {open && (
+        <ul className="place__list" id={listId} role="listbox" aria-label={`${label} suggestions`}>
+          {shown.map((place, i) => {
+            const { main, sub } = splitPlaceName(place.name)
+            return (
+              <li
+                key={`${place.lat},${place.lon},${place.name}`}
+                id={`${listId}-${i}`}
+                role="option"
+                aria-selected={i === active}
+                className={`place__row${i === active ? ' is-active' : ''}`}
+                onMouseDown={(e) => {
+                  // mousedown, not click: the input's blur would close the
+                  // list before a click ever landed.
+                  e.preventDefault()
+                  choose(place)
+                }}
+              >
+                {/* The top hit wears the mint circle; the rest stay neutral. */}
+                <span
+                  className={`place__circle${i === 0 ? ' place__circle--top' : ''}`}
+                  aria-hidden="true"
+                >
+                  <span className={`dot ${i === 0 ? 'dot--scenic' : 'dot--ink'}`} />
+                </span>
+                <span className="place__name">
+                  {main}
+                  {sub && <span className="place__sub">{sub}</span>}
+                </span>
+              </li>
+            )
+          })}
+        </ul>
+      )}
+
+      {locating && !error && <p className="place__hint mono">Finding you…</p>}
+      {!locating && !error && searching && <p className="place__hint mono">Searching…</p>}
+      {/* An empty list is a quiet real answer, not an error. */}
+      {!error && !searching && noneFound && (
+        <p className="place__hint mono">No places found for that search.</p>
+      )}
+      {error && (
+        <p className="place__hint mono" id={errorId} role="alert">
+          {error}
+        </p>
+      )}
     </div>
   )
 }

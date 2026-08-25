@@ -1,8 +1,9 @@
 import maplibregl from 'maplibre-gl'
 import { useCallback, useEffect, useRef, useState } from 'react'
 
-import { routeColor, styleFor, swatchBackground } from '../lib/dash.js'
+import { routeColor, styleFor } from '../lib/dash.js'
 import { pointAtDistance } from '../lib/follow.js'
+import { MOBILE_LAYOUT, useMatchMedia } from '../lib/media.js'
 
 const STYLE_URL = 'https://tiles.openfreemap.org/styles/positron'
 const INITIAL_CENTER = [79.8521, 6.921]
@@ -16,8 +17,8 @@ const RAD = Math.PI / 180
  * The camera used to be a whole-route `fitBounds` and nothing else, which for
  * the default three routes at the gate's London origin computes to **3.4 to 5.1
  * metres per pixel**. At that scale a 1.4 m/s walker moves 0.28 px per second
- * and the 7px selected line is 35 m wide on the ground: the map is a picture of
- * the walk, not a thing to walk by.
+ * and the selected line is tens of metres wide on the ground: the map is a
+ * picture of the walk, not a thing to walk by.
  *
  * 0.4 m/px is about z17 at London's latitude, and a street is then a street.
  *
@@ -49,26 +50,6 @@ function zoomForScale(metresPerPixel, lat) {
   return Math.log2((78271.516 * Math.cos(lat * RAD)) / metresPerPixel)
 }
 
-/**
- * A circle of `radiusM` metres about a point, as a GeoJSON ring.
- *
- * A polygon rather than a `circle` layer with a zoom expression: `circle-radius`
- * is in screen pixels, so holding a *metre* radius through a zoom change means
- * an interpolation expression that has to be rewritten whenever the zoom range
- * moves. A ring in degrees is simply correct at every zoom and is updated as
- * source data, which is the separation this file already keeps.
- */
-function circleRing([lon, lat], radiusM, steps = 48) {
-  const dLat = radiusM / 111320
-  const dLon = radiusM / (111320 * Math.max(0.01, Math.cos(lat * RAD)))
-  const ring = []
-  for (let i = 0; i <= steps; i += 1) {
-    const a = (i / steps) * 2 * Math.PI
-    ring.push([lon + dLon * Math.cos(a), lat + dLat * Math.sin(a)])
-  }
-  return { type: 'Polygon', coordinates: [ring] }
-}
-
 // How long to wait for the basemap before giving up on it and showing the
 // fallback. Deliberately generous: a cold tile CDN fetching style, sprites,
 // glyphs and a first ring of vector tiles can take well over ten seconds on a
@@ -77,6 +58,16 @@ function circleRing([lon, lat], radiusM, steps = 48) {
 // map that is never coming — a blocked tile host, a CSP that forgot
 // connect-src, a stalled worker — none of which resolve themselves.
 const MAP_LOAD_TIMEOUT_MS = 20000
+
+/** The puck, in the design's stated geometry: a 9.5 sky core inside a 13
+ *  surface ring, under a 34 halo that breathes between .22 and .07 opacity
+ *  over 2.6s. Those are diameters; circle-radius wants radii. */
+const PUCK_CORE_R = 9.5 / 2
+const PUCK_RING_W = (13 - 9.5) / 2
+const HALO_R = 34 / 2
+const HALO_BREATH_MS = 2600
+const HALO_OPACITY_HIGH = 0.22
+const HALO_OPACITY_LOW = 0.07
 
 const prefersReducedMotion = () =>
   typeof window !== 'undefined' &&
@@ -89,10 +80,9 @@ function boundsOf(coordinates) {
   )
 }
 
-function markerElement(className, text, label) {
+function markerElement(className, label) {
   const el = document.createElement('div')
   el.className = `marker ${className}`
-  el.textContent = text
   el.setAttribute('role', 'img')
   el.setAttribute('aria-label', label)
   return el
@@ -105,14 +95,16 @@ function token(name) {
 }
 
 /**
- * Recolour the basemap to the §2.4 palette.
+ * Recolour the basemap to the redesign's palette: base #ECF0E6, parks
+ * #DEEBD3, water #D9E7EE, roads #FBFAF6 — read from the tokens, never
+ * restated here.
  *
- * OpenFreeMap ships no dark style, so rather than a second tile source the
- * existing style's layers are repainted in place — the option §2.4 offers first.
- * Layers are matched by id and source-layer rather than by a hard-coded list,
- * because the upstream style is not ours and its layer names change without
- * notice; a missing match must degrade to "that layer keeps its own colour",
- * never to a thrown error that takes the map down.
+ * OpenFreeMap's positron is not ours, so rather than a second tile source the
+ * existing style's layers are repainted in place. Layers are matched by id and
+ * source-layer rather than by a hard-coded list, because the upstream style's
+ * layer names change without notice; a missing match must degrade to "that
+ * layer keeps its own colour", never to a thrown error that takes the map
+ * down.
  */
 function applyMapPalette(map) {
   const land = token('--map-land')
@@ -155,7 +147,7 @@ function applyMapPalette(map) {
     ) {
       if (layer.type === 'fill') set('fill-color', park)
     } else if (id.includes('building')) {
-      if (layer.type === 'fill') set('fill-color', land)
+      set('fill-color', land)
     } else if (
       id.includes('road') ||
       id.includes('street') ||
@@ -179,24 +171,30 @@ function applyMapPalette(map) {
 /**
  * The map is an enhancement, never the only way to read a result.
  *
- * Everything drawn here is also written out in the route rail, and the app is
- * tested with this component removed from the DOM entirely. Markers carry real
- * `aria-label`s, but they are a convenience — the rail is the accessibility
- * story.
+ * Everything drawn here is also written out in the result cards and the route
+ * detail, and the app is tested with this component removed from the DOM
+ * entirely. Markers carry real `aria-label`s, but they are a convenience — the
+ * cards are the accessibility story.
  *
  * Three things in here were bug fixes rather than choices, and are marked as
- * such below: the deferred creation that survives StrictMode, the load deadline
- * that only runs while the page is visible, and the `jump`-instead-of-`fly`
- * guard for a hidden tab. None of them should be tidied away.
+ * such below: the deferred creation that survives StrictMode, the load
+ * deadline that only runs while the page is visible, and the
+ * `jump`-instead-of-`fly` guard for a hidden tab. None of them should be
+ * tidied away.
  */
 export default function MapView({
   routes,
   selected,
   origin,
   dest,
-  theme,
   highlight,
   onSelect,
+  // Detail-focus: the scrimmed modal shows only the selected route and its
+  // barrier dots; every other line comes off the map until the modal closes.
+  focus = false,
+  // A blocker the user asked to see: {lon, lat, seq}. The seq makes asking
+  // for the same barrier twice two requests, so the camera comes back.
+  focusPoint = null,
   follow = null,
 }) {
   const containerRef = useRef(null)
@@ -216,6 +214,8 @@ export default function MapView({
   const followTracking = follow?.tracking ?? null
   const followPosition = followTracking?.position ?? null
   const followActive = Boolean(follow && followPosition)
+  const followRouteId = follow?.route?.id ?? null
+  const isMobile = useMatchMedia(MOBILE_LAYOUT)
 
   useEffect(() => {
     onSelectRef.current = onSelect
@@ -257,11 +257,13 @@ export default function MapView({
           style: STYLE_URL,
           center: INITIAL_CENTER,
           zoom: INITIAL_ZOOM,
-          attributionControl: { compact: true },
+          // The design's own centered line replaces the injected control; the
+          // sentence it renders is the attribution OpenStreetMap asks for.
+          attributionControl: false,
         })
       } catch (err) {
-        // WebGL unavailable, or the style host is blocked. The route rail still
-        // carries the whole answer, so this degrades rather than breaking.
+        // WebGL unavailable, or the style host is blocked. The result cards
+        // still carry the whole answer, so this degrades rather than breaking.
         console.warn('Meander: map could not start —', err)
         setFailed(true)
         return
@@ -275,11 +277,11 @@ export default function MapView({
       // host, a CSP missing connect-src, a stalled worker — and emits no
       // `error` for any of them. Without a deadline the user gets an
       // unexplained grey rectangle forever, which is worse than being told the
-      // map is unavailable and pointed at the list that has the whole answer.
-      // The deadline only runs while the page is actually visible. A hidden tab
-      // does not render, so MapLibre legitimately never reaches `load`, and a
-      // plain timer would blame the map for the browser's own power saving —
-      // showing "the map could not load" on a tab nobody has looked at yet.
+      // map is unavailable and pointed at the cards that have the whole
+      // answer. The deadline only runs while the page is actually visible: a
+      // hidden tab does not render, so MapLibre legitimately never reaches
+      // `load`, and a plain timer would blame the map for the browser's own
+      // power saving.
       let settled = false
       const startDeadline = () => {
         clearTimeout(deadline)
@@ -344,7 +346,7 @@ export default function MapView({
       mapRef.current = map
       if (import.meta.env.DEV) window.__meanderMap = map
 
-      // The container is sized by the layout grid and by the 900px breakpoint,
+      // The container is sized by the viewport and by the 1024px breakpoint,
       // so it changes height without the window necessarily changing size — a
       // phone rotating, or a desktop crossing the breakpoint. MapLibre's own
       // trackResize did not pick that up here: the canvas kept its initial
@@ -368,26 +370,17 @@ export default function MapView({
     }
   }, [])
 
-  // --- theme ---------------------------------------------------------------
-
-  useEffect(() => {
-    const map = mapRef.current
-    if (!map || !ready) return
-    applyMapPalette(map)
-  }, [theme, ready])
-
   // --- route layers --------------------------------------------------------
 
   useEffect(() => {
     const map = mapRef.current
     if (!map || !ready) return
 
-    // Delegated listeners come off before their layers do. `map.off` appeared
-    // zero times in this file, so every re-run of this effect added another
+    // Delegated listeners come off before their layers do. MapLibre holds them
+    // on the map, not on the layer, so removing the layer does not remove
+    // them; without this sweep every re-run of the effect added another
     // click/mouseenter/mouseleave triple for a layer id that keeps recurring
-    // across searches — and MapLibre holds them on the map, not on the layer,
-    // so removing the layer does not remove them. Seven routes arriving over a
-    // stream meant seven live handlers per line, all firing onSelect.
+    // across searches, all firing onSelect.
     for (const [type, layer, handler] of layerHandlersRef.current) {
       map.off(type, layer, handler)
     }
@@ -395,20 +388,20 @@ export default function MapView({
 
     for (const id of layerIdsRef.current) {
       if (map.getLayer(`line-${id}`)) map.removeLayer(`line-${id}`)
-      if (map.getLayer(`case-${id}`)) map.removeLayer(`case-${id}`)
       if (map.getSource(`route-${id}`)) map.removeSource(`route-${id}`)
     }
     for (const id of [
       'highlight',
       'rest-stops',
-      'follow-walked-case',
-      'follow-walked',
-      'follow-accuracy',
+      'follow-behind',
+      'follow-ahead',
+      'follow-connector',
+      'follow-halo',
       'follow-here',
     ]) {
       if (map.getLayer(id)) map.removeLayer(id)
     }
-    for (const id of ['highlight', 'rest-stops', 'follow-walked', 'follow-here']) {
+    for (const id of ['highlight', 'rest-stops', 'follow-behind', 'follow-ahead', 'follow-connector', 'follow-here']) {
       if (map.getSource(id)) map.removeSource(id)
     }
 
@@ -426,23 +419,12 @@ export default function MapView({
       })
     }
 
-    // Cases first for every route, then lines, so one route's casing can never
-    // paint over another route's line.
-    for (const route of drawable) {
-      map.addLayer({
-        id: `case-${route.id}`,
-        type: 'line',
-        source: `route-${route.id}`,
-        layout: { 'line-cap': 'round', 'line-join': 'round' },
-        paint: { 'line-color': token('--raised'), 'line-width': 7 },
-      })
-    }
     for (const route of drawable) {
       const style = styleFor(route.id)
       const paint = {
-        'line-color': routeColor(route.id, theme),
-        'line-width': 5,
-        'line-opacity': 0.45,
+        'line-color': routeColor(route.id),
+        'line-width': 4.5,
+        'line-opacity': 0.75,
       }
       const isSolid = style.dash.length === 2 && style.dash[1] === 0
       if (!isSolid) paint['line-dasharray'] = style.dash
@@ -473,40 +455,7 @@ export default function MapView({
       )
     }
 
-    // --- follow layers, added once and thereafter only fed new data ---------
-    //
-    // The separation this file keeps: sources and layers are created here,
-    // paint and data are updated elsewhere. Re-adding a layer per GPS fix would
-    // tear down and rebuild every route layer once a second.
-    map.addSource('follow-walked', {
-      type: 'geojson',
-      data: { type: 'Feature', geometry: { type: 'LineString', coordinates: [] } },
-    })
-    // A --raised case at the selected line's own width, so the stretch already
-    // walked is genuinely blanked before being repainted at the unselected 0.45
-    // rather than merely tinted — painting 45% of a colour over 100% of the
-    // same colour changes nothing.
-    map.addLayer({
-      id: 'follow-walked-case',
-      type: 'line',
-      source: 'follow-walked',
-      layout: { 'line-cap': 'round', 'line-join': 'round' },
-      paint: { 'line-color': token('--raised'), 'line-width': 7.5 },
-    })
-    map.addLayer({
-      id: 'follow-walked',
-      type: 'line',
-      source: 'follow-walked',
-      layout: { 'line-cap': 'round', 'line-join': 'round' },
-      paint: { 'line-color': token('--ink-2'), 'line-width': 7, 'line-opacity': 0.45 },
-    })
-
-    map.addSource('follow-here', {
-      type: 'geojson',
-      data: { type: 'FeatureCollection', features: [] },
-    })
-
-    // The stretch of line belonging to the step under the cursor (§6.4). Added
+    // The stretch of line belonging to the step under the cursor. Added
     // before the rest stops so their circles stay on top of it.
     map.addSource('highlight', {
       type: 'geojson',
@@ -517,12 +466,12 @@ export default function MapView({
       type: 'line',
       source: 'highlight',
       layout: { 'line-cap': 'round', 'line-join': 'round' },
-      paint: { 'line-color': token('--accent'), 'line-width': 11, 'line-opacity': 0.55 },
+      paint: { 'line-color': token('--sky-deep'), 'line-width': 11, 'line-opacity': 0.55 },
     })
 
-    // Rest stops for the selected route only (§4.10). A circle layer rather
-    // than DOM markers: there can be a dozen of them, and they need to sit
-    // under the barrier markers rather than competing with them.
+    // Rest stops for the selected route only. A circle layer rather than DOM
+    // markers: there can be a dozen of them, and they sit under the barrier
+    // markers rather than competing with them. Mint, the rest-stop accent.
     map.addSource('rest-stops', {
       type: 'geojson',
       data: { type: 'FeatureCollection', features: [] },
@@ -533,42 +482,127 @@ export default function MapView({
       source: 'rest-stops',
       paint: {
         'circle-radius': 4.5,
-        'circle-color': token('--raised'),
+        'circle-color': token('--surface'),
         'circle-stroke-width': 3,
-        'circle-stroke-color': ['get', 'colour'],
+        'circle-stroke-color': token('--mint-deep'),
       },
     })
 
-    // Last, so the walker is on top of every route, every rest stop and every
-    // highlight. Where you are is the one thing on this map that must never be
-    // underneath anything.
+    // --- follow layers, added once and thereafter only fed new data ---------
     //
-    // The reported accuracy is drawn rather than described: someone standing
-    // still while the app insists they are sixty metres along deserves to see
-    // how sure it is.
-    map.addLayer({
-      id: 'follow-accuracy',
-      type: 'fill',
-      source: 'follow-here',
-      filter: ['==', ['geometry-type'], 'Polygon'],
-      paint: { 'fill-color': token('--accent'), 'fill-opacity': 0.12 },
+    // The separation this file keeps: sources and layers are created here,
+    // paint and data are updated elsewhere. Re-adding a layer per GPS fix
+    // would tear down and rebuild every route layer once a second.
+    //
+    // Follow mode redraws the followed route as two lines: the stretch ahead
+    // in mint at 11px, the stretch already walked behind at 9px and 55%.
+    map.addSource('follow-behind', {
+      type: 'geojson',
+      data: { type: 'Feature', geometry: { type: 'LineString', coordinates: [] } },
     })
-    // Distinct from the brand-green A pin on purpose: on a round trip the start
-    // and the walker are the same place at the start and the same place again
-    // at the end, and two identical marks there say nothing.
+    map.addSource('follow-ahead', {
+      type: 'geojson',
+      data: { type: 'Feature', geometry: { type: 'LineString', coordinates: [] } },
+    })
+    map.addLayer({
+      id: 'follow-behind',
+      type: 'line',
+      source: 'follow-behind',
+      layout: { 'line-cap': 'round', 'line-join': 'round' },
+      paint: { 'line-color': token('--map-follow-behind'), 'line-width': 9, 'line-opacity': 0.55 },
+    })
+    map.addLayer({
+      id: 'follow-ahead',
+      type: 'line',
+      source: 'follow-ahead',
+      layout: { 'line-cap': 'round', 'line-join': 'round' },
+      paint: { 'line-color': token('--mint-deep'), 'line-width': 11 },
+    })
+
+    // Off route: a dashed connector from the walker back to the marked path.
+    // 2.5px, dash 4 6 — MapLibre's dasharray is in multiples of line width.
+    map.addSource('follow-connector', {
+      type: 'geojson',
+      data: { type: 'Feature', geometry: { type: 'LineString', coordinates: [] } },
+    })
+    map.addLayer({
+      id: 'follow-connector',
+      type: 'line',
+      source: 'follow-connector',
+      paint: {
+        'line-color': token('--map-connector'),
+        'line-width': 2.5,
+        'line-dasharray': [4 / 2.5, 6 / 2.5],
+      },
+    })
+
+    // Last, so the walker is on top of every route and every rest stop. Where
+    // you are is the one thing on this map that must never be underneath
+    // anything. The halo breathes; its opacity is animated elsewhere.
+    map.addSource('follow-here', {
+      type: 'geojson',
+      data: { type: 'FeatureCollection', features: [] },
+    })
+    map.addLayer({
+      id: 'follow-halo',
+      type: 'circle',
+      source: 'follow-here',
+      paint: {
+        'circle-radius': HALO_R,
+        'circle-color': token('--sky-deep'),
+        'circle-opacity': HALO_OPACITY_HIGH,
+      },
+    })
     map.addLayer({
       id: 'follow-here',
       type: 'circle',
       source: 'follow-here',
-      filter: ['==', ['geometry-type'], 'Point'],
       paint: {
-        'circle-radius': 8,
-        'circle-color': token('--accent'),
-        'circle-stroke-width': 3,
-        'circle-stroke-color': token('--raised'),
+        'circle-radius': PUCK_CORE_R,
+        'circle-color': token('--sky-deep'),
+        'circle-stroke-width': PUCK_RING_W,
+        'circle-stroke-color': token('--surface'),
       },
     })
-  }, [routes, ready, theme])
+  }, [routes, ready])
+
+  // --- which lines are visible: streaming, detail focus, or follow ---------
+
+  useEffect(() => {
+    const map = mapRef.current
+    if (!map || !ready) return
+
+    for (const id of layerIdsRef.current) {
+      if (!map.getLayer(`line-${id}`)) continue
+      const visible = followActive
+        ? false // the ahead/behind pair carries the whole picture
+        : focus
+          ? id === selected
+          : true
+      map.setLayoutProperty(`line-${id}`, 'visibility', visible ? 'visible' : 'none')
+      if (visible) {
+        const isSelected = id === selected
+        map.setPaintProperty(`line-${id}`, 'line-width', isSelected ? 7 : 4.5)
+        map.setPaintProperty(`line-${id}`, 'line-opacity', isSelected ? 1 : 0.75)
+      }
+    }
+
+    const chosen = routes.find((r) => r.id === selected)
+    const source = map.getSource('rest-stops')
+    if (source) {
+      source.setData({
+        type: 'FeatureCollection',
+        features:
+          followActive || !chosen
+            ? []
+            : (chosen.rest_stops ?? []).map((stop) => ({
+                type: 'Feature',
+                properties: {},
+                geometry: { type: 'Point', coordinates: [stop.lon, stop.lat] },
+              })),
+      })
+    }
+  }, [selected, routes, focus, followActive, ready])
 
   // --- follow: data only, never a layer ------------------------------------
 
@@ -576,9 +610,11 @@ export default function MapView({
     const map = mapRef.current
     if (!map || !ready) return
 
-    const walked = map.getSource('follow-walked')
+    const behind = map.getSource('follow-behind')
+    const ahead = map.getSource('follow-ahead')
     const here = map.getSource('follow-here')
-    if (!walked || !here) return
+    const connector = map.getSource('follow-connector')
+    if (!behind || !ahead || !here || !connector) return
 
     const at = followTracking?.at ?? null
     const geometry = follow?.route?.geometry ?? null
@@ -586,35 +622,73 @@ export default function MapView({
     // Split at `at.alongM`: whole vertices up to the one behind the walker,
     // then the projected point itself, so the join is where the person is
     // rather than at the last vertex they happened to pass.
-    let trace = []
+    let walked = []
+    let remaining = geometry ?? []
     if (followActive && at && geometry?.length > 1) {
-      trace = geometry.slice(0, at.index + 1)
       const head = pointAtDistance(geometry, at.alongM, followTracking.cumulative)
-      if (head) trace = [...trace, [head.lon, head.lat]]
+      walked = geometry.slice(0, at.index + 1)
+      remaining = geometry.slice(at.index + 1)
+      if (head) {
+        walked = [...walked, [head.lon, head.lat]]
+        remaining = [[head.lon, head.lat], ...remaining]
+      }
     }
-    walked.setData({
+    behind.setData({
       type: 'Feature',
-      geometry: { type: 'LineString', coordinates: trace.length > 1 ? trace : [] },
+      geometry: { type: 'LineString', coordinates: walked.length > 1 ? walked : [] },
+    })
+    ahead.setData({
+      type: 'Feature',
+      geometry: {
+        type: 'LineString',
+        coordinates: followActive && remaining.length > 1 ? remaining : [],
+      },
     })
 
-    const features = []
-    if (followActive) {
-      const accuracyM = followTracking.accuracyM
-      if (accuracyM != null && accuracyM > 0) {
-        features.push({
-          type: 'Feature',
-          properties: {},
-          geometry: circleRing(followPosition, accuracyM),
-        })
-      }
-      features.push({
-        type: 'Feature',
-        properties: {},
-        geometry: { type: 'Point', coordinates: followPosition },
-      })
+    // The dashed way back, only while genuinely off route.
+    let connectorLine = []
+    if (followActive && followTracking?.offRoute && at && geometry?.length > 1) {
+      const nearest = pointAtDistance(geometry, at.alongM, followTracking.cumulative)
+      if (nearest) connectorLine = [followPosition, [nearest.lon, nearest.lat]]
     }
-    here.setData({ type: 'FeatureCollection', features })
-  }, [followActive, followPosition, followTracking, follow?.route?.geometry, ready, theme])
+    connector.setData({
+      type: 'Feature',
+      geometry: { type: 'LineString', coordinates: connectorLine.length > 1 ? connectorLine : [] },
+    })
+
+    here.setData({
+      type: 'FeatureCollection',
+      features: followActive
+        ? [{ type: 'Feature', properties: {}, geometry: { type: 'Point', coordinates: followPosition } }]
+        : [],
+    })
+  }, [followActive, followPosition, followTracking, follow?.route?.geometry, ready])
+
+  // The halo breathes: .22 to .07 and back over 2.6s. Static under
+  // prefers-reduced-motion, at the midpoint, and not run at all when there is
+  // no puck to breathe under.
+  useEffect(() => {
+    const map = mapRef.current
+    if (!map || !ready || !followActive) return undefined
+    if (prefersReducedMotion()) {
+      if (map.getLayer('follow-halo')) {
+        map.setPaintProperty('follow-halo', 'circle-opacity', (HALO_OPACITY_HIGH + HALO_OPACITY_LOW) / 2)
+      }
+      return undefined
+    }
+    const started = performance.now()
+    const timer = setInterval(() => {
+      if (!map.getLayer('follow-halo')) return
+      const phase = ((performance.now() - started) % HALO_BREATH_MS) / HALO_BREATH_MS
+      const wave = (1 + Math.cos(phase * 2 * Math.PI)) / 2
+      map.setPaintProperty(
+        'follow-halo',
+        'circle-opacity',
+        HALO_OPACITY_LOW + wave * (HALO_OPACITY_HIGH - HALO_OPACITY_LOW),
+      )
+    }, 80)
+    return () => clearInterval(timer)
+  }, [followActive, ready])
 
   // --- follow: the camera ---------------------------------------------------
 
@@ -669,41 +743,6 @@ export default function MapView({
     })
   }, [followActive, followPosition, cameraTaken, ready])
 
-  // --- selection emphasis (paint properties only, never re-adding layers) ---
-
-  useEffect(() => {
-    const map = mapRef.current
-    if (!map || !ready) return
-
-    for (const id of layerIdsRef.current) {
-      const isSelected = id === selected
-      // The casing is --raised at line-width + 6, so the selected line stays
-      // legible where it crosses a park or open water (§2.4).
-      if (map.getLayer(`case-${id}`)) {
-        map.setPaintProperty(`case-${id}`, 'line-color', token('--raised'))
-        map.setPaintProperty(`case-${id}`, 'line-width', isSelected ? 13 : 7)
-        map.setPaintProperty(`case-${id}`, 'line-opacity', isSelected ? 1 : 0.45)
-      }
-      if (map.getLayer(`line-${id}`)) {
-        map.setPaintProperty(`line-${id}`, 'line-width', isSelected ? 7 : 5)
-        map.setPaintProperty(`line-${id}`, 'line-opacity', isSelected ? 1 : 0.45)
-      }
-    }
-
-    const chosen = routes.find((r) => r.id === selected)
-    const source = map.getSource('rest-stops')
-    if (source) {
-      source.setData({
-        type: 'FeatureCollection',
-        features: (chosen?.rest_stops ?? []).map((stop) => ({
-          type: 'Feature',
-          properties: { colour: routeColor(chosen.id, theme) },
-          geometry: { type: 'Point', coordinates: [stop.lon, stop.lat] },
-        })),
-      })
-    }
-  }, [selected, routes, ready, theme])
-
   // --- step highlight ------------------------------------------------------
 
   useEffect(() => {
@@ -721,10 +760,7 @@ export default function MapView({
       type: 'Feature',
       geometry: { type: 'LineString', coordinates: span.length > 1 ? span : [] },
     })
-    if (map.getLayer('highlight')) {
-      map.setPaintProperty('highlight', 'line-color', token('--accent'))
-    }
-  }, [highlight, selected, routes, ready, theme])
+  }, [highlight, selected, routes, ready])
 
   // --- viewport ------------------------------------------------------------
 
@@ -733,12 +769,22 @@ export default function MapView({
     if (!map || !ready) return
 
     const target = routes.find((r) => r.id === selected && r.geometry?.length > 1)
-    const coordinates = target
-      ? target.geometry
-      : routes.flatMap((r) => (r.geometry?.length > 1 ? r.geometry : []))
+    const coordinates =
+      focus && target
+        ? target.geometry
+        : routes.flatMap((r) => (r.geometry?.length > 1 ? r.geometry : []))
     if (coordinates.length < 2) return
 
-    const narrow = map.getContainer().clientWidth < 640
+    // The camera frames the routes in the part of the map a person can see,
+    // not the part the UI is standing on. Below the breakpoint the bottom
+    // sheet owns a bit over half the stage at its resting height; above it,
+    // the capsule claims the top and the card row the bottom. Framing to the
+    // full viewport put every loop squarely behind the sheet — measured, on
+    // the first screenshot pass.
+    const height = map.getContainer().clientHeight
+    const padding = isMobile
+      ? { top: 70, left: 40, right: 40, bottom: Math.round(height * 0.6) }
+      : { top: 140, left: 60, right: 60, bottom: 360 }
     // Jump rather than fly when nobody can see it. MapLibre animates the camera
     // with requestAnimationFrame, which does not run in a hidden tab — so an
     // animated fitBounds started while the page is backgrounded never
@@ -746,21 +792,43 @@ export default function MapView({
     // centre with the routes off-screen.
     const instant = prefersReducedMotion() || document.hidden
     map.fitBounds(boundsOf(coordinates), {
-      padding: narrow ? 40 : 60,
+      padding,
       duration: instant ? 0 : 500,
       maxZoom: 16,
     })
-  }, [routes, selected, ready])
+  }, [routes, selected, focus, isMobile, ready])
 
   // Not while following. `fit` is keyed on [routes, selected, ready], and
   // `case 'settled'` replaces `routes` wholesale — so a refetch landing
   // mid-walk used to yank the camera from the walker back out to the whole
   // route's bounds, at the exact moment someone was looking at it to decide
-  // which way to turn. The button still calls `fit` deliberately.
+  // which way to turn.
   useEffect(() => {
     if (followActive) return
     fit()
   }, [fit, followActive])
+
+  // "Tap a blocker to see it on the map": ease to the barrier's own
+  // coordinates, close enough that the dot means something.
+  useEffect(() => {
+    const map = mapRef.current
+    if (!map || !ready || !focusPoint) return
+    const instant = prefersReducedMotion() || document.hidden
+    map.easeTo({
+      center: [focusPoint.lon, focusPoint.lat],
+      zoom: Math.max(map.getZoom(), 15.5),
+      duration: instant ? 0 : 450,
+    })
+  }, [focusPoint, ready])
+
+  // Centre on the origin before any route exists, so the plan screen's map is
+  // the neighbourhood the walk would start in rather than the initial city.
+  useEffect(() => {
+    const map = mapRef.current
+    if (!map || !ready || !origin || routes.length > 0) return
+    const instant = prefersReducedMotion() || document.hidden
+    map.easeTo({ center: [origin.lon, origin.lat], zoom: 14, duration: instant ? 0 : 500 })
+  }, [origin, routes.length, ready])
 
   // --- markers -------------------------------------------------------------
 
@@ -779,98 +847,58 @@ export default function MapView({
     if (origin) {
       add(
         [origin.lon, origin.lat],
-        markerElement('', 'A', `Start: ${origin.name ?? 'your location'}`),
+        markerElement('marker--origin', `Start: ${origin.name ?? 'your location'}`),
       )
     }
     if (dest) {
       add(
         [dest.lon, dest.lat],
-        markerElement('', 'B', `Destination: ${dest.name ?? 'chosen point'}`),
+        markerElement('marker--dest', `Destination: ${dest.name ?? 'chosen point'}`),
       )
     }
 
-    // Barriers stay DOM markers rather than a circle layer: they carry a glyph
-    // and an aria-label, and they are the one thing on this map that a user
-    // must not miss.
-    for (const route of routes) {
-      if (route.status === 'ok') continue
+    // Barrier dots: rose for steps, amber for everything else, each with a
+    // surface ring, at the barrier's own coordinates. DOM markers rather than
+    // a circle layer: they carry an aria-label, and they are the one thing on
+    // this map a user must not miss. In detail focus and in follow mode only
+    // the route being looked at contributes its barriers.
+    const withBarriers =
+      followActive && followRouteId
+        ? routes.filter((r) => r.id === followRouteId)
+        : focus
+          ? routes.filter((r) => r.id === selected)
+          : routes
+    for (const route of withBarriers) {
       for (const blocker of route.blockers ?? []) {
         add(
           [blocker.lon, blocker.lat],
           markerElement(
-            'marker--blocker',
-            '✕',
+            blocker.type === 'steps' ? 'marker--barrier marker--barrier-steps' : 'marker--barrier',
             `Barrier on the ${route.label} route. ${blocker.type}: ${blocker.description}`,
           ),
         )
       }
     }
-  }, [routes, selected, origin, dest, ready])
-
-  // --- controls ------------------------------------------------------------
-
-  const zoom = (delta) => {
-    const map = mapRef.current
-    if (!map) return
-    // Pressing + or - while following is a deliberate choice of scale, so it
-    // counts as taking the camera. Without this the next fix would ease the
-    // zoom straight back to 0.4 m/px and the button would look broken.
-    if (followActive) setCameraTaken(true)
-    map.easeTo({ zoom: map.getZoom() + delta, duration: prefersReducedMotion() ? 0 : 200 })
-  }
+  }, [routes, selected, origin, dest, focus, followActive, followRouteId, ready])
 
   const drawn = routes.filter((r) => r.geometry?.length > 1)
   const chosen = routes.find((r) => r.id === selected)
   const summary = drawn.length
     ? `Map showing ${drawn.length} route${drawn.length === 1 ? '' : 's'}: ${drawn
         .map((r) => `${r.label} as a ${styleFor(r.id).pattern} line`)
-        .join(', ')}.${chosen ? ` ${chosen.label} is selected.` : ''} Every route is described in full in the list beside this map.`
+        .join(', ')}.${chosen ? ` ${chosen.label} is selected.` : ''} Every route is described in full in the cards over this map.`
     : 'Map of the area. No routes are drawn yet.'
 
   return (
-    // §4.10 asks for role="img" on the container. It cannot go here, and this
-    // is not a shortcut: role="img" declares the element a single graphic whose
-    // contents are not exposed, so nesting the zoom buttons inside it is
-    // `nested-interactive` — a serious WCAG 4.1.2 failure, which axe caught.
-    // It cannot go on .map__canvas either, because MapLibre injects its own
-    // attribution button in there. The summary therefore reaches assistive
-    // technology through the labelled region plus the visually-hidden
-    // description below, which conveys the same sentence without lying about
-    // what the element is.
     <section className="map" aria-label="Map of the suggested routes">
       <div className="map__canvas" ref={containerRef} />
 
       {failed && (
         <div className="map__fallback">
           <p>
-            The map could not load. Every route is described in full in the list beside it;
-            nothing is missing from it.
+            The map could not load. Every route is described in full in its card and detail;
+            nothing is missing from them.
           </p>
-        </div>
-      )}
-
-      {/* Legend, bottom-left. Hidden below 900px, where the rail is the legend. */}
-      {drawn.length > 0 && (
-        <div className="legend" aria-hidden="true">
-          {drawn.map((route) => {
-            const style = styleFor(route.id)
-            return (
-              <p
-                key={route.id}
-                className={route.id === selected ? 'legend__row is-selected' : 'legend__row'}
-              >
-                {/* One property, not `background` plus `backgroundImage`.
-                    Setting both — even with one undefined — makes React warn
-                    about mixing shorthand and longhand, and swatchBackground
-                    already returns whichever of the two this route needs. */}
-                <span
-                  className="legend__line"
-                  style={{ background: swatchBackground(route.id, theme) }}
-                />
-                {route.label} <span className="legend__pattern">{style.pattern}</span>
-              </p>
-            )
-          })}
         </div>
       )}
 
@@ -880,27 +908,17 @@ export default function MapView({
           when it has something to do is a status as much as a control. */}
       {followActive && cameraTaken && (
         <button type="button" className="map__recentre" onClick={recentre}>
-          <span aria-hidden="true">◎</span> Re-centre
+          Re-centre
         </button>
       )}
 
-      {/* Last in the DOM inside the stage, and the stage is after the panel, so
-          a keyboard user reaching the routes never traverses zoom buttons
-          first (§9). */}
-      <div className="map__controls">
-        <button type="button" className="map__ctrl" onClick={() => zoom(1)}>
-          <span aria-hidden="true">+</span>
-          <span className="visually-hidden">Zoom in</span>
-        </button>
-        <button type="button" className="map__ctrl" onClick={() => zoom(-1)}>
-          <span aria-hidden="true">−</span>
-          <span className="visually-hidden">Zoom out</span>
-        </button>
-        <button type="button" className="map__ctrl" onClick={fit}>
-          <span aria-hidden="true">⌖</span>
-          <span className="visually-hidden">Recentre on the selected route</span>
-        </button>
-      </div>
+      <p className="map-attribution">
+        map data ©{' '}
+        <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noreferrer">
+          OpenStreetMap
+        </a>{' '}
+        contributors
+      </p>
 
       <p className="visually-hidden">{summary}</p>
     </section>

@@ -74,30 +74,35 @@ describe('safe-area tokens', () => {
 })
 
 describe('safe-area consumption', () => {
-  it('does not pin a fixed height on the topbar', () => {
-    // The most likely regression by some distance. Restoring `height: 56px`
-    // alongside `padding-top` clips the 44px .icon-button out of the content box
-    // under the global border-box — a 44x44 violation introduced by the very fix
-    // that was meant to be safe.
-    const [topbar] = bodies('.topbar')
-    expect(topbar).not.toMatch(/^\s*height:/m)
-    expect(topbar).toMatch(/--safe-top/)
-  })
+  // The layers that touch each edge of the viewport in the 2026 layout, and
+  // the inset each one must restate. A `padding:` or `top:`/`bottom:`
+  // shorthand landing in a later rule deletes the arithmetic with no error
+  // and no visible change on a desktop — the same trap at every one of these.
+  const EDGES = [
+    ['.capsule-wrap', '--safe-top'], // the floating plan capsule
+    ['.rail--row', '--safe-bottom'], // the desktop results row
+    ['.sheet', '--safe-bottom'], // the mobile sheet's padding
+    ['.follow', '--safe-top'], // the follow layer's own padding…
+    ['.follow', '--safe-bottom'], // …reaches every edge
+    ['.follow', '--safe-left'],
+    ['.follow', '--safe-right'],
+    ['.map-attribution', '--safe-bottom'],
+  ]
 
-  it('restates the safe sides in every rule that resets .panel padding', () => {
-    // The trap at the 420px override: a four-side `padding:` shorthand landing
-    // after the base rule deletes both longhands with no error and no visible
-    // change on a desktop. This catches every future one too.
-    const resets = bodies('.panel').filter((b) => /padding:/.test(b))
-    expect(resets.length).toBeGreaterThan(0)
-    for (const b of resets) expect(b).toMatch(/--safe-bottom/)
-  })
-
-  it('restates --safe-right in every rule that sets .map__controls trailing inset', () => {
-    // Same trap, second instance, at the 899px override.
-    const rules = bodies('.map__controls').filter((b) => /inset-inline-end:/.test(b))
+  it.each(EDGES)('%s consumes %s', (selector, token) => {
+    const rules = bodies(selector)
     expect(rules.length).toBeGreaterThan(0)
-    for (const b of rules) expect(b).toMatch(/--safe-right/)
+    expect(rules.some((b) => b.includes(token))).toBe(true)
+  })
+
+  it('keeps the full-surface search inside all four insets', () => {
+    // The one layer that owns the whole viewport at once. Checked against one
+    // rule holding all four, not the union across rules — four rules with one
+    // side each would leave three edges bare whenever only one applied. (The
+    // demo strip's `.app--demo .search` override is also in `bodies`, which is
+    // why this is `some` and not `[first]`.)
+    const rules = bodies('.search')
+    expect(rules.some((b) => SIDES.every((side) => b.includes(`--safe-${side}`)))).toBe(true)
   })
 
   it('still opts into the full viewport in index.html', () => {

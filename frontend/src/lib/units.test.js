@@ -101,13 +101,14 @@ describe('an unknown distance is never zero', () => {
   it.each([
     ['metric', METRIC_24],
     ['imperial', IMPERIAL],
-    // **Changed glyph, unchanged rule.** The placeholder was an em dash and is
-    // now `UNKNOWN` — an ASCII hyphen — because the em dash is the character the
-    // app is removing. The name of this test moved with it: "as an em dash"
-    // became a lie the moment the glyph changed, and a test whose name describes
-    // the previous behaviour is how the next reader learns the wrong thing.
+    // **Changed glyph, unchanged rule — twice now.** The placeholder was an em
+    // dash, then briefly an ASCII hyphen while the app was removing em dashes
+    // from its prose, and the 2026 redesign put the em dash back by stated
+    // rule: "unknown renders as —". Asserting against `UNKNOWN` rather than a
+    // literal means this test follows the constant; the glyph decision lives
+    // at its declaration in units.js.
     //
-    // What is asserted below is the part that matters and did not move: an
+    // What is asserted below is the part that matters and never moved: an
     // unknown distance is never rendered as a zero.
   ])('renders null, undefined and NaN as the unknown placeholder in %s', (_name, units) => {
     for (const value of [null, undefined, Number.NaN]) {

@@ -350,8 +350,8 @@ export async function geocode(q, options = {}) {
  * ⚠ **The only write this application makes, and it is to a public database.**
  * Everything else here is a read that leaves no trace; this leaves a permanent,
  * publicly visible note carrying a coordinate and whatever the person typed.
- * About.jsx and FirstRun.jsx both say so, because a privacy promise that has an
- * exception must name it.
+ * ReportBarrier.jsx says so before its submit button, because a privacy
+ * promise that has an exception must name it where the exception happens.
  *
  * The target is api06.dev.openstreetmap.org — the OSM *development* server,
  * whose data is disposable — and backend/main.py asserts that host at call time

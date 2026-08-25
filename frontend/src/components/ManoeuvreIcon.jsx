@@ -153,7 +153,7 @@ export default function ManoeuvreIcon({ sign = 0, className = 'manoeuvre' }) {
     const f = fork(key === '7')
     return (
       <svg {...common}>
-        <path d={f.other} strokeWidth={1.25} opacity={0.55} />
+        <path d={f.other} strokeWidth={1.8} opacity={0.55} />
         <path d={f.taken} />
         <path d={f.head} />
       </svg>

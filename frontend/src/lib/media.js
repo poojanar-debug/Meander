@@ -1,18 +1,18 @@
 import { useEffect, useState } from 'react'
 
 /**
- * The one place the 900px breakpoint is written in JavaScript.
+ * The one place the 1024px breakpoint is written in JavaScript.
  *
- * `styles.css` decides the layout at this width — one column, the stage as a
- * band above the panel, the trip bar static — and follow mode's *behaviour*
- * changes at the same width: below it the overlay is full-screen and modal, and
- * above it the stage is a column beside a panel that stays legitimately usable.
- * Those two decisions have to be the same decision. A literal `899` typed a
- * second time in a component is how a layer becomes modal on one side of a
- * breakpoint and the layout stays two-column on the other, which is a state
- * with no way out.
+ * `styles.css` decides the presentation at this width — below it the plan, the
+ * results and the route detail live in a draggable bottom sheet over the map;
+ * at 1024 and up they become the floating plan capsule, the results row and
+ * the centered modal — and behaviour changes at the same width: the sheet and
+ * the follow overlay are modal below it and not above. Those two decisions
+ * have to be the same decision. A literal `1023` typed a second time in a
+ * component is how a layer becomes modal on one side of a breakpoint while
+ * the layout stays desktop on the other, which is a state with no way out.
  */
-export const MOBILE_LAYOUT = '(max-width: 899px)'
+export const MOBILE_LAYOUT = '(max-width: 1023px)'
 
 /**
  * Subscribe to a media query.
