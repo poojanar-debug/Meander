@@ -1,6 +1,84 @@
 
 ---
 
+## The gate could drive a browser it did not start · 2026-08-26
+
+`main`'s CI went red on the commit that had just passed the same gate on its
+own PR. The frontend job died at the layout gate with:
+
+```
+TypeError: fetch failed
+  [cause]: Error: connect ECONNREFUSED 127.0.0.1:9444
+```
+
+A re-run went green, which is the worst possible outcome: nothing was wrong
+with the build, nothing was learned, and the lesson on offer was "press the
+button again". Pulling the thread found four defects in about forty lines of
+CDP glue, none of them touched since `73a7386` wrote the gate on 2026-08-08.
+
+**1. `launch()` reported success whether or not it had reached a browser.**
+It polled `/json/version` a hundred times at 100 ms and `break`-ed out of the
+loop either way, then returned the same `{ proc, port }` in both cases. The
+ECONNREFUSED came from the *next* call, so the run ended with a stack trace
+about `fetch` rather than a sentence about Chrome. Success is now the only
+path that returns; every other outcome prints what happened and exits 2.
+
+**2. Ten seconds was not enough for a cold runner.** Now thirty. The number is
+patience, not tolerance: nothing the gate accepts has changed, only how long
+it waits for a browser to exist.
+
+**3. `stdio: 'ignore'` threw away the reason.** A launch that fails for a real
+reason — a missing shared library, a sandbox refusal, a profile another
+instance holds — says so on stderr, and the gate was discarding it. stderr is
+piped and the first lines are reported. Proved with a fake browser that exits
+127 after writing `error while loading shared libraries: libnss3.so`; the
+gate now prints that line back.
+
+**4. The one that matters: a fixed port let the gate adopt a stranger.**
+`--remote-debugging-port=9444` plus "poll until something answers" does not
+identify the browser that answered. **Demonstrated on purpose**: with a Chrome
+left over from an earlier run holding 9444, pointing `CHROME_PATH` at
+`/bin/false` — a binary that cannot serve anything — still produced a
+connected gate and twelve graded checks. Where the stale browser happens to
+sit on the right page, the same path reports a **pass that means nothing**,
+which is the exact failure this file's header was written to refuse.
+
+The port is now `0`. The kernel picks a free one, Chrome announces it on
+stderr, and the gate connects to that — so the port it drives is by
+construction the port of the browser it spawned. Re-running the `/bin/false`
+demonstration with a live decoy on 9444 now exits 2 and grades nothing.
+
+**And the leak that manufactured the stranger.** `proc.kill()` ran in exactly
+one place, after the report, so any throw in between left a headless Chrome
+running — and a crashed run of this gate is what leaked the browser found on
+9444 (`Inspected target navigated or closed`, from two gates sharing a port
+and a profile). The browser is now reaped on `exit`, `SIGINT`, `SIGTERM`, and
+on an uncaught throw or rejection, which also stops "the gate crashed" from
+being reported as "checks failed".
+
+Two smaller ones in `connect()`, both silent for the same reason:
+`targets.find(t => t.type === 'page')` was dereferenced unguarded, so a
+browser with no page target died on `Cannot read properties of undefined`;
+and `ws.onerror = rej` rejected with an `Event`, which renders as
+`[object Event]` wherever it surfaces.
+
+**Verified, each failure path made to fail on purpose before the gate was
+trusted again** — the rule BLOCKED.md §5 states and this is the first change
+to actually apply it to `gate.mjs` itself:
+
+| provoked | reported |
+|---|---|
+| `CHROME_PATH=/bin/false` | `Chrome exited with code 1`, exit 2 |
+| a browser exiting 127 with a linker error | the linker error, verbatim, exit 2 |
+| a browser that starts and never announces a port | `never announced a debugging port within 30s`, exit 2, after exactly 30 s |
+| a live decoy on 9444 plus `/bin/false` | exit 2, nothing graded (was: 12 checks graded) |
+
+And the happy path is unchanged: 69 of 69 green in a real headless Chrome.
+
+**No application code changed.** This is entirely the harness that grades it.
+
+---
+
 ## Somewhere to go — the destination end of a trip · 2026-08-26
 
 The backend has accepted a `destination` since Phase C, `models.py` has
