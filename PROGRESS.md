@@ -4969,3 +4969,92 @@ longer persists, so nothing was written to `fixtures/`.
 18 more synthetic fixtures, one per loop scenario per preference preset per
 scale, because a fixture is keyed on the request body and the runtime can now
 send three bodies where it sent one.
+
+## §17 — Deployed, and what the deploy found first · 2026-08-26
+
+Both halves are live. The app is Cloudflare Pages, built from `main` by the
+GitHub integration the moment PR #8 merged; the API and the router are the same
+VM they have been, `docker compose` behind Caddy at `meander-app.duckdns.org`.
+The AWS stacks in `infra/` are still unapplied and `deploy.yml` still dies at
+its OIDC role, because the repository still has no AWS secrets.
+
+### The production checkout was four commits stale, staged as a revert
+
+Found before touching anything, and it would have deployed an old backend
+silently. `/home/ubuntu/Meander` had `HEAD` at `752a792` — correct, matching
+`origin/main` — and its **working tree and index at `dffb17d`**, four commits
+behind. Not a partial state: `git diff dffb17d` was empty, so the files on disk
+were that commit exactly, with `Wordmark.jsx`, `favicon.svg` and
+`destination-contract.test.js` deleted and `backend/config.py` and `main.py`
+reverted. 33 files, 2,216 deletions, all staged.
+
+The signature is `git checkout <old> -- .`, which writes and stages an old tree
+without moving `HEAD`, so every `git log` and every `git status` branch line
+reads correctly while the files are wrong. `git pull` would have refused or
+merged into it; **`docker compose build api` would have quietly built it.** The
+image is baked from that directory, and nothing in the deploy path compares it
+to `HEAD`.
+
+Resolved by proving it first and then discarding it: the tree was byte-identical
+to `dffb17d`, `dffb17d` is an ancestor of `origin/main`, and `git status
+--untracked-files=all` listed nothing untracked, so `git reset --hard
+origin/main` could not lose anything that was not already in git. `.env` is
+ignored and survived; `data/cache.db` was already identical to main's.
+
+**This generalises past this incident.** BLOCKED.md §7 records two deploy
+commands that report success while changing nothing — `caddy reload` reading a
+replaced inode, `--force-recreate` reusing a stale image — and the lesson drawn
+there was to check the effect over the wire rather than the exit code. This is a
+third of the same kind, one step earlier: the *source* can be wrong while every
+command that reads it succeeds. A deploy should assert `git status` is clean and
+`HEAD` is the commit it means to ship before it builds anything.
+
+### The deploy
+
+```bash
+git reset --hard origin/main
+docker compose -f docker-compose.yml -f compose.prod.yml build api
+docker compose -f docker-compose.yml -f compose.prod.yml up -d --force-recreate api
+```
+
+`build` then `up`, in that order, which is the pair BLOCKED.md §7 identifies as
+the one that actually replaces anything. Caddy was left alone: nothing in this
+change touches `Caddyfile`, and recreating it is the step that exists to
+re-resolve the single-file bind mount. The previous image was tagged
+`meander-api:rollback-2026-08-26` before the build.
+
+### Verified over the wire, not by exit code
+
+`https://meander-app.duckdns.org/healthz` → `{"status":"ok","version":"0.1.0"}`,
+and the container reports the new code (`PRESETS` lists all six).
+
+A public `POST /api/routes` for `["quiet","shade","air"]` from the Pages origin
+returns three real routes, each carrying its basis note. The default three are
+unchanged and `fastest` still reports `scoring_method: "clip"`, so the committed
+CLIP cache is still being read.
+
+**The shade score was checked against the weather rather than assumed.** Every
+route came back `shade: 1.0`, which is the answer `_blend_shade` is supposed to
+give when nobody needs shade — and London was at **100% cloud** at that hour,
+confirmed against Open-Meteo directly. Asked again for an 18:00 departure at 68%
+cloud, the same three routes returned 0.9791, 0.9812 and 0.9800, with the
+**shade preset highest**. Small, because the sun is at ten degrees by then and
+the demand term is small with it; the point is that they differ at all. Before
+this change all three were the same number by construction.
+
+A departure two days out returns `shade: null`, because the cloud series does
+not reach that far. That is `_hour_index` doing what its comment says it does,
+and null is the honest answer.
+
+`frontend/scripts/live-gate.mjs` against production, in a real browser: **28
+passed, 0 failed, 14 not checkable here.** Same as the last recorded run, which
+is the point — CORS, CSP, the service worker, the offline open, the precache and
+a direct permalink all still hold with the new bundle. The live Pages bundle no
+longer contains `chip__soon` or `not implemented yet`, and does contain
+`detail__basis-note`.
+
+**Live API calls:** the live gate's one rate-limit token, four `POST /api/routes`
+against the public host, two Open-Meteo cloud-cover reads to check the shade
+arithmetic, and the routing calls behind them, all to the self-hosted graph on
+the same VM. No GraphHopper credits were spent: the hosted API is not in this
+deployment's path.
