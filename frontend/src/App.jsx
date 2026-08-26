@@ -140,7 +140,20 @@ function reducer(state, action) {
     }
 
     case 'origin':
-      return { ...state, origin: action.value, geoDenied: false, linkNote: null }
+      // The phase is cleared when the fix lands, which it was not: `locating`
+      // was set by the button and nothing ever unset it, so "Finding you…"
+      // stayed under a field already showing the place it had found, until
+      // Find routes moved the phase on. Same shape as `geoDenied` below, and
+      // for the same reason: this is the answer to the question `locating`
+      // asked, so it is what ends it.
+      return {
+        ...state,
+        origin: action.value,
+        phase:
+          state.phase === 'locating' ? (state.routes.length ? 'success' : 'idle') : state.phase,
+        geoDenied: false,
+        linkNote: null,
+      }
 
     case 'dest':
       return { ...state, dest: action.value, linkNote: null }
@@ -230,9 +243,15 @@ export default function App() {
   const [highlight, setHighlight] = useState(null)
   // A blocker the user asked to see on the map: {lon, lat, seq}.
   const [focusPoint, setFocusPoint] = useState(null)
-  // Mobile surfaces: which sheet is up, how tall it sits, and whether the
-  // full-screen place search covers everything.
-  const [searchOpen, setSearchOpen] = useState(false)
+  // Mobile surfaces: which field the full-screen place search is editing, how
+  // the sheet is snapped, and whether the plan is being held open over
+  // results.
+  //
+  // `searchFor` is 'origin', 'dest' or null for "not open". It was a boolean
+  // while there was only one field to search for; a boolean cannot say which
+  // end of the trip is being typed, and both the screen's accessible name and
+  // the place it writes the pick back to depend on that.
+  const [searchFor, setSearchFor] = useState(null)
   const [planOverride, setPlanOverride] = useState(false)
   const [snap, setSnap] = useState('full')
 
@@ -254,8 +273,8 @@ export default function App() {
 
   // The straight line to the destination, which is what resolves `auto` once
   // there is one. Null for a loop, which puts effectiveMode back on the time
-  // ladder. A destination can only arrive through a permalink in this design,
-  // but a link is a request like any other and gets the same answer.
+  // ladder. A destination now arrives from the plan surfaces as well as from a
+  // permalink; both are the same request and get the same answer.
   const straightLineM = useMemo(
     () =>
       state.dest && state.origin
@@ -444,6 +463,23 @@ export default function App() {
     [state.objectives, announce],
   )
 
+  // A destination is only ever a place picked from search. There is no
+  // "use my location" beside it, and that is a load-bearing absence rather
+  // than an omission: `resultsStore.js` hashes the destination byte-exact
+  // while the origin has to be snapped to a grid, precisely because a device
+  // fix cannot reach this field.
+  const onDest = useCallback(
+    (place) => {
+      dispatch({ type: 'dest', value: place })
+      announce(
+        place
+          ? `Going to ${place.name}. The destination sets how long this takes.`
+          : 'Round trip. Meander will bring you back to where you started.',
+      )
+    },
+    [announce],
+  )
+
   const onFind = useCallback(() => {
     setPlanOverride(false)
     setDetailOpen(false)
@@ -553,6 +589,7 @@ export default function App() {
 
   const planProps = {
     origin: state.origin,
+    dest: state.dest,
     minutes: state.minutes,
     mode: state.mode,
     effectiveMode: mode,
@@ -563,6 +600,7 @@ export default function App() {
     onMinutes: (value) => dispatch({ type: 'minutes', value }),
     onMode: (value) => dispatch({ type: 'mode', value }),
     onToggleObjective,
+    onDest,
     onFind,
   }
 
@@ -666,14 +704,17 @@ export default function App() {
           {state.linkNote && <p className="linknote">{state.linkNote}</p>}
           <StatusBanner error={state.error} onRetry={() => dispatch({ type: 'retry' })} />
 
-          {searchOpen ? (
+          {searchFor ? (
             <PlaceSearch
+              key={searchFor}
+              field={searchFor}
               value={null}
               onPick={(place) => {
-                dispatch({ type: 'origin', value: place })
-                setSearchOpen(false)
+                if (searchFor === 'dest') onDest(place)
+                else dispatch({ type: 'origin', value: place })
+                setSearchFor(null)
               }}
-              onCancel={() => setSearchOpen(false)}
+              onCancel={() => setSearchFor(null)}
             />
           ) : detailOpen && selectedRoute ? (
             <Sheet
@@ -713,14 +754,17 @@ export default function App() {
                 departAt={state.departAt}
                 units={units}
                 onDepartAt={(value) => dispatch({ type: 'departAt', value })}
-                onOpenSearch={() => setSearchOpen(true)}
+                onOpenSearch={() => setSearchFor('origin')}
+                onOpenDestSearch={() => setSearchFor('dest')}
+                onClearDest={() => onDest(null)}
               />
             </Sheet>
           ) : (
             <Sheet snap={snap} onSnap={setSnap} label="Routes">
               <div className="rail__plan-row">
-                <span className="mono">
-                  {state.minutes} min · {state.mode === 'auto' ? 'Auto' : mode}
+                <span className="mono rail__plan-summary">
+                  {isLoop ? `${state.minutes} min` : `to ${state.dest.name}`} ·{' '}
+                  {state.mode === 'auto' ? 'Auto' : mode}
                 </span>
                 <button
                   type="button"

@@ -1,6 +1,123 @@
 
 ---
 
+## Somewhere to go — the destination end of a trip · 2026-08-26
+
+The backend has accepted a `destination` since Phase C, `models.py` has
+`is_loop()`, `budget_minutes()` and `straight_line_m()` built around it, and
+`buildRouteRequest`, `encodeState`, `resultsStore.js`, `MapView`, `RouteDetail`
+and `ExportPills` all already handled one. **Nothing on screen could set it.**
+The only way to ask for a point-to-point trip was to hand-write a `?to=` link,
+which App.jsx said out loud in a comment: "a destination can only arrive
+through a permalink in this design".
+
+This is the missing control, on both plan surfaces, in the 2026 language.
+
+**Done**
+
+- **Desktop capsule** gains a destination segment between the origin and the
+  minutes, split by the same 1x22 hairline, wearing an ink dot to match the
+  map's own `marker--dest`. Its popover is the same `PlaceInput` combobox the
+  origin uses, plus the hint DESIGN-HANDOFF §4.3 wrote for this exact drawer:
+  "Empty means a round trip — Meander brings you back to where you started."
+- **Mobile plan sheet** gains a second search field under the first, the same
+  input-fill row with the same magnifier, and a 44x44 clear control once a
+  destination is set. It opens the same full-surface place screen.
+- `PlaceSearch` now serves both ends. One `FIELDS` table decides the label, the
+  placeholder and the dialog's accessible name; an unknown key falls back to
+  the origin, which is the one input the app cannot run without.
+- Both place segments carry a visually-hidden key ("Starting point:",
+  "Destination:"), so a screen reader gets "Destination, Round trip" rather
+  than a button called "Round trip".
+- The mobile results summary reads `to Vondelpark · Auto` for a point-to-point
+  trip instead of a dial position that did not describe it.
+- `api/mock.js` draws to the destination. It used to draw every point-to-point
+  route on a **fixed bearing of 22 degrees at a fixed 2100 m** whatever was
+  asked for, which nothing noticed because nothing could ask. Its auto mode now
+  reads the straight line through the same `deriveModeForDistance` the app
+  uses, imported rather than restated.
+- `gate.mjs` grades the new screen: the destination field is in the plan
+  manifest, and a new `[destination]` pass picks a place through the real
+  combobox, checks the clear control and the budget note exist, asserts the
+  dial is *gone*, sweeps 44x44 and axe in both themes, and presses Find routes
+  to prove a destination still reaches the request. 69 checks, from 56.
+
+**Decisions**
+
+- **The time dial is absent, not disabled, once there is a destination.**
+  `buildRouteRequest` omits `minutes` from a point-to-point body and
+  `encodeState` omits it from the link, so the dial cannot change that
+  request — not its length, not its mode, not even its cache row. A control
+  that moves and changes nothing is the one thing this UI is not allowed to
+  be. The precedent is `BestWindow`, which does not render at all rather than
+  name a time it cannot stand behind. On the capsule the segment goes; on the
+  sheet one mono sentence stands where the dial stood.
+- **No "use my location" beside the destination**, and that absence is
+  load-bearing rather than an oversight. `resultsStore.js` hashes the
+  destination byte-exact while snapping the origin to an ~11 m grid, and the
+  reason it is allowed to is written in its own header: a device fix cannot
+  reach that field. `destination-contract.test.js` asserts the `onLocate`
+  handler still dispatches `type: 'origin'` and nothing else.
+- **Two place names now share the capsule**, so neither keeps the 240 px it
+  had. 200 each still fits "Viharamahadevi Park" whole, and because the cap is
+  a hard `max-width` the pill's width is bounded by construction rather than by
+  the data: measured at **840 px** with two names long enough to hit both caps,
+  which leaves 92 px either side at 1024 and no horizontal scroll. "Round
+  trip" takes the placeholder weight §4.3 gives a placeholder value.
+- The `nonce` model is untouched. Picking a destination changes state and
+  nothing else; **Find routes** is still the only thing that asks.
+
+**Verified**
+
+- 547 frontend tests pass, 14 of them new in
+  `src/lib/destination-contract.test.js`: the mock's three routes each end
+  within 5 m of the chosen point, a loop still returns to its origin, auto mode
+  reads the straight line rather than the dial's default (Colombo to Kandy is a
+  drive, not a walk), and both plan surfaces, the place screen and App's
+  `planProps` all carry the handler.
+- `node scripts/gate.mjs` — 69 of 69 green in a real headless Chrome, both
+  themes, including the new destination pass.
+- `npm run build` clean.
+
+**Four things found on the way, three of them older than this change.**
+
+- **`Find routes` broke onto two lines on every desktop window under about
+  1600 px**, and had since the redesign shipped. `.capsule-wrap` is absolutely
+  positioned with `left: 50%`, and an abspos box with `left` set and `right:
+  auto` shrinks to fit *the space left of it* — half the viewport. The pill
+  wanted 657 px at HEAD against a 640 px cap at 1280, so it squeezed the one
+  child that could reflow and stood 77 px tall instead of 60. Measured against
+  a build of HEAD's own sources before touching it, because a second place
+  name makes the pill wider and it would have been easy to call this a
+  regression. Centred with `left: 0; right: 0; margin-inline: auto; width:
+  max-content` instead, which also fixes a second symptom nobody had named:
+  `drop-in` ends on `transform: none`, so the centring translate was cancelled
+  for the 220 ms of the animation and the capsule slid sideways into place on
+  every mount. Now 776 x 60 at every width from 1024 up, and the action is one
+  line and 44 px tall.
+- **"Finding you…" never went away.** `onLocate` set `phase: 'locating'` and
+  the `origin` case that answers it left the phase alone, so the hint sat under
+  a field already showing the place it had found until Find routes moved the
+  phase on. The `geoDenied` case had the right shape all along; `origin` now
+  matches it.
+- **`Edit plan` wrapped** once the summary beside it could hold a place name.
+  That one is this change's: the row read `35 min · Auto` before, which never
+  filled it. The summary truncates, the control does not.
+- **And one that was the gate's own.** The first run failed
+`[destination][light] every target clears 44x44` on `.sheet__grabber-hit` at
+**43.999996 px** against a 44 px minimum, and passed in dark. The resting
+height is exactly 44 in every state measured; picking a place unmounts the
+search screen and remounts the sheet, whose height is an inline style with a
+transition on it, and the sweep was landing mid-transition. It failed about
+half the time. Fixed by making `pickDestination` wait for two equal readings of
+the sheet's height before returning, rather than by sleeping and hoping — a
+gate that fails at random teaches people to re-run it until it is green, which
+is the same as not having one. Five consecutive runs green after it.
+
+**Live API calls:** none. Verified against `VITE_MOCK_API=1`.
+
+---
+
 ## The 2026 UI — full presentation rewrite · 2026-08-25
 
 The presentation layer replaced wholesale with the approved 2026 mockups

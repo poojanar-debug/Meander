@@ -11,16 +11,26 @@ const MODE_LABEL = { auto: 'Auto', foot: 'Walk', bike: 'Bike', car: 'Drive' }
 
 /**
  * The desktop plan capsule: one floating pill, its segments split by
- * hairlines — origin, minutes, mode, objectives — and the primary action on
- * the end. Each segment opens the same editor the mobile plan sheet uses,
- * dropped as a popover under the capsule.
+ * hairlines — origin, destination, minutes, mode, objectives — and the primary
+ * action on the end. Each segment opens the same editor the mobile plan sheet
+ * uses, dropped as a popover under the capsule.
  *
  * One editor at a time; Escape and clicking anywhere else close it. The
  * segments are real buttons with `aria-expanded`, so the popover is a
  * disclosure rather than a mystery.
+ *
+ * **The minutes segment is not rendered once there is a destination**, and
+ * that is not tidying. `buildRouteRequest` omits `minutes` from a
+ * point-to-point body and `encodeState` omits it from the link, so the dial
+ * changes nothing about that request: not its length, not its mode, not even
+ * its cache row. A control that moves and changes nothing is the one thing
+ * this UI is not allowed to be, and the precedent is `BestWindow`, which does
+ * not render at all rather than show a time it cannot stand behind. The
+ * destination popover says where the length comes from instead.
  */
 export default function PlanCapsule({
   origin,
+  dest,
   minutes,
   mode,
   effectiveMode,
@@ -28,6 +38,7 @@ export default function PlanCapsule({
   locating,
   geoDenied,
   onOrigin,
+  onDest,
   onLocate,
   onMinutes,
   onMode,
@@ -67,19 +78,41 @@ export default function PlanCapsule({
           onClick={() => toggle('origin')}
         >
           <span className="dot dot--sky" aria-hidden="true" />
-          <span className="capsule__origin-name">{origin ? origin.name : 'Where from?'}</span>
+          <span className="visually-hidden">Starting point: </span>
+          <span className="capsule__place-name">{origin ? origin.name : 'Where from?'}</span>
         </button>
 
         <span className="capsule__rule" aria-hidden="true" />
 
         <button
           type="button"
-          className="capsule__seg capsule__seg--minutes mono"
-          aria-expanded={editor === 'minutes'}
-          onClick={() => toggle('minutes')}
+          className="capsule__seg capsule__seg--dest"
+          aria-expanded={editor === 'dest'}
+          onClick={() => toggle('dest')}
         >
-          {minutes} min
+          <span className="dot dot--ink" aria-hidden="true" />
+          <span className="visually-hidden">Destination: </span>
+          {/* "Round trip" is the default value, not a prompt, so it wears the
+              placeholder weight the trip bar has always given one. */}
+          <span className={dest ? 'capsule__place-name' : 'capsule__place-name is-placeholder'}>
+            {dest ? dest.name : 'Round trip'}
+          </span>
         </button>
+
+        {!dest && (
+          <>
+            <span className="capsule__rule" aria-hidden="true" />
+
+            <button
+              type="button"
+              className="capsule__seg capsule__seg--minutes mono"
+              aria-expanded={editor === 'minutes'}
+              onClick={() => toggle('minutes')}
+            >
+              {minutes} min
+            </button>
+          </>
+        )}
 
         <span className="capsule__rule" aria-hidden="true" />
 
@@ -145,7 +178,29 @@ export default function PlanCapsule({
         </div>
       )}
 
-      {editor === 'minutes' && (
+      {/* No "use my location" here, deliberately. A destination is always a
+          place picked from search, which is what lets resultsStore.js hash it
+          byte-exact while the origin has to be snapped to a grid. */}
+      {editor === 'dest' && (
+        <div className="capsule__popover">
+          <PlaceInput
+            label="Destination"
+            placeholder="Where to?"
+            value={dest}
+            autoFocus
+            onPick={(place) => {
+              onDest(place)
+              setEditor(null)
+            }}
+            onClear={() => onDest(null)}
+          />
+          <p className="capsule__hint mono">
+            Empty means a round trip — Meander brings you back to where you started.
+          </p>
+        </div>
+      )}
+
+      {editor === 'minutes' && !dest && (
         <div className="capsule__popover">
           <TimeDial minutes={minutes} effectiveMode={effectiveMode} onChange={onMinutes} />
         </div>
