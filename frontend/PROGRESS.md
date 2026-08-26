@@ -332,3 +332,87 @@ repo and is the specification for the frontend.
   phase 2's rename, and doing it here would have made this commit two changes.
 
 **Live API calls:** none. The frontend was verified against `VITE_MOCK_API=1`.
+
+## The other three objectives, released · 2026-08-26
+
+The chip row has offered six objectives since it was written and only three
+could be pressed: `quiet`, `shade` and `air` were `disabled`, read `· soon`, and
+`ObjectiveChips.jsx` held a `SOON` set naming them. The backend now routes all
+six, so the set is gone and nothing in this component special-cases an
+objective any more — `dash.js`'s identity table is the only thing deciding what
+the row offers.
+
+**Done**
+
+- `ObjectiveChips.jsx` loses `SOON`, `disabled` and the `· soon` span.
+- Three new palette families, one per newly-pressable objective, each the
+  objective's own route hue taken through the same oklch steps as the existing
+  five: `--indigo-*` (quiet, H=275), `--teal-*` (shade, H=195), `--clay-*`
+  (air, H=45). Contrast on wash: 7.00:1, 6.54:1, 7.08:1, against 6.30-7.60:1
+  for the five already there.
+- `RouteDetail.jsx` gains a fourth score bar for `Scores.quiet`, and renders
+  `status_note` on `ok` routes as well as blocked ones.
+- `export.js` learns the fourth score label, which is all `provenanceNote`
+  needed to report it as "not measured" when it is null.
+- `api/mock.js` gains real fixtures for the three, in both trip shapes.
+- The gate grows from 70 checks to 85.
+
+**status_note on an ok route had never been rendered**
+
+The backend has always been able to emit one — `_status_note` returns
+`raw.preset_note` regardless of blocked status, and `route_scenic` has set
+notes like "No route near you was more scenic than the fastest one, so this is
+much the same way" since it was written. `RouteDetail.jsx:220` gated on
+`route.status !== 'ok'`, so none of them ever reached a screen.
+
+That became load-bearing rather than cosmetic: the three new presets each carry
+a sentence saying what their objective was inferred from, because none of the
+three can be measured and a bare number under the word "Shade" invites a reader
+to assume a survey. The two cases now share the slot and nothing else —
+`.detail__basis-note` is neutral, because rose on that surface means "this
+route is refused" everywhere else in the app.
+
+**The card meta line stays at three scores**
+
+`scenic · air · shade`, with `quiet` visible only in the detail panel. Not a
+layout failure: `.card__meta` has no `white-space: nowrap`, so a fourth term
+wraps rather than overflowing and the 320 px check still passes. But it already
+wraps at three, so a fourth buys no comparison and costs every compact card a
+taller meta block. The reasoning is in `CARD_SCORES`'s docstring so it does not
+get silently "fixed" later.
+
+**Deviations**
+
+- **The new wash families are declared in `:root` only, not in both theme
+  blocks.** No wash family in this stylesheet is declared twice: the
+  `[data-theme='dark']` block restates the neutrals and `--route-*` and nothing
+  else. Duplicating nine tokens there would have broken that pattern for no
+  gain; `check_palette.sh` passes and the gate's dark-theme axe pass over the
+  pressed chips confirms they render.
+- **`--ink-disabled` was deleted.** Its only consumer repo-wide was the disabled
+  chip, and this project does not keep dead declarations.
+- `docs/DESIGN-2026.md:130` still specifies the three as "outline, disabled
+  color, `· soon`". That document reproduces the approved specification verbatim
+  and is not edited to match the code; a note at its head points here.
+
+**Found in passing, both fixed**
+
+- **A pressed chip lost its wash under the cursor.** `.chip:not(:disabled):hover`
+  scored (0,3,0) against `.chip--x.is-pressed`'s (0,2,0), so on a pointer device
+  hovering a selected chip replaced its accent with the neutral hover fill — and
+  the wash is one of the two signals that the chip is on. Now
+  `.chip:hover:not(.is-pressed)`.
+- **The mock presented unmeasured data as measured.** Its unknown-objective
+  fallback carried `scores: { scenic: 0, air: 0, shade: 0 }` and
+  `rest_stops: []`. Zero is a measurement in this app and `[]` means "we looked
+  and found none"; both are now null. The mock also had no `rest_stops: null`
+  fixture at all, so the "were not checked for this route" sentence had never
+  rendered in the demo.
+
+**Components can be tested here after all.** `renderToStaticMarkup` from
+`react-dom/server` works in the existing bare-Node vitest environment with no
+new dependency, so the chips are rendered and asserted rather than grepped —
+the new test fails against the old component. Several comments in this repo say
+nothing renders a component; that is now out of date.
+
+**Live API calls:** none. Verified against `VITE_MOCK_API=1` throughout.

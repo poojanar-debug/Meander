@@ -16,7 +16,7 @@ const COLOMBO = { lat: 6.9271, lon: 79.8612 }
 
 /** The length the point-to-point fixtures were drawn at, before a real
  *  destination started setting it. Durations are still expressed as a
- *  multiple of it so the three routes keep their relative shape. */
+ *  multiple of it so the six routes keep their relative shape. */
 const BASE_TRIP_M = 2100
 
 const sleep = (ms, signal) =>
@@ -153,7 +153,7 @@ function steps(geometry, distanceM, durationMin, streets) {
 }
 
 /**
- * The three fixture routes for one request.
+ * The six fixture routes for one request, one per objective.
  *
  * Exported for the test suite only — nothing but `mockFetchRoutes` below calls
  * it in the app. The suite needs it directly because the streaming path it
@@ -165,7 +165,7 @@ export function buildRoutes(req) {
   const dest = req.destination ?? null
   const isLoop = !dest
   const minutes = req.minutes ?? 35
-  // `polyline` puts its bow at zero at t=1, so all three of these end on the
+  // `polyline` puts its bow at zero at t=1, so every one of these ends on the
   // destination however far they wander on the way. That is the property the
   // map, the arrival latch and the last step all read.
   const aim = dest ? aimAt(origin, dest) : null
@@ -193,6 +193,18 @@ export function buildRoutes(req) {
   const accessibleGeom = isLoop
     ? loop(origin, 380 * scale, 0)
     : polyline(origin, aim.bearingDeg, aim.lengthM, -0.09)
+  // Six distinct shapes, not three drawn twice. The rail, the map legend and
+  // the screenshot demo all read six lines at once, and two objectives sharing
+  // a polyline would look like the picker doing nothing.
+  const quietGeom = isLoop
+    ? loop(origin, 470 * scale, 2)
+    : polyline(origin, aim.bearingDeg, aim.lengthM, 0.14)
+  const shadeGeom = isLoop
+    ? loop(origin, 560 * scale, 4)
+    : polyline(origin, aim.bearingDeg, aim.lengthM, -0.28)
+  const airGeom = isLoop
+    ? loop(origin, 610 * scale, 5)
+    : polyline(origin, aim.bearingDeg, aim.lengthM, 0.34)
 
   // Distances are measured from the drawn geometry rather than declared
   // separately. When they disagreed, the rail said 1.4 km and follow mode's
@@ -201,10 +213,13 @@ export function buildRoutes(req) {
   const fastestM = Math.round(lengthOf(fastestGeom))
   const scenicM = Math.round(lengthOf(scenicGeom))
   const accessibleM = Math.round(lengthOf(accessibleGeom))
+  const quietM = Math.round(lengthOf(quietGeom))
+  const shadeM = Math.round(lengthOf(shadeGeom))
+  const airM = Math.round(lengthOf(airGeom))
 
-  // Route.elevation, in the shape backend/models.py:99-116 defines. The three
-  // routes deliberately cover the three states the profile has to keep apart,
-  // the same way `shade: null` below covers them for scores:
+  // Route.elevation, in the shape backend/models.py:99-116 defines. The first
+  // three routes deliberately cover the three states the profile has to keep
+  // apart, the same way the nulls below cover them for scores:
   //
   //   fastest      measured, nothing over the limit
   //   scenic       measured, two stretches over it — the hatched case
@@ -245,7 +260,7 @@ export function buildRoutes(req) {
     duration_min: Math.round(18 * scale),
     distance_m: fastestM,
     mode,
-    scores: { scenic: 0.31, air: 0.62, shade: 0.2 },
+    scores: { scenic: 0.31, air: 0.62, shade: 0.2, quiet: 0.18 },
     elevation: profile(fastestM, 6, []),
     scoring_method: 'clip',
     confidence: 0.88,
@@ -271,7 +286,7 @@ export function buildRoutes(req) {
     duration_min: Math.round(26 * scale),
     distance_m: scenicM,
     mode,
-    scores: { scenic: 0.79, air: 0.71, shade: 0.58 },
+    scores: { scenic: 0.79, air: 0.71, shade: 0.58, quiet: 0.52 },
     elevation: profile(scenicM, 24, [[12, 19], [38, 44]]),
     scoring_method: 'clip',
     confidence: 0.72,
@@ -313,13 +328,13 @@ export function buildRoutes(req) {
     duration_min: Math.round(22 * scale),
     distance_m: accessibleM,
     mode,
-    // `shade: null` is deliberate and is the only fixture that exercises it.
+    // The two nulls are deliberate and this is the only fixture carrying any.
     // A null score means "we did not measure this"; a 0 means "we measured it
     // and it is zero". They are different statements and the UI must never
-    // render them alike — null gets a hatched track and the words "not
-    // measured", 0 gets a real, empty bar. Without a null anywhere in the mock
-    // that branch was never seen.
-    scores: { scenic: 0.44, air: 0.65, shade: null },
+    // render them alike — null gets the words "not measured", 0 gets a real,
+    // empty bar. Without a null anywhere in the mock that branch was never
+    // seen, and the quiet row is the newest place it can go unseen.
+    scores: { scenic: 0.44, air: 0.65, shade: null, quiet: null },
     // null, not a flat profile — see the note beside `profile` above.
     elevation: null,
     scoring_method: 'geometry_only',
@@ -352,10 +367,114 @@ export function buildRoutes(req) {
     status_note: 'Two barriers on this route cannot be avoided with the current road data.',
   }
 
-  const byId = { fastest, scenic, accessible }
+  // The three objectives that spent a release as disabled chips. Each carries
+  // a note in the shape the backend sends with its preset: these steer on
+  // OpenStreetMap way tags, which is a proxy for quiet, shade and clean air
+  // rather than a measurement of any of them, and the detail panel is the only
+  // place a user is told so.
+  //
+  // ⚠ The wording tracks `routing.PRESET_NOTES` rather than paraphrasing it.
+  // The first draft of the shade note here said shade was inferred "from tree
+  // and land use tags", which names a source the backend explicitly says it
+  // does not have — a demo that invents a data source is the same false claim
+  // as a score that invents a measurement, and harder to catch because nothing
+  // downstream reads the string.
+  const quiet = {
+    id: 'quiet',
+    label: 'Quiet',
+    status: 'ok',
+    geometry: quietGeom,
+    duration_min: Math.round(24 * scale),
+    distance_m: quietM,
+    mode,
+    scores: { scenic: 0.55, air: 0.6, shade: 0.41, quiet: 0.86 },
+    elevation: profile(quietM, 12, []),
+    scoring_method: 'geometry_only',
+    confidence: 0.66,
+    rest_stops: [
+      { ...pointAt(quietGeom, 0.24), type: 'bench', at_m: 460 },
+      { ...pointAt(quietGeom, 0.71), type: 'drinking water', at_m: 1420 },
+    ],
+    steps: steps(quietGeom, quietM, 24 * scale, [
+      'Barnes Place',
+      'Guildford Crescent',
+      'Rosmead Place',
+      'Horton Place',
+    ]),
+    blockers: [],
+    narration: null,
+    synthetic_upstream: false,
+    confidence_note: 'Accessibility data covers 66% of this route.',
+    status_note:
+      'Quiet is inferred from the kind of way this route follows, mostly how much motor traffic its streets carry. Nobody has measured the noise on it.',
+  }
+
+  const shade = {
+    id: 'shade',
+    label: 'Shade',
+    status: 'ok',
+    geometry: shadeGeom,
+    duration_min: Math.round(28 * scale),
+    distance_m: shadeM,
+    mode,
+    scores: { scenic: 0.68, air: 0.64, shade: 0.9, quiet: 0.47 },
+    elevation: profile(shadeM, 18, [[22, 27]]),
+    scoring_method: 'clip',
+    confidence: 0.81,
+    // Looked, found none. The empty list and the null on `air` below are the
+    // two halves of a distinction the UI states in words, and neither had a
+    // fixture behind it until these three arrived.
+    rest_stops: [],
+    steps: steps(shadeGeom, shadeM, 28 * scale, [
+      'Ward Place',
+      'Cinnamon Gardens',
+      'Independence Avenue',
+      'Reid Avenue',
+    ]),
+    blockers: [],
+    narration: null,
+    synthetic_upstream: false,
+    confidence_note: 'Accessibility data covers 81% of this route.',
+    status_note:
+      'Tree cover is not something a route can be planned from. This route prefers the kinds of way that tend to be shaded, and avoids bridges, which never are.',
+  }
+
+  const air = {
+    id: 'air',
+    label: 'Clean air',
+    status: 'ok',
+    geometry: airGeom,
+    duration_min: Math.round(31 * scale),
+    distance_m: airM,
+    mode,
+    scores: { scenic: 0.5, air: 0.88, shade: 0.33, quiet: 0.61 },
+    elevation: profile(airM, 9, []),
+    scoring_method: 'geometry_only',
+    confidence: 0.58,
+    // Could not look. Not the same answer as the empty list above.
+    rest_stops: null,
+    steps: steps(airGeom, airM, 31 * scale, [
+      'Marine Drive',
+      'Bambalapitiya Flats',
+      'Station Passage',
+      'Sea Avenue',
+    ]),
+    blockers: [],
+    narration: null,
+    synthetic_upstream: false,
+    confidence_note: 'Accessibility data covers 58% of this route.',
+    status_note:
+      'Clean air here means keeping away from motor traffic and out of tunnels. The air quality reading on the card covers the whole area, not this pavement.',
+  }
+
+  const byId = { fastest, scenic, accessible, quiet, shade, air }
   const requested = req.objectives?.length ? req.objectives : ['fastest', 'scenic', 'accessible']
   return requested.map(
     (id) =>
+      // Every objective in the table above has a fixture, so reaching this
+      // means the id is not one of them — a hand-edited permalink, or a stale
+      // client. Nulls rather than zeros throughout: nothing routed this and
+      // nothing scored it, and a zero is a measurement.
       byId[id] ?? {
         id,
         label: id[0].toUpperCase() + id.slice(1),
@@ -364,15 +483,15 @@ export function buildRoutes(req) {
         duration_min: 0,
         distance_m: 0,
         mode,
-        scores: { scenic: 0, air: 0, shade: 0 },
+        scores: { scenic: null, air: null, shade: null, quiet: null },
         scoring_method: 'placeholder',
-        confidence: 0,
-        rest_stops: [],
+        confidence: null,
+        rest_stops: null,
         blockers: [],
         narration: null,
         synthetic_upstream: false,
         confidence_note: null,
-        status_note: `The ${id} objective is not implemented yet.`,
+        status_note: `Meander has no objective called ${id}, so there is nothing here to route for it.`,
       },
   )
 }
@@ -384,6 +503,12 @@ const NARRATION = {
     'Cuts east into the park after four minutes and stays under trees almost to the end. Two benches on the way, and a water fountain roughly half way.',
   accessible:
     'Follows quiet residential streets with dropped kerbs until the canal crossing, where three steps stop it. Nothing in the road data offers a way around.',
+  quiet:
+    'Leaves the main road at the first junction and stays on residential streets the whole way. Two crossings, both signalled, and a water fountain about two thirds along.',
+  shade:
+    'Hugs the tree line through the gardens rather than taking the direct way, which is what makes it longer. No benches anywhere on it, so plan a stop before you set off.',
+  air:
+    'Keeps a block back from the arterial road for most of its length and finishes along the sea front. Rest stops were not checked here.',
 }
 
 export async function mockFetchRoutes(req, { signal, onProgress, onRoute } = {}) {

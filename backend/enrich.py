@@ -922,7 +922,19 @@ class EnrichContext:
     # as "no gates on this route".
     barrier_nodes: list[dict[str, Any]] | None = None
     air: AirQuality | None = None
-    shade_score: float | None = None
+    # **How much shade the hour demands, not how much a route provides.**
+    #
+    # It used to be the finished score, and that was the whole of `Scores.shade`
+    # on the wire: one number computed at the midpoint of the longest route and
+    # stamped on every route in the request. Under the three original objectives
+    # nobody could tell, because it was the same claim about the same hour
+    # whichever route you looked at. A Shade *preset* made it a defect — the one
+    # route chosen for shade would have reported exactly the shade of the route
+    # that ignored it, which is a label with nothing behind it.
+    #
+    # So the split: this is the demand, `geometry.score_geometry` measures what
+    # each route offers against it, and `main._blend_shade` puts them together.
+    shade_need: float | None = None
     sun: SunPosition | None = None
     departure: DepartureSuggestion | None = None
 
@@ -958,11 +970,12 @@ async def enrich_context(
     )
 
     sun = solar_position(when, midpoint)
-    # "How much shade will you get relative to how much you need." With no cloud
-    # data there is no honest number, so it stays null rather than becoming 1.0.
-    shade: float | None = None
+    # How much shade this hour calls for: a high sun in a clear sky, and nothing
+    # at all once it is down or the cloud has closed in. With no cloud data
+    # there is no honest number, so it stays null rather than becoming 0.
+    need: float | None = None
     if cloud is not None:
-        shade = round(max(0.0, min(1.0, 1.0 - shade_need(sun) * (1.0 - cloud))), 4)
+        need = round(max(0.0, min(1.0, shade_need(sun) * (1.0 - cloud))), 4)
 
     departure = await _degrade(
         "best_departure", best_departure(longest, when, air=air, cloud=cloud)
@@ -972,7 +985,7 @@ async def enrich_context(
         rest_stop_nodes=stops_found.usable if stops_found else None,
         barrier_nodes=barriers_found.usable if barriers_found else None,
         air=air,
-        shade_score=shade,
+        shade_need=need,
         sun=sun,
         departure=departure,
     )

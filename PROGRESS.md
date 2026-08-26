@@ -4676,3 +4676,211 @@ is making.
 
 **Live API calls:** the live gate's, and the health probes above. The API half
 was untouched: this change is frontend-only and moved no wire field.
+
+## §15 — The other three routes, and what they are allowed to claim · 2026-08-26
+
+`RouteId` has promised six objectives since the first commit. Three of them had
+a label, a colour, a dash pattern and a chip reading `· soon`, and no
+implementation: `main.py` turned each into a blocked route saying "not
+implemented yet", and a test asserted that it did. This is `quiet`, `shade` and
+`air` becoming real.
+
+### The problem that had to be solved before any of them could ship
+
+None of the three things they are named after is in OpenStreetMap in a form a
+router can steer on. There is no noise layer. There is no pollution layer.
+Trees are mapped as points and woodland as areas, and a `custom_model` reads
+edges — so canopy never reaches the thing that picks the route. What is
+available is `road_class`, `surface` and `road_environment`, three tags about
+the *kind* of way.
+
+So each preset is a preference inferred from tags, and the decision recorded in
+[adr/0007](docs/adr/0007-preference-presets-are-proxies.md) is that this is
+worth shipping **only** if every route from one says so where a user reads it.
+`routing.PRESET_NOTES` is one sentence per preset, carried on `preset_note` and
+arriving as `status_note` on `status: "ok"` routes as well as blocked ones. The
+shade sentence names the missing data outright rather than gesturing at it.
+
+### Where the three actually differ, and where they honestly do not
+
+Noise and street-level pollution fall off with the same underlying quantity —
+how much motor traffic a way carries — and `road_class` is the only proxy either
+one has. `ROAD_CLASS_QUIET_PROXY` is therefore deliberately close to
+`ROAD_CLASS_AIR_PROXY`, and the comment above it says so rather than dressing up
+a distinction the data cannot support.
+
+What separates them is `SURFACE_QUIET`, which has no counterpart in the air
+proxy at all: cobbles are the loudest surface in a European city and no dirtier
+for it, and asphalt is the quietest while `SURFACE_NATURALNESS` rates it 0.15
+because a scenic route wants the opposite thing. Both tables are right about the
+property they name.
+
+Air and shade diverge hardest on `road_environment`, and that divergence is
+constructed rather than lucky. A tunnel is the worst place on a route for the
+air you breathe (`multiply_by 0.03`) and the only fully covered thing a road
+graph knows about (`1.0`, unpenalised). A bridge deck is the reverse: no street
+trees, no buildings, no shade (`0.15`) and exactly the open, windy conditions
+that disperse a plume (`1.0`, unpenalised).
+
+`quiet` differs from `scenic` in a third way. `scenic_custom_model` leaves
+RESIDENTIAL, SERVICE and UNCLASSIFIED at 1.0, so it only ever steers *off*
+arterials; a residential street still carries cars, so `quiet` steps down
+through them too. And `quiet` never rewards an unsealed surface, which is
+scenic's signature.
+
+Worth writing down while reading those models: **rules that multiply by exactly
+1 are no-ops.** GraphHopper starts every edge at priority 1.0, so
+`scenic_custom_model`'s several `multiply_by: "1.0"` lines document an intention
+the router never acts on. Reading them as though they did something is the
+easiest way to misjudge what scenic will return.
+
+### `Scores.shade` was measuring the hour, not the route
+
+Found while building the preset, and it would have made the preset meaningless.
+`enrich_context` computed one shade figure at the midpoint of the longest route
+and `main.py` stamped it on every route in the request. Under three objectives
+nobody could tell: it was the same claim about the same hour whichever route you
+looked at. A Shade *preset* would have reported exactly the shade of the route
+that ignored shade.
+
+Split into two halves that compose. `EnrichContext.shade_need` is the demand —
+sun elevation against cloud cover, per request. `score_geometry` returns
+`shade_cover`, per route, from the canopy tables. `main._blend_shade` is
+`1 - need * (1 - cover)`, which is a strict generalisation of the old formula:
+pin `cover` to zero and it is `1 - need` exactly. At night and under closed
+cloud every route scores 1.0, because nobody is short of shade at midnight and a
+low score there would be the app inventing a problem.
+
+Measured, with a clear July noon and the demo fixtures: fastest 0.381, air
+0.601, shade 0.739. Before this change all three would have read the same
+number.
+
+`Scores.quiet` was added rather than folded into `air`. A preset with no number
+beside it cannot be checked by the person reading the card.
+
+### Two tests that caught things nothing else could
+
+`test_each_model_and_the_table_that_scores_it_agree_on_ordering` compares each
+custom model's effective per-class multiplier against the table that scores the
+result. It failed on the first run: `shade_custom_model` did not mention `STEPS`
+at all, and an unmentioned road class **keeps priority 1.0** — so the model put a
+flight of steps in its top band while `ROAD_CLASS_CANOPY_PROXY` rated it below an
+ordinary footway. A route chosen for shade could have scored worse for shade than
+one that ignored it, which is the label-with-nothing-behind-it failure
+`route_scenic` was written to prevent.
+
+`test_custom_models_only_name_values_graphhopper_knows` enforces what
+`routing.py:54-60` had only described in prose: a custom model naming an encoded
+value the graph does not carry fails the **whole request**, and the vocabulary is
+not the OSM one — `surface=earth` is valid OSM and rejected here.
+
+### The synthetic fixtures needed more care than expected
+
+Eighteen new GraphHopper fixtures, six scenarios by three presets, generated by
+`scripts/make_synthetic_fixtures.py`. No committed fixture was modified: a
+fixture is keyed on a hash of the outgoing request body and the existing three
+presets send the same bodies they always did.
+
+Three things had to change in the generator, and two of them were defects.
+
+**The preset was being sniffed back out of the request.** No custom model meant
+fastest, a rule mentioning STEPS meant accessible, anything else meant scenic.
+That works for exactly three presets and silently mislabels six. The generator
+already knows which preset it is asking for, so it now says so.
+
+**`_weighted_spans` cannot express a four per cent tag.** It lays down runs of
+two to eight points over a route of seventy-odd, so the smallest thing it can
+say is about three per cent and the realised share of a rare value swings wildly.
+Asked for four per cent BRIDGE, the shade loop drew **seventeen** — enough to
+pull its cover score below the scenic route's and make the demo say the opposite
+of what the preset does. Tunnel and bridge are now forced spans, like the
+`known_bad` steps and cobbles already were, and they are the only tags in the
+file that decide anything on their own.
+
+**The first quiet tag mix disagreed with the quiet model.** It was
+residential-heavy, on the loose idea that a quiet route means back streets.
+`quiet_custom_model` penalises RESIDENTIAL at 0.7 and leaves car-free ways at
+1.0, so it reaches for a footpath first. The mismatch made the *air* route score
+higher on quietness than the quiet one. A fixture that disagrees with the model
+it stands in for is worse than no fixture.
+
+### What is deliberately not claimed
+
+On the demo data `scenic` beats `air` on the air proxy at two of three
+locations, and beats `quiet` on quietness at one. That was not tuned away,
+because it is true: a woodland path really is quiet and really is away from
+traffic, and editing the committed fixtures of a shipped preset to flatter a new
+one would be inventing a result. The test asserts each preference preset beats
+**`fastest`** on its own measure, which is the bar a label actually has to clear.
+
+Nor is a canopy query to Overpass, which would be the honest version of shade.
+Overpass is already the entire latency budget of a request at 13.6 s, and
+`overpass_barrier_query` records that one bbox over three Vondelpark routes
+returns more than 2,000 barrier nodes and truncates. Trees are denser than
+barriers, and a truncated answer is a biased sample of the bbox rather than a
+short one.
+
+### The self-hosted verification is now wider and unrun
+
+`scripts/verify_selfhosted.py` checked three presets; it checks six. It also
+stopped requiring every geometry to differ from every other, and now requires
+each steered preset to differ from **`fastest`** — because a graph with no
+tunnel near the origin will answer `air` and `shade` identically and be right
+to, while either matching `fastest` is the custom-model-ignored failure the
+script exists to catch.
+
+**It has not been re-run.** No self-hosted graph has been up. "All six route
+against a self-hosted server" is an expectation, not a result, and README.md
+says so in those words.
+
+`backend/record_fixtures.py` was widened the same way; its worst-case credit
+estimate went from five requests per scenario to eight (five single-shot presets
+plus scenic's three-rung ladder).
+
+### The frontend was already built for this
+
+Almost nothing had to change to release the chips. `dash.js`'s identity table
+has carried all six ids, colours and dash patterns from the start;
+`permalink.js` derives its accepted set from that table rather than hard-coding
+one, and `permalink.test.js` already round-tripped `obj=scenic,scenic,air,shade,quiet,fastest`.
+`App.jsx`'s reducer, its three-at-a-time refusal, `buildRouteRequest`,
+`RouteRail`, `MapView` and the `.dot--*` classes are all generic over the id.
+
+What was left was `ObjectiveChips.jsx`'s `SOON` set, three chip-pressed CSS
+rules with the palette families they needed, a fourth score bar, the mock's
+fixtures, and one rendering gap. `frontend/PROGRESS.md` has the detail; two
+things from it belong here.
+
+**`status_note` on an `ok` route had never reached a screen.** The backend has
+always been able to emit one — `_status_note` returns `raw.preset_note`
+regardless of blocked status — and `route_scenic` has been setting notes like
+"No route near you was more scenic than the fastest one, so this is much the
+same way" since it was written. `RouteDetail.jsx:220` gated on
+`route.status !== 'ok'`, so every one of them was dropped. It stopped being
+cosmetic the moment three presets needed to state their basis.
+
+**A pressed chip lost its wash under the cursor.** `.chip:not(:disabled):hover`
+scored (0,3,0) against `.chip--x.is-pressed`'s (0,2,0), so hovering a selected
+chip on a pointer device replaced its accent with the neutral hover fill. The
+wash is one of the two signals that a chip is on; the other is `aria-pressed`,
+which a sighted mouse user does not hear.
+
+### Numbers
+
+**787 backend tests and 597 frontend tests pass offline**, at 87.04% statement
+coverage against the 85% floor. The backend suite was re-run under
+`unshare -n` — the new presets answer entirely from committed fixtures with the
+network unplugged.
+
+The layout and accessibility gate reports **85 checks, all green**, against real
+headless Chrome in both themes. The pre-change gate was 70, and it was also run
+against the new build and stayed green, so nothing it already graded regressed.
+Fifteen of the new checks are the objective picker, which had no interaction
+coverage at all: the gate now presses a chip, trades `accessible` out for
+`quiet`, and runs axe and the 44x44 sweep over a screen where the new washes are
+actually painted.
+
+**Live API calls:** none. Every route in this entry came from a committed
+fixture, every enrichment call degraded to null against a missing one, and the
+gate ran against `VITE_MOCK_API=1`. No self-hosted graph was available, which is
+why the widened `verify_selfhosted.py` is unrun and said to be.

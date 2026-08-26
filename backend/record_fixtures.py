@@ -20,7 +20,7 @@ from . import fixtures as fx
 from .config import TEST_LOCATIONS_BY_SLUG, settings
 from .geometry import LatLon
 from .logging_setup import configure_logging, get_logger
-from .routing import GRAPHHOPPER_CREDIT_COST, route_accessible, route_fastest, route_scenic
+from .routing import GRAPHHOPPER_CREDIT_COST, PRESETS
 
 log = get_logger(__name__)
 
@@ -36,11 +36,18 @@ def _scenarios():
     return SCENARIOS
 
 
+def _preset_names() -> tuple[str, ...]:
+    from scripts.make_synthetic_fixtures import SYNTHETIC_PRESETS
+
+    return SYNTHETIC_PRESETS
+
+
 async def _record_graphhopper(force: bool) -> int:
     scenarios = _scenarios()
     budget = fx.get_budget()
-    # Three presets per scenario, and scenic may climb its ladder up to 3 rungs.
-    worst_case = len(scenarios) * 5 * GRAPHHOPPER_CREDIT_COST
+    # Six presets per scenario, and scenic may climb its ladder up to 3 rungs,
+    # so eight requests: five single-shot presets plus scenic's three.
+    worst_case = len(scenarios) * 8 * GRAPHHOPPER_CREDIT_COST
     remaining = budget.remaining("graphhopper")
     print(f"GraphHopper: {len(scenarios)} scenarios, worst case {worst_case} credits, "
           f"{remaining} remaining in the budget.")
@@ -58,17 +65,20 @@ async def _record_graphhopper(force: bool) -> int:
             dest = LatLon(d.lat, d.lon)
 
         fastest = None
-        for name in ("fastest", "scenic", "accessible"):
+        # Same order the generator writes in, and `fastest` first is required
+        # rather than tidy: route_scenic derives its duration cap and its
+        # greenness floor from it.
+        for name in _preset_names():
             if force:
                 body_sig = _signature_for(origin, dest, scenario, name)
                 fx.fixture_path("graphhopper", body_sig).unlink(missing_ok=True)
             try:
-                if name == "fastest":
-                    fastest = await route_fastest(origin, dest, scenario.minutes, scenario.mode)
-                elif name == "scenic":
-                    await route_scenic(origin, dest, scenario.minutes, scenario.mode, fastest)
+                if name == "scenic":
+                    await PRESETS[name](origin, dest, scenario.minutes, scenario.mode, fastest)
                 else:
-                    await route_accessible(origin, dest, scenario.minutes, scenario.mode)
+                    route = await PRESETS[name](origin, dest, scenario.minutes, scenario.mode)
+                    if name == "fastest":
+                        fastest = route
             # A recording run must survive one bad scenario: the point is to
             # capture as many fixtures as the budget allows in a single pass.
             except Exception as exc:  # noqa: BLE001 — an offline run must not abort part-way

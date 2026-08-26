@@ -34,9 +34,30 @@ Every error uses one envelope:
 | `minutes` | no | 20–360, default 35. The time budget, and the primary input **for a loop**. It has a default, so it is always populated; read `budget_minutes()`, which is `None` when there is a destination. The client omits it entirely from a point-to-point body, and the plan surfaces hide the dial rather than show one that changes nothing. |
 | `mode` | no | `auto` \| `foot` \| `bike` \| `car`. Default `auto`. |
 | `depart_at` | no | ISO 8601. Used for sun position and air quality. |
-| `objectives` | no | Up to three of `fastest` `scenic` `accessible` `quiet` `shade` `air`. Defaults to the first three. |
+| `objectives` | no | Up to three of `fastest` `scenic` `accessible` `quiet` `shade` `air`. Defaults to the first three. `nature` is accepted as a retired alias for `scenic` and is never emitted. |
 
 Unknown fields are rejected with `422` rather than ignored.
+
+**What each objective optimises**
+
+| id | label | what it asks the router for |
+|---|---|---|
+| `fastest` | Fastest | Shortest time. No custom model. The control every other preset is measured against. |
+| `scenic` | Scenic | Maximum visual appeal, capped at 1.6× the fastest duration and required to beat it. Several candidates are routed and the best is kept. |
+| `accessible` | Accessible | Hard accessibility constraints first. **May return `status: "blocked"`** rather than a route. |
+| `quiet` | Quiet | Away from motor traffic, and off cobblestones. Unlike `scenic` it penalises ordinary residential streets, and unlike `scenic` it has no preference for an unsealed surface. |
+| `shade` | Shade | The kinds of way that tend to be shaded, and never a bridge deck. |
+| `air` | Clean air | Away from motor traffic, and **out of tunnels**, which is where it and `shade` pull hardest in opposite directions. |
+
+The last three are **preferences inferred from OpenStreetMap way tags**, not
+measurements of noise, canopy or pollution — none of the three exists in OSM in
+a form a router can steer on. Every route from one of them carries a
+`status_note` saying so in a sentence, on `status: "ok"` as well as on blocked
+routes. See [adr/0007](adr/0007-preference-presets-are-proxies.md).
+
+Every preset except `fastest` sends a `custom_model`, which needs GraphHopper's
+flexible mode. On a free hosted package all five come back
+`status: "blocked"` with that reason; self-hosting is what makes them real.
 
 **`auto` mode ladder** — resolved server-side, and mirrored exactly by `deriveMode` in the frontend:
 
@@ -59,7 +80,7 @@ minutes > 120          -> car
       "duration_min": 18.0,
       "distance_m": 1450,
       "mode": "foot",
-      "scores": { "scenic": 0.31, "air": 0.62, "shade": 0.20 },
+      "scores": { "scenic": 0.31, "air": 0.62, "shade": 0.20, "quiet": 0.55 },
       "scoring_method": "clip",
       "confidence": 0.88,
       "rest_stops": [{ "lat": 6.93, "lon": 79.86, "type": "bench", "at_m": 180 }],
@@ -86,6 +107,14 @@ minutes > 120          -> car
 | `confidence` | Fraction of the route for which accessibility data actually exists, 0…1. |
 | `confidence_note` | The same thing as a sentence, pre-written for display. Render it verbatim. |
 | `synthetic_upstream` | `true` when the route was built from a hand-authored fixture rather than a real routing response. Implies `scoring_method: "placeholder"`. |
+| `scores.*` | `scenic`, `air`, `shade` and `quiet`, each **`null` when it was not computed**. Null is not zero: zero shade is a claim about a place, "we did not measure this" is not. Render null as "not measured". Every score is reported on every route whatever objective produced it, so the comparison across the rail is the reader's to make. |
+| `status_note` | Present on blocked routes, and on `ok` routes from `quiet`, `shade` and `air`, where it states what the objective was inferred from. Render it verbatim. |
+
+`scores.shade` is the only one that combines a request-level figure with a
+route-level one: how much shade the hour calls for (sun elevation against cloud
+cover, at the midpoint) against how much cover the route's own tags suggest.
+At night and under closed cloud it is 1.0 on every route, because nobody is
+short of shade at midnight.
 
 ### `status: "blocked"` is a result, not an error
 

@@ -1,6 +1,11 @@
 import { spawn } from 'node:child_process'
 import { existsSync } from 'node:fs'
 
+// The objective table itself, so the picker is graded against what the app
+// believes it offers rather than against a number written down twice. It is
+// plain data with no imports of its own and never enters the browser here.
+import { OBJECTIVES } from '../src/lib/dash.js'
+
 /**
  * Layout and accessibility gate, in a real headless Chrome.
  *
@@ -18,8 +23,9 @@ import { existsSync } from 'node:fs'
  * depends on them, and a selector matching zero elements is a FAILURE, not a
  * silent skip.
  *
- * What it drives, per viewport: the plan surface → Use my location → Find
- * routes → the streamed cards → the route detail → (on a phone) follow mode.
+ * What it drives, per viewport: the plan surface → the objective picker →
+ * Use my location → Find routes → the streamed cards → the route detail →
+ * (on a phone) follow mode.
  * At each stop: every interactive target clears 44x44 in both themes, axe
  * reports no wcag2a/2aa violations in both themes, nothing scrolls
  * horizontally at 320 or 390, and there is exactly one polite live region.
@@ -564,6 +570,83 @@ async function a11yPass(label) {
 await load(390, 844, true)
 await a11yPass('plan')
 
+// 3a. THE OBJECTIVE PICKER — operated, not merely counted.
+//
+// `.chip` has been in the plan manifest since this gate was written, which
+// proves chips exist and nothing more. It is the control that decides what
+// gets routed, all six of its chips went live when the last three objectives
+// shipped, and pressing one is the only way to learn that a chip presses at
+// all: axe reads the markup, the sweep measures the box, and neither notices
+// a dead handler or a pressed state that never paints.
+await load(390, 844, true)
+
+const chipStates = () =>
+  cdp.evaluate(`([...document.querySelectorAll('.chip')]).map(c => ({
+    id: (c.className.match(/chip--([a-z]+)/) || [])[1] ?? '?',
+    disabled: c.disabled,
+    pressed: c.getAttribute('aria-pressed') === 'true',
+    washed: c.classList.contains('is-pressed'),
+  }))`)
+
+async function pressChip(id) {
+  const hit = await cdp.evaluate(
+    `(()=>{const c=document.querySelector('.chip--${id}');if(!c)return false;c.click();return true})()`,
+  )
+  await new Promise((r) => setTimeout(r, 200))
+  return hit
+}
+
+const chipsAtRest = await chipStates()
+const chipIds = chipsAtRest.map((c) => c.id)
+check(
+  '[objectives] every objective in dash.js has a chip that can be pressed',
+  chipIds.length === OBJECTIVES.length &&
+    OBJECTIVES.every((o) => chipIds.includes(o.id)) &&
+    chipsAtRest.every((c) => !c.disabled),
+  `${chipIds.join(', ') || 'none'}${
+    chipsAtRest.some((c) => c.disabled)
+      ? ` — disabled: ${chipsAtRest.filter((c) => c.disabled).map((c) => c.id).join(', ')}`
+      : ''
+  }`,
+)
+check(
+  '[objectives] aria-pressed agrees with the pressed wash on every chip',
+  chipsAtRest.every((c) => c.pressed === c.washed),
+  chipsAtRest.filter((c) => c.pressed !== c.washed).map((c) => c.id).join(', '),
+)
+
+// Three are pressed on a fresh load and the reducer refuses a fourth on
+// purpose, so the toggle makes room before it asks for anything. Pressing
+// `quiet` straight into a full set would be refused, and a refusal looks
+// exactly like a dead chip from out here.
+const released = await pressChip('accessible')
+const taken = await pressChip('quiet')
+const chipsAfter = Object.fromEntries((await chipStates()).map((c) => [c.id, c]))
+check('[objectives] both chips were there to press', released && taken)
+check(
+  '[objectives] pressing a pressed chip releases it',
+  chipsAfter.accessible?.pressed === false && chipsAfter.accessible?.washed === false,
+  JSON.stringify(chipsAfter.accessible ?? null),
+)
+check(
+  '[objectives] pressing a free chip presses it',
+  chipsAfter.quiet?.pressed === true && chipsAfter.quiet?.washed === true,
+  JSON.stringify(chipsAfter.quiet ?? null),
+)
+
+const chipOverflow = await cdp.evaluate(overflowCheck)
+check(
+  '[objectives] no horizontal scroll with a different three pressed',
+  chipOverflow.scrollW <= chipOverflow.clientW + 1,
+  `${chipOverflow.scrollW} vs ${chipOverflow.clientW}${
+    chipOverflow.wide.length ? ` — ${chipOverflow.wide.join(', ')}` : ''
+  }`,
+)
+
+// Graded as its own screen: a pressed chip is the only place three of the
+// wash families are drawn at all, and their text sits on them.
+await a11yPass('objectives')
+
 // 3b. THE PLAN WITH A DESTINATION — a distinct screen, so it is graded as one.
 //
 // It was reachable before this only through a shared link, which the gate has
@@ -647,12 +730,52 @@ if (resultsOk) {
 }
 
 // 5. THE DETAIL, mobile: one tap on a card selects and opens it.
+//
+// Routed with `quiet` traded in for `accessible` rather than on the default
+// three, because the two newest pieces of this panel only exist on a route
+// that has them: the fourth score bar, and the sentence an ok route carries
+// saying what its objective steered on. All three objectives that are on by
+// default have neither, so grading the default set grades the old panel.
 await load(390, 844, true)
-await driveToResults(true)
-await cdp.evaluate(`(()=>{document.querySelector('button.route')?.click()})()`)
+await cdp.evaluate(`(()=>{document.querySelector('[aria-label="Use my location"]')?.click()})()`)
+await waitFor(
+  `!![...document.querySelectorAll('button')].find(x=>/find routes/i.test(x.textContent||'')&&!x.disabled)`,
+  60,
+)
+await pressChip('accessible')
+await pressChip('quiet')
+const swapped = await cdp.evaluate(
+  `document.querySelector('.chip--quiet')?.getAttribute('aria-pressed') === 'true'`,
+)
+check('[detail] the picker traded quiet in for accessible', swapped)
+await cdp.evaluate(
+  `(()=>{const b=[...document.querySelectorAll('button')].find(x=>/find routes/i.test(x.textContent||'')&&!x.disabled);if(b)b.click()})()`,
+)
+await waitFor(`document.querySelectorAll('button.route').length >= 3`, 80)
+const quietCard = await cdp.evaluate(`(() => {
+  const row = [...document.querySelectorAll('button.route')].find(b => /^Quiet/.test((b.textContent || '').trim()))
+  if (!row) return false
+  row.click()
+  return true })()`)
+check('[detail] the objective that was traded in has a card', quietCard)
 const detailUp = await waitFor(`!!document.querySelector('.detail--sheet')`, 40, 100)
 check('[detail] tapping a card opens the detail sheet', detailUp)
 if (detailUp) {
+  const panel = await cdp.evaluate(`(() => ({
+    rows: [...document.querySelectorAll('.scores__row .scores__label')].map(s => s.textContent),
+    basis: document.querySelectorAll('.detail__basis-note').length,
+    blocked: document.querySelectorAll('.detail__blocked-note').length,
+  }))()`)
+  check(
+    '[detail] one score row per field on the wire',
+    panel.rows.join(',') === 'scenic,air,shade,quiet',
+    panel.rows.join(',') || 'none',
+  )
+  check(
+    "[detail] an ok route's note renders, and not in the rejection skin",
+    panel.basis === 1 && panel.blocked === 0,
+    `${panel.basis} basis, ${panel.blocked} blocked`,
+  )
   await a11yPass('detail')
 }
 

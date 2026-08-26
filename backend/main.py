@@ -791,7 +791,7 @@ def _scored_route(
     raw: RawRoute,
     rest_stops: list[EnrichRestStop] | None = None,
     air: AirQuality | None = None,
-    shade: float | None = None,
+    shade_need: float | None = None,
     assessment: _Assessment | None = None,
     enrichment_pending: bool = False,
 ) -> Route:
@@ -838,7 +838,8 @@ def _scored_route(
         scores=Scores(
             scenic=scores.scenic if scores else None,
             air=_blend_air(air, scores.air if scores else None),
-            shade=shade,
+            shade=_blend_shade(shade_need, scores.shade_cover if scores else None),
+            quiet=scores.quiet if scores else None,
         ),
         scoring_method=method,
         # A coverage figure computed over invented tags is not a coverage
@@ -936,7 +937,7 @@ def _blend_air(measured: AirQuality | None, road_proxy: float | None) -> float |
     """Combine a regional air-quality measurement with local traffic exposure.
 
     The Open-Meteo reading is a real measurement but covers a whole area, so on
-    its own it gives all three routes the same number. The road-class proxy is
+    its own it gives every route in a request the same number. The road-class proxy is
     route-specific but is only a proxy. Together: the regional level, modulated
     by how much traffic this particular route runs alongside.
     """
@@ -945,6 +946,30 @@ def _blend_air(measured: AirQuality | None, road_proxy: float | None) -> float |
     if road_proxy is None:
         return measured.score
     return round(measured.score * (0.55 + 0.45 * road_proxy), 4)
+
+
+def _blend_shade(need: float | None, cover: float | None) -> float | None:
+    """Combine how much shade the hour demands with how much this route offers.
+
+    ``1 - need * (1 - cover)``, which reads as "how much of your need this route
+    meets". At night and under heavy cloud ``need`` is 0 and every route scores
+    1.0, because shade is not a thing anyone is short of at midnight and a low
+    score there would be a complaint about nothing. Under a clear midday sun
+    ``need`` is 1 and the score is the route's cover exactly.
+
+    It is a strict generalisation of what enrich.py used to compute on its own:
+    that figure was ``1 - need``, which is this formula with ``cover`` pinned to
+    zero. Every route in a request got it, so no route could be shadier than any
+    other.
+
+    Null on either input rather than a guess. A missing ``cover`` is the case
+    worth naming: it means the route carries none of the tags the canopy proxy
+    reads, and answering "how much of your need is met" then requires assuming
+    the route provides nothing. That is a claim about a place.
+    """
+    if need is None or cover is None:
+        return None
+    return round(max(0.0, min(1.0, 1.0 - need * (1.0 - cover))), 4)
 
 
 def _blocked_route(route_id: str, label: str, mode: str, note: str) -> Route:
@@ -1098,19 +1123,9 @@ async def route_events(req: RouteRequest) -> AsyncIterator[dict[str, Any]]:
         failures.append(exc)
         routes.append(_blocked_route(objective, label, mode, exc.human_message))
 
-    # Objectives beyond the implemented three (quiet/shade/air) are not silently
-    # dropped — the UI is told they are not available yet.
-    for objective in ordered:
-        if objective not in PRESETS:
-            label = ROUTE_LABELS.get(objective, objective.title())
-            routes.append(
-                _blocked_route(objective, label, mode,
-                               f"The {label.lower()} objective is not implemented yet.")
-            )
-
     # fastest is routed alone and first. This ordering is load-bearing, not
     # stylistic: route_scenic takes it and derives both the SCENIC_DURATION_CAP
-    # and the greenness floor from it. A flat gather over all three would pass
+    # and the greenness floor from it. A flat gather over every objective would pass
     # fastest=None and silently disable both — see test_scenic_baseline.py.
     if "fastest" in objectives:
         yield {"type": "progress", "pct": 15, "text": "Routing the fastest way",
@@ -1126,8 +1141,20 @@ async def route_events(req: RouteRequest) -> AsyncIterator[dict[str, Any]]:
             fastest_route = raw
             routed.append(("fastest", ROUTE_LABELS.get("fastest", "Fastest"), raw))
 
-    # scenic and accessible are independent of each other, so they go together.
-    rest = [o for o in ordered if o in PRESETS and o != "fastest"]
+    # Everything else is independent of everything else, so it goes together.
+    # `ordered` is at most three ids, so this is at most two concurrent routes,
+    # or three when fastest was not asked for.
+    #
+    # No `o in PRESETS` guard, deliberately. There used to be one, paired with a
+    # loop above that turned an objective without a preset into a blocked route
+    # reading "not implemented yet" — and that loop is what made the filter safe.
+    # With every declared objective now routing for real, the filter would
+    # *silently drop* an id instead, which is the failure mode this codebase
+    # keeps writing tests against. `objectives` is a Literal so pydantic rejects
+    # anything unknown with a 422, and `test_every_declared_objective_has_a_preset`
+    # asserts the two sets have not drifted; a KeyError here would be the right
+    # noise if they ever do.
+    rest = [o for o in ordered if o != "fastest"]
     if rest:
         yield {"type": "progress", "pct": 35, "text": "Routing the other ways",
                "segments_scored": 0}
@@ -1148,7 +1175,7 @@ async def route_events(req: RouteRequest) -> AsyncIterator[dict[str, Any]]:
     #
     # Enrichment is the entire latency budget of a request — Overpass measured
     # 13.6 s against 0.024 s for a whole self-hosted route — and it is shared
-    # across all three routes, so waiting for it meant nothing at all reached
+    # across every route in the request, so waiting for it meant nothing at all reached
     # the browser for up to fourteen seconds. The map can draw these now.
     #
     # enrichment_pending says plainly that air, shade and rest stops are not
@@ -1207,7 +1234,7 @@ async def route_events(req: RouteRequest) -> AsyncIterator[dict[str, Any]]:
                 _reassess_with_barriers, assessment, raw, spans
             )
         route = _scored_route(
-            objective, label, raw, stops, context.air, context.shade_score,
+            objective, label, raw, stops, context.air, context.shade_need,
             assessment=assessment,
         )
         routes.append(route)

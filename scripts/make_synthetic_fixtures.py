@@ -54,15 +54,28 @@ from backend import fixtures as fx
 from backend.config import FIXTURE_DIR, GRAPHHOPPER_URL, TEST_LOCATIONS_BY_SLUG
 from backend.geometry import LatLon, haversine_m, path_length_m
 from backend.models import EffectiveMode
-from backend.routing import build_request_body, route_accessible, route_fastest, route_scenic
+from backend.routing import PRESETS, build_request_body
 
 # Metres per second, used to turn a synthetic distance into a synthetic duration.
 SPEED_M_S: dict[str, float] = {"foot": 1.35, "bike": 4.2, "car": 9.0}
 
 # How far the preset bows away from the straight line, as a fraction of the
-# straight-line distance. This is what makes the three presets measurably
-# different geometries rather than three copies of the same one.
-BOW_FRACTION: dict[str, float] = {"fastest": 0.03, "scenic": 0.34, "accessible": 0.13}
+# straight-line distance. This is what makes the presets measurably different
+# geometries rather than six copies of the same one.
+#
+# **Signed**, and each sign is load-bearing. `accessible` used to be negated by
+# a special case inside `_a_to_b`; with six presets bowing the same way, three
+# pairs would have overlapped almost exactly, so the side is now part of the
+# constant. The magnitudes follow each preset's `distance_influence`: a model
+# that tolerates a detour wanders further from the straight line.
+BOW_FRACTION: dict[str, float] = {
+    "fastest": 0.03,
+    "scenic": 0.34,
+    "accessible": -0.13,
+    "quiet": 0.19,
+    "shade": -0.26,
+    "air": 0.11,
+}
 
 # Realistic tag mixes per preset. "MISSING" is included on purpose: most of the
 # world is untagged, and the accessibility engine has to cope with that.
@@ -87,7 +100,54 @@ DETAIL_MIX: dict[str, dict[str, list[tuple[str, float]]]] = {
                     ("MISSING", 0.25)],
         "road_environment": [("ROAD", 1.0)],
     },
+    # Car-free where it can be, and **paved**. The paving is the whole point: a
+    # quiet route has no reason to prefer a gravel track, and `SURFACE_QUIET`
+    # rates asphalt top where `SURFACE_NATURALNESS` rates it near the bottom.
+    #
+    # The first draft of this mix was residential-heavy, on the loose idea that
+    # a quiet route means back streets. That is not what `quiet_custom_model`
+    # does — it penalises RESIDENTIAL at 0.7 and leaves car-free ways at 1.0, so
+    # it reaches for a footpath first and a back street second. A fixture that
+    # disagrees with the model it is standing in for is worse than no fixture:
+    # it was making the *air* route score higher on quietness than the quiet
+    # one, which is exactly the reading a demo must not invent.
+    "quiet": {
+        "road_class": [("FOOTWAY", 0.3), ("PEDESTRIAN", 0.2), ("PATH", 0.15),
+                       ("CYCLEWAY", 0.15), ("LIVING_STREET", 0.1), ("RESIDENTIAL", 0.1)],
+        "surface": [("ASPHALT", 0.55), ("CONCRETE", 0.15), ("PAVING_STONES", 0.05),
+                    ("MISSING", 0.25)],
+        "road_environment": [("ROAD", 1.0)],
+    },
+    # Tree-lined ways, a tunnel it is happy to use, and almost no bridge deck.
+    # The road_environment mix is the only one of the six that is not nearly all
+    # ROAD, because it is the only preset for which the tag decides anything.
+    "shade": {
+        "road_class": [("PATH", 0.3), ("FOOTWAY", 0.3), ("TRACK", 0.15),
+                       ("RESIDENTIAL", 0.2), ("BRIDLEWAY", 0.05)],
+        "surface": [("GROUND", 0.3), ("COMPACTED", 0.25), ("DIRT", 0.15),
+                    ("ASPHALT", 0.05), ("MISSING", 0.25)],
+        "road_environment": [("ROAD", 1.0)],
+    },
+    # Away from engines, and **no tunnel at all** — the one tag this preset
+    # treats as near-fatal, against the shade preset that seeks it out.
+    "air": {
+        "road_class": [("PATH", 0.35), ("FOOTWAY", 0.25), ("PEDESTRIAN", 0.15),
+                       ("CYCLEWAY", 0.15), ("RESIDENTIAL", 0.05), ("BRIDLEWAY", 0.05)],
+        "surface": [("ASPHALT", 0.35), ("PAVING_STONES", 0.2), ("COMPACTED", 0.15),
+                    ("MISSING", 0.3)],
+        "road_environment": [("ROAD", 1.0)],
+    },
 }
+
+
+# Every preset with a committed synthetic fixture, in the order they are
+# written. Kept as a tuple here rather than read from `routing.PRESETS` so that
+# adding a preset is a deliberate act with a tag mix and a bow behind it: the
+# tables above are keyed by these names and a KeyError is a better failure than
+# a fixture generated from somebody else's geometry.
+SYNTHETIC_PRESETS: tuple[str, ...] = (
+    "fastest", "scenic", "accessible", "quiet", "shade", "air",
+)
 
 
 @dataclass(frozen=True)
@@ -167,10 +227,8 @@ def _a_to_b(origin: LatLon, dest: LatLon, preset: str, rng: random.Random) -> li
     norm = math.hypot(dlat_m, dlon_m) or 1.0
     perp_north, perp_east = -dlon_m / norm, dlat_m / norm
 
+    # Signed, so presets bow to opposite sides and stay visibly distinct.
     bow = straight * BOW_FRACTION[preset]
-    # Presets bow to opposite sides so their geometries are visibly distinct.
-    if preset == "accessible":
-        bow = -bow
     control = _offset(mid, perp_north * bow * 2, perp_east * bow * 2)
 
     n = max(24, min(90, int(straight / 45)))
@@ -180,10 +238,16 @@ def _a_to_b(origin: LatLon, dest: LatLon, preset: str, rng: random.Random) -> li
 def _loop(origin: LatLon, target_distance_m: float, preset: str,
           rng: random.Random) -> list[LatLon]:
     """A closed loop through the origin, roughly ``target_distance_m`` long."""
-    lobes = {"fastest": 0.0, "scenic": 3.0, "accessible": 0.0}[preset]
-    wobble = {"fastest": 0.06, "scenic": 0.22, "accessible": 0.03}[preset]
+    lobes = {"fastest": 0.0, "scenic": 3.0, "accessible": 0.0,
+             "quiet": 2.0, "shade": 4.0, "air": 0.0}[preset]
+    wobble = {"fastest": 0.06, "scenic": 0.22, "accessible": 0.03,
+              "quiet": 0.12, "shade": 0.18, "air": 0.09}[preset]
     radius = target_distance_m / (2 * math.pi)
-    start_bearing = math.radians({"fastest": 20.0, "scenic": 95.0, "accessible": 200.0}[preset])
+    # Six distinct start bearings, spread so no two loops sit on top of each
+    # other. A reader comparing two presets on the map has to be able to see
+    # that they are different routes.
+    start_bearing = math.radians({"fastest": 20.0, "scenic": 95.0, "accessible": 200.0,
+                                  "quiet": 260.0, "shade": 320.0, "air": 145.0}[preset])
     centre = _offset(origin, radius * math.cos(start_bearing), radius * math.sin(start_bearing))
 
     n = 72
@@ -203,7 +267,8 @@ def _loop(origin: LatLon, target_distance_m: float, preset: str,
 
 def _elevations(points: list[LatLon], preset: str, rng: random.Random) -> list[float]:
     base = 8.0 + rng.uniform(0, 20)
-    amplitude = {"fastest": 2.0, "scenic": 22.0, "accessible": 1.2}[preset]
+    amplitude = {"fastest": 2.0, "scenic": 22.0, "accessible": 1.2,
+                 "quiet": 4.5, "shade": 14.0, "air": 6.0}[preset]
     n = len(points)
     return [
         round(base + amplitude * math.sin(3.1 * i / n * math.pi) + rng.uniform(-0.4, 0.4), 1)
@@ -231,6 +296,27 @@ def _weighted_spans(n_points: int, mix: list[tuple[str, float]], rng: random.Ran
     return spans
 
 
+# Tunnel and bridge spans, as a fraction of the route, per preset.
+#
+# **Forced rather than drawn from a weighted mix, and this is not tidiness.**
+# `_weighted_spans` lays down runs of two to eight points over a route of
+# seventy-odd, so the smallest thing it can express is about three per cent and
+# the realised share of a rare value swings wildly around its nominal weight.
+# Asked for four per cent BRIDGE, the shade loop drew **seventeen** — enough to
+# pull its cover score below the scenic route's and make the demo say the
+# opposite of what the preset does.
+#
+# These two values are also the only tags in the file that decide anything on
+# their own (geometry.ROAD_ENVIRONMENT_COVER is a two-entry table), so leaving
+# them to chance was the wrong call twice over. Shade takes a short tunnel and
+# no bridge; air takes a bridge and no tunnel, which is the divergence
+# `air_custom_model` and `shade_custom_model` are built around.
+FORCED_ENVIRONMENT: dict[str, tuple[tuple[float, float, str], ...]] = {
+    "shade": ((0.30, 0.35, "TUNNEL"),),
+    "air": ((0.55, 0.60, "BRIDGE"),),
+}
+
+
 def _details(points: list[LatLon], preset: str, rng: random.Random,
              known_bad: bool) -> dict[str, list[list[Any]]]:
     n = len(points)
@@ -243,10 +329,15 @@ def _details(points: list[LatLon], preset: str, rng: random.Random,
         forced_class.append((int(n * 0.42), int(n * 0.45), "STEPS"))
         forced_surface.append((int(n * 0.62), int(n * 0.68), "COBBLESTONE"))
 
+    forced_env = [
+        (int(n * start), int(n * end), value)
+        for start, end, value in FORCED_ENVIRONMENT.get(preset, ())
+    ]
+
     return {
         "road_class": _weighted_spans(n, mix["road_class"], rng, forced_class),
         "surface": _weighted_spans(n, mix["surface"], rng, forced_surface),
-        "road_environment": _weighted_spans(n, mix["road_environment"], rng),
+        "road_environment": _weighted_spans(n, mix["road_environment"], rng, forced_env),
     }
 
 
@@ -264,7 +355,9 @@ def _synth_payload(body: dict[str, Any], preset: str, scenario: Scenario) -> dic
     elevations = _elevations(points, preset, rng)
     distance_m = path_length_m(points)
     # Scenic is genuinely slower per metre: unsealed surfaces and more turns.
-    speed = SPEED_M_S[profile] * {"fastest": 1.0, "scenic": 0.88, "accessible": 0.95}[preset]
+    # Quiet is the fastest of the preferences because it stays on pavement.
+    speed = SPEED_M_S[profile] * {"fastest": 1.0, "scenic": 0.88, "accessible": 0.95,
+                                  "quiet": 0.97, "shade": 0.9, "air": 0.94}[preset]
     time_ms = int(distance_m / speed * 1000)
 
     return {
@@ -412,23 +505,26 @@ async def _generate(scenario: Scenario, force: bool) -> list[str]:
         )
         written.append(f"{scenario.slug}/{preset} (unroutable)")
 
+    # Which preset the handler is answering for, set by the loop below.
+    #
+    # It used to be sniffed out of the outgoing custom model: no model meant
+    # fastest, a rule mentioning STEPS meant accessible, anything else meant
+    # scenic. That worked for exactly three presets and silently mislabels six.
+    # The generator already knows which preset it is asking for, so it says so
+    # rather than deducing it back out of the request.
+    answering_for = "fastest"
+
     def handler(request: httpx.Request) -> httpx.Response:
-        body = json.loads(request.content)
-        custom_model = body.get("custom_model")
-        if custom_model is None:
-            preset = "fastest"
-        elif any("STEPS" in str(rule.get("if", "")) for rule in custom_model["priority"]):
-            preset = "accessible"
-        else:
-            preset = "scenic"
-        return httpx.Response(200, json=_synth_payload(body, preset, scenario))
+        return httpx.Response(200, json=_synth_payload(json.loads(request.content),
+                                                       answering_for, scenario))
 
     transport = httpx.MockTransport(handler)
     original_client = fx._client
     fx._client = httpx.AsyncClient(transport=transport)
     try:
         with fx.recording_as(fx.PROVENANCE_SYNTHETIC):
-            for preset in ("fastest", "scenic", "accessible"):
+            for preset in SYNTHETIC_PRESETS:
+                answering_for = preset
                 if preset in scenario.unroutable:
                     continue
                 body = build_request_body(origin_pt, dest_pt, scenario.minutes,
@@ -467,8 +563,8 @@ async def _report(scenario: Scenario) -> str:
 
     lines = [f"  {scenario.slug} ({scenario.mode}, {scenario.minutes} min)"]
     fastest = None
-    for name, fn in (("fastest", route_fastest), ("scenic", route_scenic),
-                     ("accessible", route_accessible)):
+    for name in SYNTHETIC_PRESETS:
+        fn = PRESETS[name]
         try:
             if name == "scenic":
                 # The whole RawRoute, not its duration. route_scenic derives

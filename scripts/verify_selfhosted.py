@@ -4,16 +4,21 @@
     python3 -m scripts.verify_selfhosted    # in another
 
 Self-hosting exists for one reason: the hosted free tier cannot execute a
-`custom_model`, so the scenic and accessible presets come back blocked. This
-checks the three things that have to be true for that to have been worth doing,
-in every region the running graph actually contains — locations outside it are
+`custom_model`, so every preset except `fastest` comes back blocked. This checks
+the three things that have to be true for that to have been worth doing, in
+every region the running graph actually contains — locations outside it are
 skipped and named, because which region set was built is an operator's choice
 rather than a defect:
 
-1. all three presets route at all
-2. their geometries are genuinely **different** — a custom model that is
-   accepted but ignored returns the fastest route three times, which looks like
-   success and is the exact failure the spec warns about
+1. all six presets route at all
+2. every preset that carries a custom model comes back **different from the
+   fastest route** — a custom model that is accepted but ignored returns the
+   fastest route under every label, which looks like success and is the exact
+   failure the spec warns about
+
+   Two preference presets matching *each other* is not a failure and is not
+   checked. A graph with no tunnel anywhere near the origin will answer `quiet`
+   and `air` identically, and it is right to.
 3. `smoothness` comes back in the path details, so the accessibility engine can
    apply the one hard constraint the hosted API could never give it
 
@@ -28,7 +33,7 @@ from dataclasses import dataclass
 
 from backend.config import GRAPHHOPPER_URL, graphhopper_is_self_hosted, path_details
 from backend.geometry import LatLon
-from backend.routing import route_accessible, route_fastest, route_scenic
+from backend.routing import PRESETS
 
 
 @dataclass(frozen=True)
@@ -88,14 +93,18 @@ async def check(spot: Spot) -> list[str]:
     print(f"\n{spot.name}  ({spot.region}, {spot.minutes} min {spot.mode})")
 
     try:
-        fastest = await route_fastest(spot.point, None, spot.minutes, spot.mode)
+        fastest = await PRESETS["fastest"](spot.point, None, spot.minutes, spot.mode)
     except Exception as exc:  # noqa: BLE001 — a failure here is the result, not a crash
         print(f"  fastest     FAILED  {type(exc).__name__}: {exc}")
         return [f"{spot.name}: fastest did not route ({type(exc).__name__})"]
 
     routes = {"fastest": fastest}
-    for name, fn in (("scenic", route_scenic), ("accessible", route_accessible)):
+    for name, fn in PRESETS.items():
+        if name == "fastest":
+            continue
         try:
+            # scenic is the only preset that takes the baseline: it derives both
+            # its duration cap and its greenness floor from it.
             routes[name] = (
                 await fn(spot.point, None, spot.minutes, spot.mode, fastest)
                 if name == "scenic"
@@ -112,13 +121,19 @@ async def check(spot: Spot) -> list[str]:
 
     # The one that matters: a custom model that is accepted but ignored returns
     # the fastest route under every preset, with no error anywhere.
+    #
+    # Compared against fastest only. Requiring all six to differ from each other
+    # would fail an honest graph: without a tunnel near the origin there is
+    # nothing for `air` and `shade` to disagree about, and they may legitimately
+    # land on the same line.
     shapes = {name: _shape(r) for name, r in routes.items()}
-    if len(routes) == 3 and len(set(shapes.values())) < 3:
-        same = [n for n in shapes if shapes[n] == shapes["fastest"] and n != "fastest"]
+    steered = [n for n in shapes if n != "fastest"]
+    same = [n for n in steered if shapes[n] == shapes["fastest"]]
+    if same:
         print(f"  !! IDENTICAL to fastest: {', '.join(same)} — custom model had no effect")
         failures.append(f"{spot.name}: {', '.join(same)} identical to fastest")
-    elif len(routes) == 3:
-        print("  ok: all three geometries differ")
+    elif len(steered) == len(PRESETS) - 1:
+        print(f"  ok: all {len(steered)} steered geometries differ from fastest")
 
     if "smoothness" in path_details() and "smoothness" not in fastest.details:
         print("  !! smoothness requested but absent from the response")
@@ -134,8 +149,9 @@ async def main_async() -> int:
 
     if not graphhopper_is_self_hosted():
         print(
-            "\nThis is the hosted API. The scenic and accessible presets cannot run "
-            "there — set MEANDER_GRAPHHOPPER_URL to your own server first.",
+            "\nThis is the hosted API. Every preset except fastest carries a custom "
+            "model and cannot run there — set MEANDER_GRAPHHOPPER_URL to your own "
+            "server first.",
             file=sys.stderr,
         )
         return 2
