@@ -22,6 +22,16 @@
     -->
     <link rel="manifest" href="/manifest.webmanifest" />
     <meta name="theme-color" content="#1c4633" />
+
+    <!--
+      The SVG first and the PNG behind it. A browser that understands
+      image/svg+xml takes the vector and gets a clean mark at every zoom and
+      pixel ratio; one that does not skips a type it cannot decode and falls to
+      the 32px raster. Both are written by frontend/scripts/make-icons.mjs from
+      the same curve, in the same token colour, so the fallback is the same
+      mark rather than a near miss.
+    -->
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png" />
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
 

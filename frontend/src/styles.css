@@ -4,10 +4,11 @@
  * One look, deliberately. The approved mockups define a single palette of
  * clean pastels on warm neutrals and no dark variant, so the dark block below
  * restates the same values rather than a second palette. It exists because
- * three consumers are pinned to its shape: `scripts/check_palette.sh` permits
- * hex only inside the two token blocks, `dash-palette.test.js` reads
- * `--route-*` and `--ink-2` out of both, and `scripts/make-icons.mjs` reads
- * `--accent` out of the dark one.
+ * two consumers are pinned to its shape: `scripts/check_palette.sh` permits
+ * hex only inside the two token blocks, and `dash-palette.test.js` reads
+ * `--route-*` and `--ink-2` out of both. `scripts/make-icons.mjs` used to read
+ * `--accent` out of the dark one; it reads `--sky-deep` and `--sky-wash` out
+ * of `:root` now, because the approved mark is drawn in the sky pair.
  *
  * Every colour is declared here and nowhere else. Values the design states as
  * oklch are converted to sRGB hex because MapLibre paints to a canvas and its
@@ -157,13 +158,19 @@
   --route-shade: #008c8d; /* oklch(0.58 0.1 195) */
   --route-air: #b87252; /* oklch(0.62 0.1 45) */
 
-  /* -- legacy brand pair, consumed by the icon generator only --------------
-   * scripts/make-icons.mjs draws the launcher icons from --brand and the dark
-   * block's --accent, and icons.test.js pins the shipped pixels to exactly
-   * these values. The launcher identity is outside the redesign's scope, so
-   * the pair keeps its values and nothing else in this file reads it. */
+  /* -- the installed app's chrome colour ----------------------------------
+   * manifest.webmanifest declares this as theme_color and index.html repeats
+   * it in a meta tag, because the browser chrome reads the tag while the
+   * installed app reads the manifest; icons.test.js holds the two together.
+   * The manifest's background_color is NOT this — that field is the launch
+   * screen, and it is --canvas, because the mark is drawn to sit on canvas.
+   *
+   * This is what remains of the pre-2026 brand pair. Its partner --accent left
+   * with the launcher icons: the approved mark draws them in --sky-deep on
+   * --sky-wash, so nothing reads a second legacy colour any more. Recolouring
+   * the browser bar is a change to the app rather than to its logo, so this
+   * one stayed. Nothing else in this file reads it. */
   --brand: #1c4633;
-  --accent: #2f7d53;
 }
 
 /* The same palette again. See the header: this design commits to one look,
@@ -183,8 +190,6 @@
   --route-quiet: #6975b5;
   --route-shade: #008c8d;
   --route-air: #b87252;
-
-  --accent: #8fd3a9; /* the icon generator's PATH colour — pinned by test */
 }
 
 /* ------------------------------------------------- theme-invariant tokens */
@@ -580,6 +585,50 @@ a {
 
 .icon {
   flex: none;
+}
+
+/* ------------------------------------------------------------- the wordmark */
+
+/* The lockup: the meander line, a 12px gap, and the name.
+ *
+ * The colour split lives here rather than in the component. Wordmark.jsx
+ * strokes `currentColor`, so this rule is what actually applies --sky-deep to
+ * the mark — and a `stroke="#4e7fbe"` written into the JSX instead would be a
+ * hard-coded colour that scripts/check_palette.sh, which reads this file and
+ * nothing else, could never see.
+ *
+ * `min-width: 0` and `max-width: 100%` are not decoration. `.sheet` declares
+ * `overflow-y: auto`, and CSS resolves the other axis to `auto` with it, so a
+ * lockup wider than the sheet's content box would scroll the SHEET sideways —
+ * which scripts/gate.mjs cannot see, because it measures documentElement. The
+ * name is allowed to wrap for the same reason: no `white-space: nowrap`.
+ *
+ * The type size is the one number the approved lockup does not state. 20px
+ * puts Hanken Grotesk 800's cap height at about 14px against the mark's 12px
+ * band of visible ink, which reads as a matched pair; the mark box is 26 but
+ * the curve only occupies the middle 45% of it. Everything else here — the
+ * weight, the tracking, the gap, the ink — is the design's. */
+.wordmark {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 0;
+  max-width: 100%;
+  min-width: 0;
+  color: var(--sky-deep);
+}
+
+.wordmark__mark {
+  flex: none;
+}
+
+.wordmark__name {
+  min-width: 0;
+  font-size: 20px;
+  font-weight: 800;
+  letter-spacing: -1.2px;
+  line-height: 1;
+  color: var(--ink);
 }
 
 /* One sentence over the map when an incoming link could not be honoured. */

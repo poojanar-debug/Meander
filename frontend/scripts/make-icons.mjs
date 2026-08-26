@@ -1,14 +1,15 @@
 import { deflateSync } from 'node:zlib'
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { mkdirSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-import { markPoints } from '../src/lib/mark.js'
+import { MARK_BOX, MARK_PATH_D, MARK_STROKE, MARK_STROKE_SMALL, markPoints } from '../src/lib/mark.js'
 import { rgb, token } from './tokens.mjs'
 
 /**
- * Draw the icon set. No dependencies — Node's zlib is the only thing needed to
- * write a PNG, and adding an image library to draw one shape would be absurd.
+ * Draw the icon set and the SVG favicon. No dependencies — Node's zlib is the
+ * only thing needed to write a PNG, and adding an image library to draw one
+ * shape would be absurd.
  *
  * **These are generated, never copied.** The set on the branch this came from
  * has the old palette baked into its pixels — a colour that is invisible to the
@@ -16,32 +17,72 @@ import { rgb, token } from './tokens.mjs'
  * is binary. Regenerating from the tokens is the only way the icons can be held
  * to the same rule as everything else.
  *
- * The mark is a path meandering through a rounded square: the long way round,
- * which is the whole idea of the application.
+ * That rule is also why `favicon.svg` is emitted here rather than written by
+ * hand. A standalone file under `public/` cannot read a custom property out of
+ * the stylesheet — nothing resolves `var(--sky-deep)` for a document the
+ * browser loads as an icon — so the only two options are a hex someone typed
+ * and a hex a script read from the token. This is the second one, which is what
+ * "never hard-code, reference the token" has to mean for a file that ships as
+ * its own document.
+ *
+ * The mark is the meander line: a single wandering path, round-capped, no fill.
+ * Its geometry lives in src/lib/mark.js and is stated once there; this script
+ * takes the polyline, and the favicon takes the same curve's `d` attribute.
  */
 
 const here = dirname(fileURLToPath(import.meta.url))
 const OUT = join(here, '..', 'public')
 
-/** The dark block only — its accent is the one that reads on the brand ground. */
-function darkBlock() {
-  const css = readFileSync(join(here, '..', 'src', 'styles.css'), 'utf8')
-  const start = css.indexOf("[data-theme='dark']")
-  return css.slice(start, css.indexOf('}', start))
-}
-
 // Read from the stylesheet so an icon cannot drift from the palette.
-export const GROUND = rgb(token('brand')) // the colour the manifest also declares
-export const PATH = rgb(token('accent', darkBlock()))
+export const GROUND = rgb(token('sky-wash')) // the tile
+export const STROKE = rgb(token('sky-deep')) // the line
 
+/**
+ * The mark's share of a tile's width, and the tile's corner radius.
+ *
+ * The design says "the centered mark at ~55% of tile width". That has two
+ * readings and they differ visibly, so it was put back to design and settled:
+ * 55% is the width of the LINE, not of the box the line is drawn in. The
+ * design's own sentence — "the mark is always the line alone" — says which
+ * one the word "mark" means.
+ *
+ * The line occupies the middle 78.125% of its 48-unit box (x from 5.25 to
+ * 42.75 with the stroke on), so the box has to be 0.55 / 0.78125 = 0.704 of
+ * the tile for the ink to land on 0.55 of it. That is where this number comes
+ * from; it is not a taste.
+ *
+ * It is close to a real ceiling, which is worth knowing before anyone raises
+ * it again. The furthest ink sits at 0.4300 of the mark box from its centre,
+ * so a 0.704 box carries it to 0.3027 of the tile against the 0.307
+ * launcher-mask safe radius icons.test.js enforces — 2.2px of margin on a
+ * 512px tile. Only the maskable file is bound by it, but the set is drawn at
+ * one scale on purpose.
+ *
+ * 22.5% radius is stated outright: a 120px tile takes 27px, which is the
+ * usual approximation of the iOS squircle.
+ */
+const MARK_SHARE = 0.704
+const TILE_RADIUS = 0.225
+
+/**
+ * What ground each file gets.
+ *
+ *   rounded  a sky-wash tile with the corners cut away, for the manifest icons
+ *   square   full bleed, for the two grounds a platform masks itself: iOS
+ *            rounds the apple-touch-icon, and an Android launcher applies its
+ *            own mask to the maskable one. Pre-rounding either means a visible
+ *            seam inside the platform's own corner.
+ *   none     no tile at all: the line, transparent behind it, for the favicon
+ *
+ * The favicon is the one file drawn at the small-size stroke weight. It is
+ * declared 32px and displayed at 16 in every browser tab there is.
+ */
 const SIZES = [
-  { file: 'favicon-32.png', size: 32, maskable: false, opaque: true },
-  { file: 'apple-touch-icon.png', size: 180, maskable: false, opaque: true },
-  { file: 'icon-192.png', size: 192, maskable: false, opaque: true },
-  { file: 'icon-512.png', size: 512, maskable: false, opaque: true },
-  // Full bleed, with the whole mark inside r=0.307 of centre so no launcher
-  // mask can clip it.
-  { file: 'icon-maskable-512.png', size: 512, maskable: true, opaque: true },
+  { file: 'favicon-32.png', size: 32, ground: 'none', share: 1, stroke: MARK_STROKE_SMALL },
+  { file: 'apple-touch-icon.png', size: 180, ground: 'square', share: MARK_SHARE, stroke: MARK_STROKE },
+  { file: 'icon-192.png', size: 192, ground: 'rounded', share: MARK_SHARE, stroke: MARK_STROKE },
+  { file: 'icon-512.png', size: 512, ground: 'rounded', share: MARK_SHARE, stroke: MARK_STROKE },
+  { file: 'icon-maskable-512.png', size: 512, ground: 'square', share: MARK_SHARE, stroke: MARK_STROKE },
 ]
 
 // ---------------------------------------------------------------- PNG writing
@@ -95,8 +136,12 @@ function encodePng(width, height, pixels) {
 // ------------------------------------------------------------------- drawing
 
 /**
- * Signed distance from a point to a line segment. The mark is drawn as a
- * thick polyline, which is exactly "within `w` of the path".
+ * Distance from a point to a line segment. The mark is drawn as a thick
+ * polyline, which is exactly "within `w` of the path" — and testing the
+ * distance to the *segment* rather than to the infinite line is what gives the
+ * two endpoints their round caps and every joint its round join, for free and
+ * without a special case. That is the same shape the SVG asks for with
+ * stroke-linecap="round".
  */
 function distanceToSegment(px, py, ax, ay, bx, by) {
   const dx = bx - ax
@@ -108,21 +153,22 @@ function distanceToSegment(px, py, ax, ay, bx, by) {
   return Math.hypot(px - cx, py - cy)
 }
 
-// The curve now lives in src/lib/mark.js, so the icon set and the in-page logo
-// draw the same shape rather than two hand-matched copies of it. That module is
-// geometry and nothing else — no colours — because `tokens.mjs` must never
-// enter the bundle and this import goes the other way.
+// The curve lives in src/lib/mark.js, so the icon set, the favicon and the
+// in-page lockup draw the same shape rather than three hand-matched copies of
+// it. That module is geometry and nothing else — no colours — because
+// `tokens.mjs` must never enter the bundle and this import goes the other way.
 
-function draw({ size, maskable, opaque }) {
+function draw({ size, ground, share, stroke }) {
   const pixels = Buffer.alloc(size * size * 4)
   const points = markPoints()
 
-  // The mark occupies a smaller share of a maskable icon so that a circular or
-  // squircle launcher mask cannot cut it.
-  const inset = maskable ? 0.5 - 0.307 : 0.0
-  const scale = maskable ? 0.614 : 1
-  const stroke = (maskable ? 0.052 : 0.085) * size
-  const radius = maskable ? 0 : size * 0.22
+  // The mark's own 48-unit box, placed in the centre of the tile at its
+  // stated share of the width. Everything about the mark scales with the box,
+  // stroke included, so the line keeps its weight relative to the curve.
+  const box = share * size
+  const origin = (size - box) / 2
+  const strokePx = (stroke / MARK_BOX) * box
+  const radius = ground === 'rounded' ? size * TILE_RADIUS : 0
 
   // 3x3 supersampling. Cheap, and the difference between a clean curve and a
   // staircase at 32px.
@@ -131,8 +177,8 @@ function draw({ size, maskable, opaque }) {
   // The polyline in device coordinates, plus a bounding box. Most of the canvas
   // is nowhere near the path, and testing 48 segments against every pixel of a
   // 512px icon is most of this script's cost.
-  const device = points.map(([x, y]) => [(inset + x * scale) * size, (inset + y * scale) * size])
-  const pad = stroke / 2 + 2
+  const device = points.map(([x, y]) => [origin + (x / MARK_BOX) * box, origin + (y / MARK_BOX) * box])
+  const pad = strokePx / 2 + 2
   const minX = Math.min(...device.map((p) => p[0])) - pad
   const maxX = Math.max(...device.map((p) => p[0])) + pad
   const minY = Math.min(...device.map((p) => p[1])) - pad
@@ -147,7 +193,7 @@ function draw({ size, maskable, opaque }) {
           const px = x + (sx + 0.5) / S
           const py = y + (sy + 0.5) / S
 
-          // Rounded-square ground, or full bleed when maskable.
+          // Rounded-square ground, or full bleed when the platform masks it.
           if (radius === 0) inGround += 1
           else {
             const qx = Math.abs(px - size / 2) - (size / 2 - radius)
@@ -159,13 +205,13 @@ function draw({ size, maskable, opaque }) {
 
           if (nearPath) {
             let nearest = Infinity
-            for (let i = 1; i < device.length && nearest > stroke / 2; i += 1) {
+            for (let i = 1; i < device.length && nearest > strokePx / 2; i += 1) {
               nearest = Math.min(
                 nearest,
                 distanceToSegment(px, py, device[i - 1][0], device[i - 1][1], device[i][0], device[i][1]),
               )
             }
-            if (nearest <= stroke / 2) inPath += 1
+            if (nearest <= strokePx / 2) inPath += 1
           }
         }
       }
@@ -175,18 +221,44 @@ function draw({ size, maskable, opaque }) {
       const pathA = inPath / total
       const i = (y * size + x) * 4
 
+      if (ground === 'none') {
+        // No tile: the line and nothing behind it. PNG alpha is not
+        // premultiplied, so every pixel carries the stroke colour and the
+        // coverage goes in the alpha channel — which is what lets a browser
+        // composite the edge cleanly against a tab strip of any colour.
+        pixels[i] = STROKE[0]
+        pixels[i + 1] = STROKE[1]
+        pixels[i + 2] = STROKE[2]
+        pixels[i + 3] = Math.round(255 * pathA)
+        continue
+      }
+
       // Path over ground, ground over nothing.
-      const r = Math.round(GROUND[0] * (1 - pathA) + PATH[0] * pathA)
-      const g = Math.round(GROUND[1] * (1 - pathA) + PATH[1] * pathA)
-      const b = Math.round(GROUND[2] * (1 - pathA) + PATH[2] * pathA)
-      pixels[i] = r
-      pixels[i + 1] = g
-      pixels[i + 2] = b
-      pixels[i + 3] = opaque && radius === 0 ? 255 : Math.round(255 * groundA)
+      pixels[i] = Math.round(GROUND[0] * (1 - pathA) + STROKE[0] * pathA)
+      pixels[i + 1] = Math.round(GROUND[1] * (1 - pathA) + STROKE[1] * pathA)
+      pixels[i + 2] = Math.round(GROUND[2] * (1 - pathA) + STROKE[2] * pathA)
+      pixels[i + 3] = ground === 'square' ? 255 : Math.round(255 * groundA)
     }
   }
 
   return encodePng(size, size, pixels)
+}
+
+/**
+ * The favicon, as the curve itself rather than a sampling of it.
+ *
+ * Same `d` the in-page lockup renders, same small-size stroke weight as
+ * favicon-32.png, and the colour read from the token above rather than typed.
+ * `stroke-linejoin` is stated even though the two curves meet with a shared
+ * tangent and no join is visible: it is what the rasteriser produces, and the
+ * three renderers are meant to be describing one shape, not agreeing by
+ * accident.
+ */
+function faviconSvg() {
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${MARK_BOX} ${MARK_BOX}" width="${MARK_BOX}" height="${MARK_BOX}" fill="none">
+  <path d="${MARK_PATH_D}" stroke="${token('sky-deep')}" stroke-width="${MARK_STROKE_SMALL}" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>
+`
 }
 
 mkdirSync(OUT, { recursive: true })
@@ -195,3 +267,6 @@ for (const spec of SIZES) {
   writeFileSync(join(OUT, spec.file), png)
   console.log(`${spec.file.padEnd(24)} ${spec.size}x${spec.size}  ${png.length} bytes`)
 }
+const svg = faviconSvg()
+writeFileSync(join(OUT, 'favicon.svg'), svg)
+console.log(`${'favicon.svg'.padEnd(24)} ${MARK_BOX}x${MARK_BOX}  ${Buffer.byteLength(svg)} bytes`)

@@ -41,6 +41,7 @@ const PLAN_MANIFEST = [
   ['.map', 'MapView.jsx'],
   ['.sheet', 'Sheet.jsx — the mobile bottom sheet'],
   ['.plan', 'PlanSheet.jsx'],
+  ['.wordmark', 'Wordmark.jsx — the lockup at the head of the plan'],
   ['.plan__search-field', 'PlanSheet.jsx — the doorway to place search'],
   ['[aria-label="Use my location"]', 'PlanSheet.jsx — the location arrow'],
   ['.dial__slider', 'TimeDial.jsx — the native range input'],

@@ -2,6 +2,7 @@ import DepartureStrip from './DepartureStrip.jsx'
 import ModeControl from './ModeControl.jsx'
 import ObjectiveChips from './ObjectiveChips.jsx'
 import TimeDial from './TimeDial.jsx'
+import Wordmark from './Wordmark.jsx'
 import { LocationArrowIcon, MagnifierIcon } from './Icons.jsx'
 
 /**
@@ -12,6 +13,13 @@ import { LocationArrowIcon, MagnifierIcon } from './Icons.jsx'
  * opens the full-surface place screen with the keyboard up, which is where
  * the real combobox lives. The location arrow beside it is the only other way
  * to set the one required input.
+ *
+ * The lockup leads because this sheet is the app's first screen and its only
+ * header. `App.jsx` opens at the `full` snap with `showPlan` true, so the
+ * wordmark is the first thing on a cold start, and it is gone once there are
+ * routes to read — the results sheet is data, not identity. `.plan` is
+ * already a centred column with a 15px gap, so the lockup needs no position
+ * of its own.
  */
 export default function PlanSheet({
   origin,
@@ -33,6 +41,8 @@ export default function PlanSheet({
 }) {
   return (
     <div className="plan">
+      <Wordmark />
+
       <div className="plan__search">
         <button type="button" className="plan__search-field" onClick={onOpenSearch}>
           <MagnifierIcon size={16} />
