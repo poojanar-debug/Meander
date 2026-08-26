@@ -175,7 +175,52 @@ def scrub(value: Any) -> Any:
         return [scrub(v) for v in value]
     if isinstance(value, dict):
         return {k: scrub(v) for k, v in value.items()}
-    return value
+    # Scalars that cannot hide a coordinate or a credential, returned as they
+    # are so the log keeps its types.
+    if value is None or isinstance(value, bool | int | bytes):
+        return value
+
+    # ⚠ Everything else, and this branch is the one the live leak came through.
+    #
+    # It is a **type** gap, not a pattern gap, and that distinction is why
+    # tightening the regexes above would never have closed it. `JsonFormatter`
+    # renders the line with `record.getMessage()`, which performs `msg % args`
+    # and stringifies each argument *at that moment* — long after this function
+    # has inspected it. So any argument whose type is not handled above reaches
+    # the output as `str(value)` having never been scrubbed.
+    #
+    # httpx logs exactly that shape:
+    #
+    #     logger.info('HTTP Request: %s %s "%s %d %s"',
+    #                 request.method, request.url, ...)
+    #
+    # and `request.url` is an **`httpx.URL` object**, not a `str`. Measured:
+    # `isinstance(httpx.URL(...), str)` is False, so every branch above missed
+    # it, the object was returned untouched, and `%` then printed the whole
+    # query string — the Mapillary token included — into the log.
+    #
+    # Stringify, scrub, and hand back the scrubbed text ONLY if scrubbing
+    # changed something. That keeps ordinary objects (enums, paths, models)
+    # rendering exactly as they did before, so this cannot quietly alter a log
+    # line that had nothing to hide; the only records that change are the ones
+    # that were leaking.
+    try:
+        text = str(value)
+    except Exception:  # noqa: BLE001 - see below
+        # Deliberately blind, and narrower would be wrong here. A `__str__` can
+        # raise anything at all, and this function runs inside a logging filter:
+        # an exception escaping it does not lose one field, it takes down
+        # logging for the whole process. `JsonFormatter` catches only
+        # (TypeError, ValueError) a few lines down because it is guarding
+        # `json.dumps`, whose failure modes are enumerable. `str()` on an
+        # arbitrary object's own code is not.
+        #
+        # Returning the value unchanged is safe: `getMessage()` is about to call
+        # the same `__str__` and will raise there too, so this branch cannot
+        # smuggle anything into a log line that was ever going to be written.
+        return value
+    cleaned = COORDINATE_SHAPED.sub("<redacted>", SENSITIVE_QUERY.sub(r"\1=<redacted>", text))
+    return cleaned if cleaned != text else value
 
 
 class PrivacyFilter(logging.Filter):
