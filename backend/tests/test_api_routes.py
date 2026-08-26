@@ -200,7 +200,7 @@ def test_a_blocked_route_reports_no_scores_at_all(api_client) -> None:
         if r["id"] == "accessible"
     )
 
-    assert accessible["scores"] == {"scenic": None, "air": None, "shade": None}
+    assert accessible["scores"] == {"scenic": None, "air": None, "shade": None, "quiet": None}
 
 
 def test_routes_built_from_synthetic_fixtures_say_so(api_client) -> None:
@@ -293,13 +293,25 @@ def test_more_than_three_objectives_is_rejected(api_client) -> None:
     assert api_client.post("/api/routes", json=body).status_code == 422
 
 
-def test_unimplemented_objective_is_reported_not_dropped(api_client) -> None:
-    body = _body(objectives=["fastest", "quiet"])
-    routes = api_client.post("/api/routes", json=body).json()["routes"]
-    quiet = next(r for r in routes if r["id"] == "quiet")
+def test_every_declared_objective_routes(api_client) -> None:
+    """The successor to a test that asserted the opposite.
 
-    assert quiet["status"] == "blocked"
-    assert "not implemented" in quiet["status_note"].lower()
+    Until the preference presets landed, `quiet`, `shade` and `air` were in
+    `RouteId` and in `ROUTE_LABELS` but not in `PRESETS`, and the request path
+    turned each of them into a blocked route reading "not implemented yet". The
+    test that guarded that behaviour is this one, retargeted: the contract
+    promises six objectives, so asking for one must not produce a placeholder.
+
+    Two at a time because `objectives` caps at three and `fastest` is worth
+    keeping in the request as the control.
+    """
+    for pair in (["fastest", "quiet"], ["fastest", "shade"], ["fastest", "air"]):
+        routes = api_client.post("/api/routes", json=_body(objectives=pair)).json()["routes"]
+        subject = next(r for r in routes if r["id"] == pair[1])
+
+        assert subject["status"] == "ok", subject.get("status_note")
+        assert subject["geometry"]
+        assert subject["duration_min"] > 0
 
 
 def test_objective_order_is_preserved(api_client) -> None:

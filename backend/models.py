@@ -38,7 +38,10 @@ RouteStatus = Literal["ok", "blocked"]
 MIN_MINUTES = 20
 MAX_MINUTES = 360
 
-# The three the spec requires. The frontend may request up to three of six.
+# The three the spec requires, and the three the app asks for when nobody has
+# chosen. All six route for real; these are the default because they answer
+# three different questions — how fast, how pleasant, can I use it at all —
+# where the other three are all variations on "what is this route like".
 DEFAULT_OBJECTIVES: tuple[RouteId, ...] = ("fastest", "scenic", "accessible")
 
 ROUTE_LABELS: dict[str, str] = {
@@ -139,6 +142,11 @@ class Scores(BaseModel):
     scenic: float | None = None
     air: float | None = None
     shade: float | None = None
+    # Added with the quiet preset. Every score here is reported on every route
+    # whatever objective produced it, so a fastest route says how quiet it
+    # happens to be and the comparison against the quiet one is the reader's to
+    # make. That is the same arrangement `scenic` and `air` have always had.
+    quiet: float | None = None
 
 
 class RestStop(BaseModel):

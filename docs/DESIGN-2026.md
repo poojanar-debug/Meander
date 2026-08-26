@@ -2,6 +2,11 @@
 
 **Status** Implemented, 2026-08-25 — `frontend/PROGRESS.md` ("The 2026 UI") records the
 implementation and its deliberate deviations, each with its reason.
+**One line has since been overtaken by the build, and is left standing.** The chip row below
+specifies "Quiet/Shade/Clean air outline, disabled color, `· soon`", which was correct while those
+three objectives had no backend. They route for real as of 2026-08-26, so the chips are pressable
+and wear their own accents. This document reproduces the approved specification verbatim and is not
+edited to match the code; the change is logged in `frontend/PROGRESS.md` like every other deviation.
 **Supersedes** `DESIGN-HANDOFF.md` for everything presentational. The non-negotiables in that
 document's §0 — unknown never renders as a claim, colour is never the only differentiator, the
 follow-mode privacy position — carry forward unchanged and are restated below.

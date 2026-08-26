@@ -35,7 +35,7 @@ const fastest = {
   ],
   blockers: [],
   rest_stops: [{ type: 'bench', at_m: 900 }],
-  scores: { scenic: 0.31, air: 0.62, shade: 0.2 },
+  scores: { scenic: 0.31, air: 0.62, shade: 0.2, quiet: 0.44 },
   steps: [{ text: 'Head north', distance_m: 120 }],
 }
 
@@ -62,7 +62,7 @@ const blocked = {
   status: 'blocked',
   status_note: 'A kerb over the limit blocks this route.',
   scoring_method: 'geometry_only',
-  scores: { scenic: 0.4, air: 0.5, shade: null },
+  scores: { scenic: 0.4, air: 0.5, shade: null, quiet: null },
   confidence: 0.44,
 }
 
@@ -165,10 +165,19 @@ describe('provenanceNote', () => {
     expect(note).not.toContain('No rest stops found')
   })
 
-  it('names a score that was not measured', () => {
+  it('names every score that was not measured', () => {
     const note = provenanceNote(blocked)
-    expect(note).toContain('Shade')
-    expect(note).toContain('not measured')
+    expect(note).toContain('Shade, Quiet: not measured.')
+  })
+
+  it('lists the quiet score and says nothing about it when it was measured', () => {
+    // `quiet` is the fourth field on `Scores` and the newest way for this note
+    // to go quietly out of date: a key missing from SCORE_LABEL is a null the
+    // file never mentions, and a consumer who sees no mention assumes.
+    expect(provenanceNote({ ...fastest, scores: { ...fastest.scores, quiet: null } })).toContain(
+      'Quiet: not measured.',
+    )
+    expect(provenanceNote(fastest)).not.toContain('not measured')
   })
 
   it('shouts about demonstration data', () => {

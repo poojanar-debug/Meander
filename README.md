@@ -8,10 +8,20 @@
 | `fastest` | Fastest | Shortest time. The control. |
 | `scenic` | Scenic | Maximum greenery, capped at 1.6× the fastest duration. |
 | `accessible` | Accessible | Hard accessibility constraints first, then greenery within them. May return no route at all. |
+| `quiet` | Quiet | Away from motor traffic, and off cobblestones. |
+| `shade` | Shade | The kinds of way that tend to be shaded. Never a bridge deck. |
+| `air` | Clean air | Away from motor traffic, and out of tunnels. |
 
-One dial, 20–360 minutes. No destination means a round trip from where you started; naming one
-puts the same three routes on the way there, and the dial steps aside because the destination is
-what sets the length.
+Three at a time, and the first three unless you say otherwise. One dial, 20–360 minutes. No
+destination means a round trip from where you started; naming one puts the same three routes on
+the way there, and the dial steps aside because the destination is what sets the length.
+
+**The last three are inferred, not measured, and every route from them says so on the card.**
+There is no noise layer in OpenStreetMap, no pollution layer, and no canopy a router can steer on
+— trees are points and woods are areas, and neither reaches the street. What those presets read is
+the *kind* of way: what it carries, what it is made of, whether it is in a tunnel or on a bridge.
+[docs/adr/0007](docs/adr/0007-preference-presets-are-proxies.md) is why that was judged worth
+shipping and what was rejected on the way.
 
 ---
 
@@ -46,8 +56,9 @@ lists the seven pieces of it that have to come back, and why each one is wanted.
 
 ### What is proven
 
-**706 backend tests and 442 frontend tests pass offline**, at 87.71% statement coverage against an
-85% floor. The suite never opens a socket, and a job in CI runs it under `unshare -n` to prove
+**787 backend tests and 597 frontend tests pass offline**, at 87.04% statement coverage against an
+85% floor. (Those first two numbers said 706 and 442 for several sessions after they stopped being
+true; they are what the suites report today.) The suite never opens a socket, and a job in CI runs it under `unshare -n` to prove
 that rather than trust it. The deploy image imports with torch absent, checked against the real
 requirements file, and `backend.main` is imported in that environment to prove absence is not the
 only thing being measured.
@@ -55,10 +66,15 @@ only thing being measured.
 **WCAG 2.1 AA, checked rather than asserted.** `frontend/scripts/gate.mjs` runs axe-core against a
 real headless Chrome in both themes and reports no wcag2a/wcag2aa violations, alongside a 44 x 44
 target sweep, a no-horizontal-scroll check at 320 px and 390 px, and an assertion that every route
-row carries its own text. 39 checks in total, and the gate refuses to run any of them if its
+row carries its own text. 85 checks in total, and the gate refuses to run any of them if its
 selector manifest does not match — the difference between grading the app and grading nothing.
 
-Ten of those are a second pass that enters follow mode and re-runs the sweep, axe and the overflow
+Fifteen of those are the objective picker, which had no interaction coverage at all until the last
+three objectives were released: the gate now presses a chip, trades one objective out for another
+because the reducer allows only three, and runs axe and the target sweep over a screen where the
+newly-pressable accents are actually painted.
+
+Ten more are a second pass that enters follow mode and re-runs the sweep, axe and the overflow
 check there. Follow mode was the one user-facing screen with no automated coverage of any kind: the
 gate reached it through neither of its entry points, and no test in the suite renders a component.
 It had been overflowing its own container on every phone in portrait since it was written.
@@ -73,10 +89,23 @@ bundle.
 used to sit here said axe-core was "still a devDependency and nothing runs it", which was true when
 the gate left the tree in the reconciliation merge and stopped being true when it came back.
 
-All three presets route against a self-hosted server. `scripts/verify_selfhosted.py` asserts it at
-**three** of its four locations under the default `demo` region set: all three presets answer, their
-geometries differ from each other, and `smoothness` comes back as a path detail — which is the fifth
-hard accessibility constraint, and the one the hosted API cannot supply at all.
+All six presets route against a self-hosted server. `scripts/verify_selfhosted.py` asserts it at
+**three** of its four locations under the default `demo` region set: every preset answers, all five
+steered geometries differ from `fastest`, and `smoothness` comes back as a path detail — which is the
+fifth hard accessibility constraint, and the one the hosted API cannot supply at all.
+
+It compares each steered preset against `fastest` rather than all of them against each other. Two
+preference presets landing on the same line is honest — without a tunnel near the origin there is
+nothing for `air` and `shade` to disagree about, and at Hyde Park `quiet` and `air` do return the
+same route — where either one matching `fastest` is the custom-model-ignored failure the script
+exists to catch.
+
+**That run is what caught the worst defect in the three new presets.** They shipped their first
+version sending one round-trip request and keeping it, and the synthetic fixtures made that look
+fine. Against the real graph at Colombo Fort, a 30-minute foot loop came back at **108 minutes** for
+Quiet, 118 for Shade and 115 for Clean air. They search three round-trip lengths now and keep the
+best fit, which is 18 minutes there — the same 18-minute loop Scenic returns, because that is what
+that network has. [docs/adr/0007](docs/adr/0007-preference-presets-are-proxies.md) has the table.
 
 The fourth, Edinburgh, is skipped rather than failed, and `scripts/verify_selfhosted.py:43-55`
 explains why. `demo` imports three bounding boxes — Sri Lanka, Greater London, Noord-Holland — while
@@ -147,7 +176,7 @@ What *has* run end to end is the same stack under `docker compose`: both images
 build, both containers reach healthy, and a real request returns three routes
 with real CLIP scores. [PROGRESS.md](PROGRESS.md) is the full build log,
 including the hostile self-audit and what a reviewer should still be sceptical
-about. [docs/adr/](docs/adr/) has the six decisions worth questioning.
+about. [docs/adr/](docs/adr/) has the seven decisions worth questioning.
 
 ### What the redesign added
 
@@ -261,21 +290,21 @@ Everything else already works for any location with no key at all: place search
 (Nominatim), rest stops (Overpass), air quality and cloud cover (Open-Meteo),
 and sun position (computed locally).
 
-> **The free GraphHopper tier routes `fastest` only.** The scenic and accessible
-> presets steer the router with a custom model, and custom models need flexible
-> mode, which free packages do not include — the API answers *"Free packages
-> cannot use flexible mode"*. Those two come back `status: "blocked"` with that
-> reason rather than silently repeating the fastest route. Round trips, path
-> details, and therefore the whole accessibility engine, are unaffected. See
+> **The free GraphHopper tier routes `fastest` only.** The other five presets
+> steer the router with a custom model, and custom models need flexible mode,
+> which free packages do not include — the API answers *"Free packages cannot
+> use flexible mode"*. All five come back `status: "blocked"` with that reason
+> rather than silently repeating the fastest route. Round trips, path details,
+> and therefore the whole accessibility engine, are unaffected. See
 > [BLOCKED.md](BLOCKED.md) #0 for the options.
 
-### Self-hosting GraphHopper, so all three presets work
+### Self-hosting GraphHopper, so all six presets work
 
 The open-source GraphHopper server has no flexible-mode restriction, so running
-one locally is what makes `scenic` and `accessible` real routes rather than
-blocked ones. It also exposes the `smoothness` tag, which the hosted API does
-not — that is one of the five hard accessibility constraints, and self-hosting
-is the only way it can fire from routing data.
+one locally is what makes the other five real routes rather than blocked ones.
+It also exposes the `smoothness` tag, which the hosted API does not — that is
+one of the five hard accessibility constraints, and self-hosting is the only way
+it can fire from routing data.
 
 ```bash
 scripts/graphhopper.sh setup

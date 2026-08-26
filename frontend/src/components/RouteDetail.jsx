@@ -17,10 +17,16 @@ const METHOD_LINE = {
   placeholder: 'placeholder values · not a measurement',
 }
 
+/** Which score, what it is called, and the accent its bar is filled with.
+ *  The accent is a family from the palette rather than the objective's own
+ *  route hue: three of these four rows have never matched the route of the
+ *  same name, and making them match now would tell a user that the bar and
+ *  the line on the map are the same measurement. */
 const SCORE_ROWS = [
   ['scenic', 'scenic', 'mint'],
   ['air', 'air', 'sky'],
   ['shade', 'shade', 'lilac'],
+  ['quiet', 'quiet', 'indigo'],
 ]
 
 /** `bench` → Bench, `drinking water` → Water, `toilets` → Toilets: the short
@@ -138,7 +144,8 @@ function StatusChip({ route, isLoop }) {
  * Everything here renders what the wire said or says that it cannot: the
  * narration block vanishes when narration is null (with its credit line, so
  * the credit never outlives the thing it credits), the coverage sentence is
- * the server's, and a blocked route's status_note renders verbatim.
+ * the server's, and status_note renders verbatim whether the route was
+ * refused or not.
  */
 export default function RouteDetail({
   route,
@@ -217,8 +224,14 @@ export default function RouteDetail({
 
   const body = (
     <>
-      {route.status !== 'ok' && route.status_note && (
-        <p className="detail__blocked-note">{route.status_note}</p>
+      {/* An ok route's note says what its objective steered on, which for the
+          tag-derived presets is the difference between a proxy and a
+          measurement. It is not a rejection and must not be dressed as one,
+          so the two cases share the slot and nothing else. */}
+      {route.status_note && (
+        <p className={route.status === 'ok' ? 'detail__basis-note' : 'detail__blocked-note'}>
+          {route.status_note}
+        </p>
       )}
 
       {route.narration && (

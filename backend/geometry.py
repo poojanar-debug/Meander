@@ -268,6 +268,154 @@ ROAD_CLASS_AIR_PROXY: dict[str, float] = {
     "PATH": 1.00,
 }
 
+# How quiet each OSM road class is, 1.0 being the quietest.
+#
+# ⚠ **This is deliberately close to ROAD_CLASS_AIR_PROXY above, and the two are
+# not independent measurements.** Traffic noise and street-level pollution both
+# fall off with the same underlying quantity — how much motor traffic the way
+# carries — and `road_class` is the only proxy for it either one has. Writing a
+# table that pretended otherwise would be inventing a distinction the data
+# cannot support.
+#
+# Where they differ, they differ for a reason that can be stated:
+#
+# * Noise scales with **speed** as well as volume, so it falls off more steeply
+#   across the arterial classes than the air proxy does.
+# * A way with no engine on it at all is quieter than the air table's 0.85
+#   allows, because that figure is tempered by traffic running *beside* a
+#   footway. Noise from the same source is what a walker actually hears.
+#
+# What keeps the quiet score from being a re-scaling of the air one is
+# SURFACE_QUIET below, which has no counterpart in the air proxy at all.
+ROAD_CLASS_QUIET_PROXY: dict[str, float] = {
+    "MOTORWAY": 0.00,
+    "TRUNK": 0.03,
+    "PRIMARY": 0.12,
+    "SECONDARY": 0.28,
+    "TERTIARY": 0.45,
+    "ROAD": 0.55,
+    "UNCLASSIFIED": 0.62,
+    "RESIDENTIAL": 0.68,
+    "SERVICE": 0.70,
+    "LIVING_STREET": 0.85,
+    "FOOTWAY": 0.88,
+    "CYCLEWAY": 0.90,
+    "STEPS": 0.90,
+    "PEDESTRIAN": 0.92,
+    "TRACK": 0.95,
+    "BRIDLEWAY": 0.97,
+    "PATH": 1.00,
+}
+
+# How quiet each surface is underfoot and under a wheel.
+#
+# **This is the term that makes the quiet score its own measurement rather than
+# a re-scaling of the air proxy, and it points the opposite way from
+# SURFACE_NATURALNESS.** Cobbles and setts are the loudest surface in a European
+# city: a car crossing them is audible streets away, and a wheelchair or a buggy
+# on them is loud to the person pushing it. Asphalt is the quietest, and
+# SURFACE_NATURALNESS rates it 0.15 because a scenic route wants the opposite
+# thing. Both tables are right about the property they name.
+SURFACE_QUIET: dict[str, float] = {
+    "ASPHALT": 1.00,
+    "GRASS": 0.95,
+    "PAVED": 0.95,
+    "CONCRETE": 0.90,
+    "COMPACTED": 0.90,
+    "GROUND": 0.90,
+    "DIRT": 0.90,
+    "EARTH": 0.90,
+    "SAND": 0.85,
+    "UNPAVED": 0.80,
+    "FINE_GRAVEL": 0.75,
+    "WOOD": 0.55,
+    "GRAVEL": 0.55,
+    "PAVING_STONES": 0.45,
+    "COBBLESTONE": 0.20,
+}
+
+# How likely each road class is to have something between it and the sun.
+# **A proxy for tree cover, and a weaker one than the tables above.**
+#
+# Canopy is not in OpenStreetMap in any form a router can steer on: trees are
+# mapped as points and woodland as areas, and neither reaches an edge's tags.
+# What is left is the correlation between the kind of way and what grows beside
+# it, and this table is that correlation written down as a judgement. It is why
+# the shade preset states its basis on the card rather than presenting a number
+# and letting a reader assume a survey.
+#
+# PEDESTRIAN is the entry worth explaining: a pedestrianised square or shopping
+# street is one of the *least* shaded surfaces in a city, and rating it high
+# because it is pleasant to walk on would be scoring the wrong property.
+ROAD_CLASS_CANOPY_PROXY: dict[str, float] = {
+    "MOTORWAY": 0.05,
+    "TRUNK": 0.08,
+    "PRIMARY": 0.15,
+    "SECONDARY": 0.25,
+    "PEDESTRIAN": 0.25,
+    "ROAD": 0.35,
+    "TERTIARY": 0.35,
+    "SERVICE": 0.40,
+    "UNCLASSIFIED": 0.40,
+    "CYCLEWAY": 0.50,
+    "LIVING_STREET": 0.50,
+    "STEPS": 0.50,
+    "RESIDENTIAL": 0.55,
+    "FOOTWAY": 0.60,
+    "TRACK": 0.80,
+    "PATH": 0.85,
+    "BRIDLEWAY": 0.85,
+}
+
+# The same question asked of the surface, and again not the naturalness ordering.
+#
+# GRASS and SAND are the entries that make the point: an open meadow and a beach
+# are two of the most natural surfaces in SURFACE_NATURALNESS and two of the
+# least shaded places you can stand. A woodland path is unsealed *because* it is
+# under trees, which is the correlation this table is actually reading.
+SURFACE_CANOPY_PROXY: dict[str, float] = {
+    "SAND": 0.20,
+    "CONCRETE": 0.25,
+    "ASPHALT": 0.30,
+    "PAVED": 0.30,
+    "PAVING_STONES": 0.30,
+    "COBBLESTONE": 0.40,
+    "GRASS": 0.50,
+    "GRAVEL": 0.60,
+    "FINE_GRAVEL": 0.60,
+    "COMPACTED": 0.60,
+    "UNPAVED": 0.70,
+    "WOOD": 0.80,
+    "GROUND": 0.85,
+    "DIRT": 0.85,
+    "EARTH": 0.85,
+}
+
+# Cover that is a fact about the way rather than a guess about what grows beside
+# it. Only two values belong here, and everything else is left out on purpose:
+# a value absent from a table lowers that term's coverage instead of
+# contributing to it, so the ordinary ROAD case falls through to the canopy
+# proxy, which is where it belongs.
+#
+# A tunnel is fully covered. A bridge is the opposite, and not by a small
+# margin: a bridge deck has no street trees, no buildings and no shade at all.
+ROAD_ENVIRONMENT_COVER: dict[str, float] = {
+    "TUNNEL": 1.00,
+    "BRIDGE": 0.10,
+}
+
+# How the two halves of a canopy estimate are weighted against each other. Road
+# class leads for the same reason it leads in `naturalness`: what a way *is*
+# says more than what it is made of.
+CANOPY_ROAD_CLASS_WEIGHT = 0.60
+CANOPY_SURFACE_WEIGHT = 0.40
+
+# The same split for the quiet score. Road class leads by more here, because the
+# traffic a way carries dominates what a walker hears and the surface is an
+# audible but secondary term.
+QUIET_ROAD_CLASS_WEIGHT = 0.75
+QUIET_SURFACE_WEIGHT = 0.25
+
 # Values meaning "nobody has tagged this". They are never scored — they lower
 # coverage instead, which is the honest treatment of an absent tag.
 UNKNOWN_TAG_VALUES = frozenset({"", "MISSING", "OTHER", "UNKNOWN", "NONE"})
@@ -359,6 +507,30 @@ class RouteGeometryScores(NamedTuple):
     naturalness: float | None
     tag_coverage: float
     has_elevation: bool
+    # The two preference presets that landed after the original three. Both are
+    # optional for the same reason `air` is: a route whose ways carry none of
+    # the tags the table reads has not been measured, and None says so.
+    quiet: float | None = None
+    shade_cover: float | None = None
+
+
+def _blend_terms(
+    first: float | None, first_weight: float, second: float | None, second_weight: float
+) -> float | None:
+    """Weighted mean of two optional terms, renormalised when one is absent.
+
+    ``None`` when neither term was measurable. The alternative — treating an
+    absent term as zero — would let an untagged surface drag a score down, which
+    is the one thing `weighted_tag_score` exists to prevent.
+    """
+    if first is None and second is None:
+        return None
+    if first is None:
+        return second
+    if second is None:
+        return first
+    total = first_weight + second_weight
+    return (first * first_weight + second * second_weight) / total
 
 
 def score_geometry(
@@ -372,11 +544,19 @@ def score_geometry(
     ``clip_score`` is the length-weighted CLIP term when one is available; when
     it is ``None`` the remaining weights are renormalised so the result is still
     on a 0-1 scale.
+
+    ``quiet`` and ``shade_cover`` are the route-specific halves of the two
+    preference presets that landed after the original three. Neither is a
+    measurement of noise or of canopy — both read the same OSM way tags every
+    other term here reads, and both are ``None`` rather than 0 when the route
+    carries none of them.
     """
     details = details or {}
-    road_class = weighted_tag_score(points, details.get("road_class"), ROAD_CLASS_NATURALNESS)
-    surface = weighted_tag_score(points, details.get("surface"), SURFACE_NATURALNESS)
-    air = weighted_tag_score(points, details.get("road_class"), ROAD_CLASS_AIR_PROXY)
+    class_spans = details.get("road_class")
+    surface_spans = details.get("surface")
+    road_class = weighted_tag_score(points, class_spans, ROAD_CLASS_NATURALNESS)
+    surface = weighted_tag_score(points, surface_spans, SURFACE_NATURALNESS)
+    air = weighted_tag_score(points, class_spans, ROAD_CLASS_AIR_PROXY)
 
     # Road class dominates: a paved path through a park is still a park path.
     naturalness: float | None
@@ -384,6 +564,35 @@ def score_geometry(
         naturalness = 0.65 * road_class.score + 0.35 * surface.score
     else:
         naturalness = road_class.score if road_class.score is not None else surface.score
+
+    quiet = _blend_terms(
+        weighted_tag_score(points, class_spans, ROAD_CLASS_QUIET_PROXY).score,
+        QUIET_ROAD_CLASS_WEIGHT,
+        weighted_tag_score(points, surface_spans, SURFACE_QUIET).score,
+        QUIET_SURFACE_WEIGHT,
+    )
+
+    # The canopy guess, then the part of the route where cover is not a guess.
+    #
+    # Blended by length rather than by weight: `cover.coverage` is the fraction
+    # of the route that is tunnel or bridge, and over that fraction the tag is
+    # the answer. Over the rest, the proxy is all there is. Weighting them as
+    # two opinions about the whole route would let a 40 m footbridge halve the
+    # shade of a two-kilometre walk under trees.
+    canopy = _blend_terms(
+        weighted_tag_score(points, class_spans, ROAD_CLASS_CANOPY_PROXY).score,
+        CANOPY_ROAD_CLASS_WEIGHT,
+        weighted_tag_score(points, surface_spans, SURFACE_CANOPY_PROXY).score,
+        CANOPY_SURFACE_WEIGHT,
+    )
+    cover = weighted_tag_score(points, details.get("road_environment"), ROAD_ENVIRONMENT_COVER)
+    shade_cover: float | None
+    if canopy is None:
+        shade_cover = cover.score
+    elif cover.score is None:
+        shade_cover = canopy
+    else:
+        shade_cover = canopy * (1.0 - cover.coverage) + cover.score * cover.coverage
 
     curve = curviness(points)
     elevation = elevation_variance(elevations) if elevations else None
@@ -407,4 +616,8 @@ def score_geometry(
         naturalness=round(naturalness, 4) if naturalness is not None else None,
         tag_coverage=round(max(road_class.coverage, surface.coverage), 4),
         has_elevation=elevation is not None,
+        quiet=round(float(np.clip(quiet, 0.0, 1.0)), 4) if quiet is not None else None,
+        shade_cover=(
+            round(float(np.clip(shade_cover, 0.0, 1.0)), 4) if shade_cover is not None else None
+        ),
     )

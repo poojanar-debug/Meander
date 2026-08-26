@@ -15,7 +15,7 @@ Three things in here have cost people whole days:
 from __future__ import annotations
 
 import asyncio
-from collections.abc import AsyncIterator, Sequence
+from collections.abc import AsyncIterator, Callable, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -302,6 +302,216 @@ def accessible_custom_model(with_smoothness: bool | None = None) -> dict[str, An
         # direct one: every extra metre is more unverified surface.
         "distance_influence": 60,
     }
+
+
+# ---------------------------------------------------------------------------
+# the preference presets
+#
+# These three landed after the original fastest/scenic/accessible set, and they
+# share a problem worth stating once here rather than three times below: the
+# only thing a custom model can steer on is what the graph encodes, and this
+# project asks for four encoded values (config.DEFAULT_PATH_DETAILS, plus
+# `smoothness` when self-hosted). There is no noise layer, no pollution layer
+# and no canopy layer in OpenStreetMap that reaches an edge.
+#
+# So each of these steers on `road_class`, `surface` and `road_environment`, and
+# each says so on the card through PRESET_NOTES. They are preferences inferred
+# from the kind of way a route follows. They are not measurements of the thing
+# they are named after, and the one rule this project is built around is that a
+# number nobody measured is never presented as one.
+#
+# Rules that multiply by exactly 1 are omitted throughout, unlike
+# scenic_custom_model above, which carries several. GraphHopper starts every
+# edge at priority 1.0, so `multiply_by: "1.0"` is a no-op that documents an
+# intention the router never acts on — and reading scenic's model as though
+# those lines did something is the easiest way to misjudge what it will return.
+# ---------------------------------------------------------------------------
+
+
+def quiet_custom_model() -> dict[str, Any]:
+    """Avoid what a walker will *hear*, which is not the same as avoiding cars.
+
+    Two things separate this from ``scenic_custom_model``, which the docstring
+    up there describes as preferring "green, quiet" ways and which will often
+    return a similar line:
+
+    * **Ordinary streets are penalised.** Scenic leaves RESIDENTIAL, SERVICE and
+      UNCLASSIFIED at 1.0, so it only ever steers away from arterials. A
+      residential street still carries cars, so this one steps down through them
+      as well, and the gap between a back street and a car-free path is where
+      the two presets diverge.
+    * **Surface is not rewarded for being unsealed.** A scenic route wants
+      ground and gravel. Those are irrelevant to noise, and cobblestone is the
+      loudest surface in a European city, so it is the only surface penalised
+      here. A quiet route will take smooth asphalt through a housing estate
+      where a scenic one detours onto a track.
+
+    Tunnels are penalised hard: a road tunnel is reverberant, and the noise a
+    walker meets in one has nowhere to go.
+    """
+    return {
+        "priority": [
+            {"if": "road_environment == FERRY", "multiply_by": "0"},
+            {"if": "road_class == MOTORWAY || road_class == TRUNK", "multiply_by": "0.02"},
+            {"if": "road_class == PRIMARY", "multiply_by": "0.1"},
+            {"if": "road_class == SECONDARY", "multiply_by": "0.25"},
+            {"if": "road_class == TERTIARY", "multiply_by": "0.45"},
+            {
+                "if": "road_class == RESIDENTIAL || road_class == UNCLASSIFIED "
+                      "|| road_class == SERVICE || road_class == ROAD",
+                "multiply_by": "0.7",
+            },
+            {"if": "road_environment == TUNNEL", "multiply_by": "0.15"},
+            {"if": "surface == COBBLESTONE", "multiply_by": "0.4"},
+        ],
+        # Higher than scenic's 20. Quiet is a property of where you are rather
+        # than of how far you went, so there is nothing to be gained by
+        # wandering; a long detour to a quieter street is still a long detour.
+        "distance_influence": 45,
+    }
+
+
+def air_custom_model() -> dict[str, Any]:
+    """Avoid what a walker will *breathe*.
+
+    Shares the traffic gradient with the quiet model, because both read the same
+    ``road_class`` and it is the only proxy for motor traffic either one has.
+    The difference is the road environment, and it is a large one:
+
+    * **A tunnel is the worst place on any route for this objective** and among
+      the least bad for shade. Exhaust concentrates in an enclosed space with no
+      cross-ventilation, and this is the sharpest, best-evidenced distinction
+      any of the three preference presets can draw from a tag.
+    * **A bridge is not penalised at all**, where the shade model penalises it
+      heavily. Open, exposed and windy is exactly what disperses a plume.
+
+    So air and shade will actively diverge wherever a route has the choice, and
+    that is by construction rather than by luck.
+
+    Surface is left alone. Unsealed ways raise particulates slightly in dry
+    weather, which is real and far below the resolution of anything here.
+    """
+    return {
+        "priority": [
+            {"if": "road_environment == FERRY", "multiply_by": "0"},
+            {"if": "road_class == MOTORWAY || road_class == TRUNK", "multiply_by": "0.02"},
+            {"if": "road_class == PRIMARY", "multiply_by": "0.08"},
+            {"if": "road_class == SECONDARY", "multiply_by": "0.22"},
+            {"if": "road_class == TERTIARY", "multiply_by": "0.45"},
+            {
+                "if": "road_class == RESIDENTIAL || road_class == UNCLASSIFIED "
+                      "|| road_class == SERVICE || road_class == ROAD",
+                "multiply_by": "0.75",
+            },
+            {"if": "road_environment == TUNNEL", "multiply_by": "0.03"},
+        ],
+        # The highest of the three. Every extra metre beside traffic is more of
+        # the thing this preset exists to avoid, so a detour has to be short to
+        # be worth taking.
+        "distance_influence": 55,
+    }
+
+
+def shade_custom_model() -> dict[str, Any]:
+    """Prefer ways likely to have something between them and the sun.
+
+    The weakest-grounded of the three, and the one whose note on the card
+    matters most. Two of its rules are facts about the way:
+
+    * **TUNNEL is the only fully covered thing a road graph knows about**, so it
+      is the one road environment left unpenalised here.
+    * **BRIDGE is penalised heavily.** A bridge deck has no street trees and no
+      buildings, and it is one of the few places where "no shade" is a certainty
+      rather than a guess.
+
+    The rest is a canopy proxy: the correlation between the kind of way and what
+    grows beside it, the same judgement written down in
+    ``geometry.ROAD_CLASS_CANOPY_PROXY``. PEDESTRIAN is penalised, which reads
+    oddly next to the other presets until you picture a paved square at noon.
+
+    ⚠ **The two tables must not drift apart.** This model steers the route and
+    ``ROAD_CLASS_CANOPY_PROXY`` scores the result, so a route chosen for shade
+    that then scores badly for shade would be the label-with-nothing-behind-it
+    failure ``route_scenic`` exists to prevent. A test asserts they agree on
+    ordering.
+    """
+    return {
+        "priority": [
+            {"if": "road_environment == FERRY", "multiply_by": "0"},
+            {"if": "road_environment == BRIDGE", "multiply_by": "0.15"},
+            {"if": "road_class == MOTORWAY || road_class == TRUNK", "multiply_by": "0.05"},
+            {"if": "road_class == PRIMARY", "multiply_by": "0.15"},
+            {"if": "road_class == SECONDARY || road_class == PEDESTRIAN", "multiply_by": "0.3"},
+            {"if": "road_class == TERTIARY || road_class == ROAD", "multiply_by": "0.4"},
+            {
+                "if": "road_class == SERVICE || road_class == UNCLASSIFIED "
+                      "|| road_class == CYCLEWAY || road_class == LIVING_STREET "
+                      "|| road_class == STEPS",
+                "multiply_by": "0.55",
+            },
+            {"if": "road_class == RESIDENTIAL", "multiply_by": "0.65"},
+            {"if": "road_class == FOOTWAY", "multiply_by": "0.75"},
+            {
+                "if": "surface == ASPHALT || surface == CONCRETE || surface == PAVED "
+                      "|| surface == PAVING_STONES || surface == SAND",
+                "multiply_by": "0.6",
+            },
+        ],
+        # Between scenic's 20 and air's 55. Reaching a tree-lined street is
+        # worth a detour in a way that reaching a marginally cleaner one is not,
+        # but a shaded route that takes half an hour longer has spent more time
+        # in the sun than the direct one would have.
+        "distance_influence": 35,
+    }
+
+
+# Round-trip lengths to try for a preference preset, as a multiple of the
+# distance the time budget implies.
+#
+# The same lever SCENIC_LOOP_CANDIDATES pulls and for the same reason: for a
+# round trip neither `distance_influence` nor the scale behaves monotonically,
+# because GraphHopper's round_trip algorithm picks a *candidate loop* and a
+# small change to either input flips it to an entirely different one. Searching
+# a ladder is meaningless; generating a few and keeping the best fit is not.
+#
+# Three, not scenic's six. Scenic is choosing on greenness as well as fit and
+# has a hard cap and a floor to satisfy; this is choosing on fit alone.
+PREFERENCE_LOOP_SCALES: tuple[float, ...] = (1.0, 0.7, 0.45)
+
+# Above this multiple of the requested time, the card says so. Not a rejection:
+# a preference preset that cannot fit the budget anywhere near you is still the
+# best answer to the question asked, and a blocked route would be a worse one.
+PREFERENCE_BUDGET_OVERSHOOT = 1.35
+
+# What each preference preset says on its own card, verbatim.
+#
+# **Every one of these is on the wire for every route of that preset**, not only
+# when something goes wrong — which is the opposite of `route_scenic`'s notes,
+# and deliberate. Scenic's notes report a promise it could not keep. These
+# report what the preset is, because none of the three can be measured directly
+# and a bare number under the word "Shade" invites a reader to assume a survey
+# that does not exist.
+#
+# ⚠ No em dash, en dash or horizontal bar: these reach the browser, and
+# `test_no_em_dash.py` reads every string constant in this module.
+PRESET_NOTES: dict[str, str] = {
+    "quiet": (
+        "Quiet is inferred from the kind of way this route follows, mostly how "
+        "much motor traffic its streets carry. Nobody has measured the noise on "
+        "it."
+    ),
+    "air": (
+        "Clean air here means keeping away from motor traffic and out of "
+        "tunnels. The air quality reading on the card is real but covers the "
+        "whole area, not this pavement."
+    ),
+    "shade": (
+        "Tree cover is not something a route can be planned from: OpenStreetMap "
+        "maps trees as points and woods as areas, and neither reaches the "
+        "streets you walk on. This route prefers the kinds of way that tend to "
+        "be shaded, and avoids bridges, which never are."
+    ),
+}
 
 
 # ---------------------------------------------------------------------------
@@ -660,8 +870,18 @@ async def _post_route(body: dict[str, Any], mode: EffectiveMode, preset: str) ->
 
 
 # ---------------------------------------------------------------------------
-# the three presets
+# the six presets
 # ---------------------------------------------------------------------------
+
+# The presets whose custom model takes no arguments and never varies. Scenic and
+# accessible are absent because theirs do: scenic's is generated per candidate
+# from a distance-influence ladder, and accessible's depends on whether the
+# graph carries `smoothness`.
+FIXED_CUSTOM_MODELS: dict[str, Callable[[], dict[str, Any]]] = {
+    "quiet": quiet_custom_model,
+    "air": air_custom_model,
+    "shade": shade_custom_model,
+}
 
 
 def build_request_body(
@@ -700,6 +920,8 @@ def build_request_body(
         )
     elif preset == "accessible":
         body["custom_model"] = accessible_custom_model()
+    elif preset in FIXED_CUSTOM_MODELS:
+        body["custom_model"] = FIXED_CUSTOM_MODELS[preset]()
 
     # When flexible mode is required, and only then.
     #
@@ -917,10 +1139,137 @@ async def route_accessible(origin: LatLon, destination: LatLon | None, minutes: 
     return await _post_route(body, mode, "accessible")
 
 
+async def _route_preference(preset: str, origin: LatLon, destination: LatLon | None,
+                            minutes: int, mode: EffectiveMode) -> RawRoute:
+    """The route this preset asks for, fitted to the time the user has.
+
+    **A point-to-point trip is one request.** Its length is set by where the
+    user is going, so there is nothing to search: the dial is not an input to
+    the answer and `_budget_fit` against it would rank candidates on noise.
+
+    **A round trip is a small candidate search**, and it is not optional. This
+    function used to send scale 1.0 and return whatever came back, on the
+    reasoning — written out at length here, and wrong — that these
+    `distance_influence` values are restrictive enough that a cap could not be
+    needed. Measured against a real self-hosted graph the first time one was
+    available, at Colombo Fort, 30 minutes on foot:
+
+        fastest       42.8 min
+        quiet        108.4 min
+        shade        118.0 min
+        air          114.7 min
+
+    Nearly four times the time asked for. The overshoot is the same
+    discontinuity `SCENIC_LOOP_CANDIDATES` documents: GraphHopper's
+    ``round_trip`` picks a candidate loop, and a custom model that reweights the
+    graph can send it to an entirely different one rather than to a slightly
+    slower version of the same one. `distance_influence` does not restrain it,
+    because the loop's length comes from ``round_trip.distance``.
+
+    So the same remedy, in its smallest form: try a few values of
+    ``round_trip.distance`` and keep whichever lands closest to the time the
+    user actually said they had. No greenness floor and no comparison against
+    fastest — the question here is only "does this fit in thirty minutes", and
+    the budget answers it without a baseline request.
+    """
+    if destination is not None:
+        route = await _post_route(
+            build_request_body(origin, destination, minutes, mode, preset), mode, preset
+        )
+        route.preset_note = PRESET_NOTES[preset]
+        return route
+
+    async def _candidate(scale: float) -> RawRoute:
+        body = build_request_body(origin, None, minutes, mode, preset,
+                                  loop_distance_scale=scale)
+        return await _post_route(body, mode, preset)
+
+    # Free against a server you run yourself, three credits a time against the
+    # hosted one. The metered path takes the first candidate that fits rather
+    # than paying for all of them, which is the arrangement route_scenic uses
+    # and for the same reason.
+    unmetered = graphhopper_is_self_hosted()
+    scales = PREFERENCE_LOOP_SCALES if unmetered else PREFERENCE_LOOP_SCALES[:2]
+
+    scored: list[tuple[float, RawRoute]] = []
+    if unmetered:
+        settled = await asyncio.gather(
+            *(_candidate(scale) for scale in scales), return_exceptions=True
+        )
+        for scale, outcome in zip(scales, settled, strict=True):
+            if isinstance(outcome, RawRoute):
+                scored.append((_budget_fit(outcome.duration_min, minutes), outcome))
+            else:
+                log.info("preference_candidate_failed",
+                         extra={"preset": preset, "loop_scale": scale,
+                                "error": type(outcome).__name__})
+        if not scored:
+            raise next(o for o in settled if isinstance(o, BaseException))
+    else:
+        for scale in scales:
+            candidate = await _candidate(scale)
+            fit = _budget_fit(candidate.duration_min, minutes)
+            scored.append((fit, candidate))
+            if candidate.duration_min <= minutes * PREFERENCE_BUDGET_OVERSHOOT:
+                break
+
+    scored.sort(key=lambda pair: pair[0], reverse=True)
+    chosen = scored[0][1]
+    note = PRESET_NOTES[preset]
+
+    # Both said only when true. Three candidates is a search, not a guarantee:
+    # a network with nowhere quiet to go will miss the budget at every scale it
+    # is offered, in either direction. Measured at Colombo Fort, where 30
+    # minutes on foot yields an 18-minute loop under every preset including
+    # scenic — the closest fit available, and not the half hour that was asked
+    # for. Saying so beats letting a reader assume the number beside the label
+    # answered the dial.
+    #
+    # The undershoot threshold is scenic's, read rather than copied. It is a
+    # judgement about the same dial, and a second constant holding the same
+    # number is a second constant to forget to change.
+    if minutes > 0 and chosen.duration_min > minutes * PREFERENCE_BUDGET_OVERSHOOT:
+        note = (
+            f"{note} This is the closest fit to your time budget that could be "
+            f"found near you, and it is still longer than you asked for."
+        )
+        log.info("preference_over_budget",
+                 extra={"preset": preset, "minutes": minutes,
+                        "duration_min": round(chosen.duration_min, 1)})
+    elif minutes > 0 and chosen.duration_min < minutes * SCENIC_BUDGET_UNDERSHOOT:
+        note = (
+            f"{note} It is also noticeably shorter than the time you asked for. "
+            f"Nothing closer to your budget was reachable."
+        )
+        log.info("preference_under_budget",
+                 extra={"preset": preset, "minutes": minutes,
+                        "duration_min": round(chosen.duration_min, 1)})
+    chosen.preset_note = note
+    return chosen
+
+
+async def route_quiet(origin: LatLon, destination: LatLon | None, minutes: int,
+                      mode: EffectiveMode) -> RawRoute:
+    return await _route_preference("quiet", origin, destination, minutes, mode)
+
+
+async def route_air(origin: LatLon, destination: LatLon | None, minutes: int,
+                    mode: EffectiveMode) -> RawRoute:
+    return await _route_preference("air", origin, destination, minutes, mode)
+
+
+async def route_shade(origin: LatLon, destination: LatLon | None, minutes: int,
+                      mode: EffectiveMode) -> RawRoute:
+    return await _route_preference("shade", origin, destination, minutes, mode)
+
+
 PRESETS = {
     "fastest": route_fastest,
     "scenic": route_scenic,
     "accessible": route_accessible,
+    "quiet": route_quiet,
+    "shade": route_shade,
+    "air": route_air,
 }
 
 

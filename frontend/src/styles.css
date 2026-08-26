@@ -95,7 +95,6 @@
    * sentence that the mockups set tertiary wears --ink-2 instead */
   --ink-2-deep: #6f6d64; /* secondary for text on tinted grounds (input fill,
    * the segmented container), where #77756c drops under 4.5:1 */
-  --ink-disabled: #b4b2a8;
   --surface: #fdfcfa;
   --canvas: #eceae4;
   --on-dark: #f5f4ef;
@@ -138,6 +137,29 @@
   --rose-on-wash: #88383b; /* oklch(0.45 0.11 20) */
   --rose-border: #e1a6a5; /* oklch(0.78 0.07 20) */
 
+  /* -- indigo: quiet ------------------------------------------------------
+   * The last three families arrived with the quiet, shade and air objectives,
+   * which had chips before they had routes. Each one takes the route hue of a
+   * single objective through the same oklch steps as the five families above,
+   * so a pressed chip is the same kind of object whichever objective it names.
+   * Only indigo carries a --deep: it draws the fourth score bar. Nothing draws
+   * a teal or a clay graphic, and a token nothing reads is a token that drifts
+   * unnoticed. */
+  --indigo-deep: #6975b5; /* oklch(0.58 0.1 275) */
+  --indigo-wash: #e1e7ff; /* oklch(0.93 0.035 275) */
+  --indigo-on-wash: #3f487e; /* oklch(0.42 0.09 275) */
+  --indigo-border: #aab4e5; /* oklch(0.78 0.07 275) */
+
+  /* -- teal: shade -------------------------------------------------------- */
+  --teal-wash: #cef0ef; /* oklch(0.93 0.035 195) */
+  --teal-on-wash: #005b5c; /* oklch(0.42 0.09 195) */
+  --teal-border: #80c6c5; /* oklch(0.78 0.07 195) */
+
+  /* -- clay: clean air ---------------------------------------------------- */
+  --clay-wash: #fde1d5; /* oklch(0.93 0.035 45) */
+  --clay-on-wash: #743b1f; /* oklch(0.42 0.09 45) */
+  --clay-border: #deaa93; /* oklch(0.78 0.07 45) */
+
   /* -- map (§ visual direction: restyled basemap; tiles stay uncached) ----- */
   --map-land: #ecf0e6;
   --map-park: #deebd3;
@@ -149,8 +171,9 @@
   /* -- route identity -----------------------------------------------------
    * Mirrored in lib/dash.js, where the MapLibre layers read them — a WebGL
    * paint property cannot resolve var(). dash-palette.test.js holds the two
-   * copies together. quiet/shade/air ship disabled ("· soon"); their hues are
-   * placeholders drawn from the same oklch system so the table stays total. */
+   * copies together. All six objectives route; the indigo, teal and clay
+   * families above are these last three hues taken through the wash steps,
+   * which is what a pressed chip for one of them is drawn in. */
   --route-fastest: #4e7fbe;
   --route-scenic: #3fa284;
   --route-accessible: #886aaa;
@@ -179,7 +202,6 @@
   --ink: #232320;
   --ink-2: #77756c;
   --ink-3: #a6a49b;
-  --ink-disabled: #b4b2a8;
   --surface: #fdfcfa;
   --canvas: #eceae4;
   --on-dark: #f5f4ef;
@@ -1217,6 +1239,25 @@ a {
   margin: 12px 0 0;
 }
 
+/* The same sentence slot for a route that was not rejected: what the objective
+ * steered on. Same shape as the note above and none of its alarm, because rose
+ * on this surface means "this route is refused" everywhere else in the app. */
+.detail__basis-note {
+  margin: 14px auto 0;
+  max-width: 640px;
+  padding: 10px 14px;
+  background: var(--input-fill);
+  color: var(--ink-2-deep);
+  border-radius: var(--r-chip);
+  font-size: 13px;
+  text-align: center;
+}
+
+.detail--sheet .detail__basis-note {
+  text-align: left;
+  margin: 12px 0 0;
+}
+
 .detail__columns {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -1290,6 +1331,7 @@ a {
 .scores__fill--mint { background: var(--mint-deep); }
 .scores__fill--sky { background: var(--sky-deep); }
 .scores__fill--lilac { background: var(--lilac-deep); }
+.scores__fill--indigo { background: var(--indigo-deep); }
 
 .scores__unmeasured {
   flex: 1;
@@ -1846,23 +1888,9 @@ a {
 }
 
 @media (hover: hover) {
-  .chip:not(:disabled):hover {
+  .chip:hover:not(.is-pressed) {
     background: var(--hover-fill);
   }
-}
-
-.chip:disabled {
-  color: var(--ink-disabled);
-  cursor: default;
-}
-
-.chip:disabled .dot {
-  background: var(--ink-disabled);
-}
-
-.chip__soon {
-  font-size: 10px;
-  font-weight: 400;
 }
 
 .chip--fastest.is-pressed {
@@ -1881,6 +1909,24 @@ a {
   background: var(--lilac-wash);
   border-color: var(--lilac-border);
   color: var(--lilac-on-wash);
+}
+
+.chip--quiet.is-pressed {
+  background: var(--indigo-wash);
+  border-color: var(--indigo-border);
+  color: var(--indigo-on-wash);
+}
+
+.chip--shade.is-pressed {
+  background: var(--teal-wash);
+  border-color: var(--teal-border);
+  color: var(--teal-on-wash);
+}
+
+.chip--air.is-pressed {
+  background: var(--clay-wash);
+  border-color: var(--clay-border);
+  color: var(--clay-on-wash);
 }
 
 /* Departure. */

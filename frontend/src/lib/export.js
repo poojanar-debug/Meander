@@ -19,7 +19,7 @@ import {
 } from './format.js'
 import { METRIC_24, formatElevation } from './units.js'
 
-const SCORE_LABEL = { scenic: 'Scenic', air: 'Air', shade: 'Shade' }
+const SCORE_LABEL = { scenic: 'Scenic', air: 'Air', shade: 'Shade', quiet: 'Quiet' }
 
 const esc = (value) =>
   String(value ?? '')

@@ -13,6 +13,19 @@ const typeLabel = (type) => {
   return readable.charAt(0).toUpperCase() + readable.slice(1)
 }
 
+/**
+ * The scores this card compares, in the order it reads them.
+ *
+ * The wire carries a fourth, `quiet`, and it deliberately stays in the detail
+ * panel. This line already wraps at 320px with three terms on it, and a card
+ * is a comparison rather than a report: a fourth number makes every card
+ * taller for something the panel one tap away states as a bar, with its own
+ * "not measured" wording when there is nothing to state.
+ */
+const CARD_SCORES = ['scenic', 'air', 'shade']
+
+const scoreLine = (scores) => CARD_SCORES.map((key) => `${key} ${score(scores[key])}`)
+
 const coveragePct = (confidence) =>
   typeof confidence === 'number' && Number.isFinite(confidence)
     ? Math.round(confidence * 100)
@@ -52,7 +65,7 @@ export default function RouteRow({
   // as "unknown" while the truth is "being checked", and those are different
   // statements. The pending line below carries the honest one.
   if (compact && !blocked && !pending) {
-    metaParts.push(`scenic ${score(scores.scenic)}`, `air ${score(scores.air)}`, `shade ${score(scores.shade)}`)
+    metaParts.push(...scoreLine(scores))
   } else {
     metaParts.push(MODE_NOUN[route.mode] ?? route.mode)
   }
@@ -87,9 +100,7 @@ export default function RouteRow({
               <span className="card__skeleton-bar" style={{ width: '46%' }} />
             </span>
           ) : (
-            <span className="card__scores mono">
-              scenic {score(scores.scenic)} · air {score(scores.air)} · shade {score(scores.shade)}
-            </span>
+            <span className="card__scores mono">{scoreLine(scores).join(' · ')}</span>
           )
         )}
 

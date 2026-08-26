@@ -1,0 +1,845 @@
+{
+  "_meander_provenance": "synthetic",
+  "_meander_recorded_at": "2026-08-26T14:09:31.316332+00:00",
+  "_meander_note": "Written by backend/fixtures.py. Secrets are redacted and excluded from the request signature.",
+  "request": {
+    "method": "POST",
+    "url": "https://graphhopper.com/api/1/route",
+    "params": {},
+    "json": {
+      "profile": "foot",
+      "points_encoded": false,
+      "instructions": true,
+      "calc_points": true,
+      "elevation": true,
+      "details": [
+        "road_class",
+        "surface",
+        "road_environment"
+      ],
+      "points": [
+        [
+          -0.162207,
+          51.507489
+        ]
+      ],
+      "algorithm": "round_trip",
+      "round_trip.distance": 2625,
+      "round_trip.seed": 42,
+      "custom_model": {
+        "priority": [
+          {
+            "if": "road_environment == FERRY",
+            "multiply_by": "0"
+          },
+          {
+            "if": "road_environment == BRIDGE",
+            "multiply_by": "0.15"
+          },
+          {
+            "if": "road_class == MOTORWAY || road_class == TRUNK",
+            "multiply_by": "0.05"
+          },
+          {
+            "if": "road_class == PRIMARY",
+            "multiply_by": "0.15"
+          },
+          {
+            "if": "road_class == SECONDARY || road_class == PEDESTRIAN",
+            "multiply_by": "0.3"
+          },
+          {
+            "if": "road_class == TERTIARY || road_class == ROAD",
+            "multiply_by": "0.4"
+          },
+          {
+            "if": "road_class == SERVICE || road_class == UNCLASSIFIED || road_class == CYCLEWAY || road_class == LIVING_STREET || road_class == STEPS",
+            "multiply_by": "0.55"
+          },
+          {
+            "if": "road_class == RESIDENTIAL",
+            "multiply_by": "0.65"
+          },
+          {
+            "if": "road_class == FOOTWAY",
+            "multiply_by": "0.75"
+          },
+          {
+            "if": "surface == ASPHALT || surface == CONCRETE || surface == PAVED || surface == PAVING_STONES || surface == SAND",
+            "multiply_by": "0.6"
+          }
+        ],
+        "distance_influence": 35
+      },
+      "ch.disable": true
+    },
+    "data": {},
+    "content": null,
+    "headers": {
+      "Content-Type": "application/json"
+    }
+  },
+  "response": {
+    "status": 200,
+    "headers": {
+      "content-type": "application/json"
+    },
+    "json": {
+      "hints": {
+        "visited_nodes.sum": 0,
+        "visited_nodes.average": 0
+      },
+      "info": {
+        "copyrights": [
+          "GraphHopper",
+          "OpenStreetMap contributors"
+        ],
+        "took": 12,
+        "road_data_timestamp": "2026-07-01T00:00:00Z"
+      },
+      "paths": [
+        {
+          "distance": 2952.964,
+          "weight": 2430.423,
+          "time": 2430422,
+          "transfers": 0,
+          "points_encoded": false,
+          "bbox": [
+            -0.17300742374348047,
+            51.506070305427514,
+            -0.15919642249804553,
+            51.514600326611024
+          ],
+          "points": {
+            "type": "LineString",
+            "coordinates": [
+              [
+                -0.162207,
+                51.507489,
+                25.7
+              ],
+              [
+                -0.162478,
+                51.507096,
+                27.1
+              ],
+              [
+                -0.162782,
+                51.506734,
+                29.2
+              ],
+              [
+                -0.163125,
+                51.506416,
+                30.8
+              ],
+              [
+                -0.163588,
+                51.506239,
+                32.9
+              ],
+              [
+                -0.164182,
+                51.506103,
+                34.2
+              ],
+              [
+                -0.164872,
+                51.50607,
+                35.6
+              ],
+              [
+                -0.165452,
+                51.506221,
+                36.6
+              ],
+              [
+                -0.166134,
+                51.506359,
+                38.0
+              ],
+              [
+                -0.166647,
+                51.506612,
+                38.3
+              ],
+              [
+                -0.167017,
+                51.506915,
+                39.4
+              ],
+              [
+                -0.167419,
+                51.507141,
+                39.7
+              ],
+              [
+                -0.16787,
+                51.507409,
+                39.6
+              ],
+              [
+                -0.16818,
+                51.507595,
+                39.2
+              ],
+              [
+                -0.168573,
+                51.50771,
+                39.3
+              ],
+              [
+                -0.168948,
+                51.507787,
+                38.3
+              ],
+              [
+                -0.169568,
+                51.507856,
+                37.6
+              ],
+              [
+                -0.170136,
+                51.507861,
+                36.1
+              ],
+              [
+                -0.170741,
+                51.507932,
+                35.2
+              ],
+              [
+                -0.171262,
+                51.508036,
+                33.3
+              ],
+              [
+                -0.171925,
+                51.508234,
+                32.0
+              ],
+              [
+                -0.172388,
+                51.508571,
+                29.9
+              ],
+              [
+                -0.172722,
+                51.508831,
+                28.4
+              ],
+              [
+                -0.173007,
+                51.509253,
+                26.2
+              ],
+              [
+                -0.172881,
+                51.509571,
+                25.1
+              ],
+              [
+                -0.172774,
+                51.509977,
+                22.9
+              ],
+              [
+                -0.172421,
+                51.5104,
+                21.0
+              ],
+              [
+                -0.172025,
+                51.510706,
+                19.5
+              ],
+              [
+                -0.17167,
+                51.510991,
+                17.8
+              ],
+              [
+                -0.17119,
+                51.511215,
+                16.6
+              ],
+              [
+                -0.170919,
+                51.511465,
+                15.0
+              ],
+              [
+                -0.170532,
+                51.511702,
+                13.6
+              ],
+              [
+                -0.170344,
+                51.511913,
+                13.2
+              ],
+              [
+                -0.170238,
+                51.512169,
+                12.0
+              ],
+              [
+                -0.170173,
+                51.51246,
+                11.8
+              ],
+              [
+                -0.170156,
+                51.51283,
+                11.6
+              ],
+              [
+                -0.169948,
+                51.513257,
+                11.3
+              ],
+              [
+                -0.169721,
+                51.513632,
+                11.6
+              ],
+              [
+                -0.169481,
+                51.513961,
+                12.2
+              ],
+              [
+                -0.169098,
+                51.51429,
+                13.5
+              ],
+              [
+                -0.168478,
+                51.514508,
+                14.5
+              ],
+              [
+                -0.167946,
+                51.5146,
+                15.7
+              ],
+              [
+                -0.167284,
+                51.514594,
+                16.6
+              ],
+              [
+                -0.166673,
+                51.514574,
+                18.2
+              ],
+              [
+                -0.166135,
+                51.514392,
+                20.2
+              ],
+              [
+                -0.165524,
+                51.514076,
+                21.7
+              ],
+              [
+                -0.165067,
+                51.513874,
+                23.5
+              ],
+              [
+                -0.164733,
+                51.513561,
+                25.7
+              ],
+              [
+                -0.164332,
+                51.513339,
+                27.4
+              ],
+              [
+                -0.164027,
+                51.513152,
+                29.4
+              ],
+              [
+                -0.163655,
+                51.512995,
+                30.9
+              ],
+              [
+                -0.163095,
+                51.512983,
+                32.2
+              ],
+              [
+                -0.162687,
+                51.512879,
+                34.1
+              ],
+              [
+                -0.162084,
+                51.512879,
+                35.1
+              ],
+              [
+                -0.161395,
+                51.512731,
+                36.9
+              ],
+              [
+                -0.160859,
+                51.512617,
+                38.0
+              ],
+              [
+                -0.160256,
+                51.512473,
+                38.4
+              ],
+              [
+                -0.159744,
+                51.512203,
+                39.3
+              ],
+              [
+                -0.159358,
+                51.511917,
+                39.3
+              ],
+              [
+                -0.159202,
+                51.511529,
+                39.8
+              ],
+              [
+                -0.159196,
+                51.51108,
+                39.3
+              ],
+              [
+                -0.159431,
+                51.51073,
+                39.2
+              ],
+              [
+                -0.159699,
+                51.510374,
+                38.6
+              ],
+              [
+                -0.160088,
+                51.510011,
+                37.6
+              ],
+              [
+                -0.160521,
+                51.509774,
+                36.6
+              ],
+              [
+                -0.160988,
+                51.509547,
+                35.5
+              ],
+              [
+                -0.161242,
+                51.509267,
+                33.6
+              ],
+              [
+                -0.161602,
+                51.509048,
+                32.0
+              ],
+              [
+                -0.161819,
+                51.508864,
+                30.7
+              ],
+              [
+                -0.16198,
+                51.508555,
+                29.0
+              ],
+              [
+                -0.162004,
+                51.508193,
+                26.9
+              ],
+              [
+                -0.162052,
+                51.507848,
+                24.8
+              ],
+              [
+                -0.162207,
+                51.507489,
+                22.9
+              ]
+            ]
+          },
+          "ascend": 14.1,
+          "descend": 16.9,
+          "details": {
+            "road_class": [
+              [
+                0,
+                6,
+                "PATH"
+              ],
+              [
+                6,
+                14,
+                "TRACK"
+              ],
+              [
+                14,
+                16,
+                "RESIDENTIAL"
+              ],
+              [
+                16,
+                20,
+                "PATH"
+              ],
+              [
+                20,
+                28,
+                "TRACK"
+              ],
+              [
+                28,
+                34,
+                "BRIDLEWAY"
+              ],
+              [
+                34,
+                42,
+                "RESIDENTIAL"
+              ],
+              [
+                42,
+                45,
+                "FOOTWAY"
+              ],
+              [
+                45,
+                47,
+                "FOOTWAY"
+              ],
+              [
+                47,
+                54,
+                "RESIDENTIAL"
+              ],
+              [
+                54,
+                56,
+                "FOOTWAY"
+              ],
+              [
+                56,
+                64,
+                "FOOTWAY"
+              ],
+              [
+                64,
+                71,
+                "PATH"
+              ],
+              [
+                71,
+                72,
+                "PATH"
+              ]
+            ],
+            "surface": [
+              [
+                0,
+                7,
+                "MISSING"
+              ],
+              [
+                7,
+                11,
+                "ASPHALT"
+              ],
+              [
+                11,
+                13,
+                "GROUND"
+              ],
+              [
+                13,
+                20,
+                "GROUND"
+              ],
+              [
+                20,
+                27,
+                "ASPHALT"
+              ],
+              [
+                27,
+                35,
+                "MISSING"
+              ],
+              [
+                35,
+                37,
+                "ASPHALT"
+              ],
+              [
+                37,
+                44,
+                "ASPHALT"
+              ],
+              [
+                44,
+                51,
+                "GROUND"
+              ],
+              [
+                51,
+                53,
+                "GROUND"
+              ],
+              [
+                53,
+                59,
+                "DIRT"
+              ],
+              [
+                59,
+                67,
+                "GROUND"
+              ],
+              [
+                67,
+                69,
+                "DIRT"
+              ],
+              [
+                69,
+                72,
+                "MISSING"
+              ]
+            ],
+            "road_environment": [
+              [
+                0,
+                6,
+                "ROAD"
+              ],
+              [
+                6,
+                9,
+                "ROAD"
+              ],
+              [
+                9,
+                12,
+                "ROAD"
+              ],
+              [
+                12,
+                15,
+                "ROAD"
+              ],
+              [
+                15,
+                17,
+                "ROAD"
+              ],
+              [
+                17,
+                23,
+                "ROAD"
+              ],
+              [
+                21,
+                25,
+                "TUNNEL"
+              ],
+              [
+                23,
+                28,
+                "ROAD"
+              ],
+              [
+                28,
+                31,
+                "ROAD"
+              ],
+              [
+                31,
+                35,
+                "ROAD"
+              ],
+              [
+                35,
+                40,
+                "ROAD"
+              ],
+              [
+                40,
+                48,
+                "ROAD"
+              ],
+              [
+                48,
+                53,
+                "ROAD"
+              ],
+              [
+                53,
+                61,
+                "ROAD"
+              ],
+              [
+                61,
+                67,
+                "ROAD"
+              ],
+              [
+                67,
+                71,
+                "ROAD"
+              ],
+              [
+                71,
+                72,
+                "ROAD"
+              ]
+            ]
+          },
+          "instructions": [
+            {
+              "distance": 369.12,
+              "heading": 48.17,
+              "sign": 0,
+              "interval": [
+                0,
+                9
+              ],
+              "text": "Continue onto Illustration Walk",
+              "time": 303803,
+              "street_name": "Illustration Walk"
+            },
+            {
+              "distance": 369.12,
+              "heading": 65.29,
+              "sign": -2,
+              "interval": [
+                9,
+                18
+              ],
+              "text": "Turn left onto Example Parade",
+              "time": 303803,
+              "street_name": "Example Parade"
+            },
+            {
+              "distance": 369.12,
+              "heading": 213.28,
+              "sign": -7,
+              "interval": [
+                18,
+                27
+              ],
+              "text": "Keep left onto Sample Street",
+              "time": 303803,
+              "street_name": "Sample Street"
+            },
+            {
+              "distance": 369.12,
+              "heading": 343.68,
+              "sign": -7,
+              "interval": [
+                27,
+                36
+              ],
+              "text": "Keep left onto Example Parade",
+              "time": 303803,
+              "street_name": "Example Parade"
+            },
+            {
+              "distance": 369.12,
+              "heading": 193.16,
+              "sign": 7,
+              "interval": [
+                36,
+                45
+              ],
+              "text": "Keep right onto Mock Avenue",
+              "time": 303803,
+              "street_name": "Mock Avenue"
+            },
+            {
+              "distance": 369.12,
+              "heading": 280.93,
+              "sign": 7,
+              "interval": [
+                45,
+                54
+              ],
+              "text": "Keep right onto Specimen Road",
+              "time": 303803,
+              "street_name": "Specimen Road"
+            },
+            {
+              "distance": 369.12,
+              "heading": 287.81,
+              "sign": 7,
+              "interval": [
+                54,
+                63
+              ],
+              "text": "Keep right onto Specimen Road",
+              "time": 303803,
+              "street_name": "Specimen Road"
+            },
+            {
+              "distance": 369.12,
+              "heading": 63.5,
+              "sign": -7,
+              "interval": [
+                63,
+                72
+              ],
+              "text": "Keep left onto Fixture Path",
+              "time": 303803,
+              "street_name": "Fixture Path"
+            },
+            {
+              "distance": 0.0,
+              "sign": 4,
+              "interval": [
+                72,
+                72
+              ],
+              "text": "Arrive at destination",
+              "time": 0,
+              "street_name": ""
+            }
+          ],
+          "legs": [],
+          "snapped_waypoints": {
+            "type": "LineString",
+            "coordinates": [
+              [
+                -0.162207,
+                51.507489
+              ],
+              [
+                -0.162207,
+                51.507489
+              ]
+            ]
+          }
+        }
+      ]
+    }
+  }
+}
