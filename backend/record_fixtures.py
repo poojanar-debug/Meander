@@ -45,9 +45,11 @@ def _preset_names() -> tuple[str, ...]:
 async def _record_graphhopper(force: bool) -> int:
     scenarios = _scenarios()
     budget = fx.get_budget()
-    # Six presets per scenario, and scenic may climb its ladder up to 3 rungs,
-    # so eight requests: five single-shot presets plus scenic's three.
-    worst_case = len(scenarios) * 8 * GRAPHHOPPER_CREDIT_COST
+    # Fourteen requests per scenario at worst: fastest and accessible once
+    # each, scenic's three-rung ladder, and three preference presets that each
+    # search three round_trip scales on a loop. Point-to-point scenarios cost
+    # less; this is the ceiling, which is what a budget check wants.
+    worst_case = len(scenarios) * 14 * GRAPHHOPPER_CREDIT_COST
     remaining = budget.remaining("graphhopper")
     print(f"GraphHopper: {len(scenarios)} scenarios, worst case {worst_case} credits, "
           f"{remaining} remaining in the budget.")

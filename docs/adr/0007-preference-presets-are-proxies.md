@@ -89,13 +89,30 @@ which is the bar a label actually has to clear.
 - Five of six presets now carry a custom model, so five need flexible mode. On a
   free hosted package the app answers with one route and five blocked ones.
   [0002](0002-self-host-graphhopper.md) got more load-bearing, not less.
-- **None of the three has a duration cap**, where `scenic` has one at 1.6x
-  fastest. A preference preset steers onto slower ways, so on a round trip it
-  overshoots the time budget: about 1.24x on the demo fixtures for `shade`.
-  Judged acceptable because their `distance_influence` values are two to three
-  times more restrictive than scenic's 20 — which is what let scenic return a
-  117-minute loop against a 42-minute baseline and is why it has a cap — and
-  because the duration is on the card beside the label. It is the first thing to
-  revisit against a real graph.
+- **A round trip is a candidate search, and the first version of this decision
+  got that wrong.** The presets originally sent one request and returned what
+  came back, on the reasoning that their `distance_influence` values (35, 45,
+  55) are restrictive enough next to scenic's 20 that a cap could not be needed.
+  The synthetic fixtures agreed: `shade` came back at 1.24x fastest. The first
+  run against a real self-hosted graph did not. At Colombo Fort, 30 minutes on
+  foot:
+
+  | | one request | three candidates |
+  |---|---|---|
+  | `quiet` | 108.4 min | 18.0 min |
+  | `shade` | 118.0 min | 17.5 min |
+  | `air` | 114.7 min | 18.0 min |
+
+  `distance_influence` never restrained it, because the loop's length comes from
+  `round_trip.distance`. It is the same discontinuity `SCENIC_LOOP_CANDIDATES`
+  documents — round_trip picks a *candidate loop*, and reweighting the graph
+  sends it to a different one rather than a slower version of the same one.
+  `PREFERENCE_LOOP_SCALES` is the smallest form of scenic's remedy: try three
+  lengths, keep the best `_budget_fit`. No greenness floor and no baseline
+  request, because the only question is whether it fits in thirty minutes.
+
+  Colombo now undershoots instead (18 against 30), which is what that network
+  offers — `scenic` returns 18.0 there too. The card says so, in the sentence
+  scenic has always used for it.
 - If a canopy layer ever becomes routable, the shade note is the thing that has
   to change first, and it is one dictionary.

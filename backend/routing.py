@@ -465,6 +465,24 @@ def shade_custom_model() -> dict[str, Any]:
     }
 
 
+# Round-trip lengths to try for a preference preset, as a multiple of the
+# distance the time budget implies.
+#
+# The same lever SCENIC_LOOP_CANDIDATES pulls and for the same reason: for a
+# round trip neither `distance_influence` nor the scale behaves monotonically,
+# because GraphHopper's round_trip algorithm picks a *candidate loop* and a
+# small change to either input flips it to an entirely different one. Searching
+# a ladder is meaningless; generating a few and keeping the best fit is not.
+#
+# Three, not scenic's six. Scenic is choosing on greenness as well as fit and
+# has a hard cap and a floor to satisfy; this is choosing on fit alone.
+PREFERENCE_LOOP_SCALES: tuple[float, ...] = (1.0, 0.7, 0.45)
+
+# Above this multiple of the requested time, the card says so. Not a rejection:
+# a preference preset that cannot fit the budget anywhere near you is still the
+# best answer to the question asked, and a blocked route would be a worse one.
+PREFERENCE_BUDGET_OVERSHOOT = 1.35
+
 # What each preference preset says on its own card, verbatim.
 #
 # **Every one of these is on the wire for every route of that preset**, not only
@@ -1123,34 +1141,111 @@ async def route_accessible(origin: LatLon, destination: LatLon | None, minutes: 
 
 async def _route_preference(preset: str, origin: LatLon, destination: LatLon | None,
                             minutes: int, mode: EffectiveMode) -> RawRoute:
-    """One request under a fixed custom model, carrying the preset's own note.
+    """The route this preset asks for, fitted to the time the user has.
 
-    No candidate search, unlike ``route_scenic``. That search exists to enforce
-    two promises scenic makes and these do not: a hard cap at 1.6x the fastest
-    duration, and a floor requiring the result be greener than the direct route.
-    Neither has an analogue here. There is no cap on how quiet a route may be,
-    and the "is it actually better" question is answered on the card by the
-    score beside the label rather than by rejecting the route before it is
-    shown. Searching would cost one GraphHopper request per candidate to pick a
-    winner on a proxy this thin, which is precision the inputs do not support.
+    **A point-to-point trip is one request.** Its length is set by where the
+    user is going, so there is nothing to search: the dial is not an input to
+    the answer and `_budget_fit` against it would rank candidates on noise.
 
-    ⚠ **The consequence is that none of the three has a duration cap**, and on a
-    round trip that is a real gap rather than a theoretical one: the loop length
-    is anchored by `round_trip.distance`, but a model that steers onto slower
-    ways still overshoots the time budget. On the demo fixtures shade comes back
-    at about 1.24x the fastest loop.
+    **A round trip is a small candidate search**, and it is not optional. This
+    function used to send scale 1.0 and return whatever came back, on the
+    reasoning — written out at length here, and wrong — that these
+    `distance_influence` values are restrictive enough that a cap could not be
+    needed. Measured against a real self-hosted graph the first time one was
+    available, at Colombo Fort, 30 minutes on foot:
 
-    Left uncapped on the judgement that these `distance_influence` values (35,
-    45 and 55) are two to three times more restrictive than scenic's 20, which
-    is what let scenic return a 117-minute loop against a 42-minute baseline in
-    Colombo and is why it grew a cap at all. Nothing is hidden either way: the
-    duration is on the card beside the label. If this needs fixing, the honest
-    fix is a cap measured against a real graph, not a scale factor guessed here.
+        fastest       42.8 min
+        quiet        108.4 min
+        shade        118.0 min
+        air          114.7 min
+
+    Nearly four times the time asked for. The overshoot is the same
+    discontinuity `SCENIC_LOOP_CANDIDATES` documents: GraphHopper's
+    ``round_trip`` picks a candidate loop, and a custom model that reweights the
+    graph can send it to an entirely different one rather than to a slightly
+    slower version of the same one. `distance_influence` does not restrain it,
+    because the loop's length comes from ``round_trip.distance``.
+
+    So the same remedy, in its smallest form: try a few values of
+    ``round_trip.distance`` and keep whichever lands closest to the time the
+    user actually said they had. No greenness floor and no comparison against
+    fastest — the question here is only "does this fit in thirty minutes", and
+    the budget answers it without a baseline request.
     """
-    body = build_request_body(origin, destination, minutes, mode, preset)
-    route = await _post_route(body, mode, preset)
-    route.preset_note = PRESET_NOTES[preset]
-    return route
+    if destination is not None:
+        route = await _post_route(
+            build_request_body(origin, destination, minutes, mode, preset), mode, preset
+        )
+        route.preset_note = PRESET_NOTES[preset]
+        return route
+
+    async def _candidate(scale: float) -> RawRoute:
+        body = build_request_body(origin, None, minutes, mode, preset,
+                                  loop_distance_scale=scale)
+        return await _post_route(body, mode, preset)
+
+    # Free against a server you run yourself, three credits a time against the
+    # hosted one. The metered path takes the first candidate that fits rather
+    # than paying for all of them, which is the arrangement route_scenic uses
+    # and for the same reason.
+    unmetered = graphhopper_is_self_hosted()
+    scales = PREFERENCE_LOOP_SCALES if unmetered else PREFERENCE_LOOP_SCALES[:2]
+
+    scored: list[tuple[float, RawRoute]] = []
+    if unmetered:
+        settled = await asyncio.gather(
+            *(_candidate(scale) for scale in scales), return_exceptions=True
+        )
+        for scale, outcome in zip(scales, settled, strict=True):
+            if isinstance(outcome, RawRoute):
+                scored.append((_budget_fit(outcome.duration_min, minutes), outcome))
+            else:
+                log.info("preference_candidate_failed",
+                         extra={"preset": preset, "loop_scale": scale,
+                                "error": type(outcome).__name__})
+        if not scored:
+            raise next(o for o in settled if isinstance(o, BaseException))
+    else:
+        for scale in scales:
+            candidate = await _candidate(scale)
+            fit = _budget_fit(candidate.duration_min, minutes)
+            scored.append((fit, candidate))
+            if candidate.duration_min <= minutes * PREFERENCE_BUDGET_OVERSHOOT:
+                break
+
+    scored.sort(key=lambda pair: pair[0], reverse=True)
+    chosen = scored[0][1]
+    note = PRESET_NOTES[preset]
+
+    # Both said only when true. Three candidates is a search, not a guarantee:
+    # a network with nowhere quiet to go will miss the budget at every scale it
+    # is offered, in either direction. Measured at Colombo Fort, where 30
+    # minutes on foot yields an 18-minute loop under every preset including
+    # scenic — the closest fit available, and not the half hour that was asked
+    # for. Saying so beats letting a reader assume the number beside the label
+    # answered the dial.
+    #
+    # The undershoot threshold is scenic's, read rather than copied. It is a
+    # judgement about the same dial, and a second constant holding the same
+    # number is a second constant to forget to change.
+    if minutes > 0 and chosen.duration_min > minutes * PREFERENCE_BUDGET_OVERSHOOT:
+        note = (
+            f"{note} This is the closest fit to your time budget that could be "
+            f"found near you, and it is still longer than you asked for."
+        )
+        log.info("preference_over_budget",
+                 extra={"preset": preset, "minutes": minutes,
+                        "duration_min": round(chosen.duration_min, 1)})
+    elif minutes > 0 and chosen.duration_min < minutes * SCENIC_BUDGET_UNDERSHOOT:
+        note = (
+            f"{note} It is also noticeably shorter than the time you asked for. "
+            f"Nothing closer to your budget was reachable."
+        )
+        log.info("preference_under_budget",
+                 extra={"preset": preset, "minutes": minutes,
+                        "duration_min": round(chosen.duration_min, 1)})
+    chosen.preset_note = note
+    return chosen
 
 
 async def route_quiet(origin: LatLon, destination: LatLon | None, minutes: int,

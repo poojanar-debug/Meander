@@ -54,7 +54,7 @@ from backend import fixtures as fx
 from backend.config import FIXTURE_DIR, GRAPHHOPPER_URL, TEST_LOCATIONS_BY_SLUG
 from backend.geometry import LatLon, haversine_m, path_length_m
 from backend.models import EffectiveMode
-from backend.routing import PRESETS, build_request_body
+from backend.routing import PREFERENCE_LOOP_SCALES, PRESETS, build_request_body
 
 # Metres per second, used to turn a synthetic distance into a synthetic duration.
 SPEED_M_S: dict[str, float] = {"foot": 1.35, "bike": 4.2, "car": 9.0}
@@ -149,6 +149,9 @@ SYNTHETIC_PRESETS: tuple[str, ...] = (
     "fastest", "scenic", "accessible", "quiet", "shade", "air",
 )
 
+# The presets whose round trip is a candidate search rather than one request.
+PREFERENCE_LOOP_PRESETS: frozenset[str] = frozenset({"quiet", "shade", "air"})
+
 
 @dataclass(frozen=True)
 class Scenario:
@@ -174,6 +177,22 @@ SCENARIOS: tuple[Scenario, ...] = (
              unroutable=("accessible",)),
     Scenario("colombo-drive", "colombo-fort", "viharamahadevi", 150, "car"),
 )
+
+
+def _loop_scales_for(preset: str, destination: LatLon | None) -> tuple[float, ...]:
+    """Every ``round_trip.distance`` this preset can ask for at request time.
+
+    A fixture is keyed on the request body, so the corpus has to contain one
+    entry per body the runtime can send — not one per preset. The preference
+    presets search a small scale ladder on a round trip (routing.py's
+    `_route_preference`), so a loop scenario needs a fixture at each rung or the
+    offline suite goes dark on whichever rung it reaches second.
+
+    Point-to-point sends one body, at scale 1.0, for every preset.
+    """
+    if destination is not None or preset not in PREFERENCE_LOOP_PRESETS:
+        return (1.0,)
+    return PREFERENCE_LOOP_SCALES
 
 
 def _seed_for(scenario: Scenario, preset: str) -> int:
@@ -527,24 +546,27 @@ async def _generate(scenario: Scenario, force: bool) -> list[str]:
                 answering_for = preset
                 if preset in scenario.unroutable:
                     continue
-                body = build_request_body(origin_pt, dest_pt, scenario.minutes,
-                                          scenario.mode, preset)
-                sig = fx.signature("POST", GRAPHHOPPER_URL, json_body=body,
-                                   headers={"Content-Type": "application/json"})
-                if fx.fixture_path("graphhopper", sig).exists() and not force:
-                    continue
-                response = await fx.fetch(
-                    "POST", GRAPHHOPPER_URL, json_body=body,
-                    headers={"Content-Type": "application/json"},
-                    cost=0, service="graphhopper",
-                    # Explicit, because this script forces `live` mode (to skip
-                    # the fixture read and regenerate) and `live` no longer
-                    # persists — a deployed instance must write nothing.
-                    # Writing fixtures is this script's entire purpose.
-                    persist=True,
-                )
-                assert response.status_code == 200
-                written.append(f"{scenario.slug}/{preset}")
+                for scale in _loop_scales_for(preset, dest_pt):
+                    body = build_request_body(origin_pt, dest_pt, scenario.minutes,
+                                              scenario.mode, preset,
+                                              loop_distance_scale=scale)
+                    sig = fx.signature("POST", GRAPHHOPPER_URL, json_body=body,
+                                       headers={"Content-Type": "application/json"})
+                    if fx.fixture_path("graphhopper", sig).exists() and not force:
+                        continue
+                    response = await fx.fetch(
+                        "POST", GRAPHHOPPER_URL, json_body=body,
+                        headers={"Content-Type": "application/json"},
+                        cost=0, service="graphhopper",
+                        # Explicit, because this script forces `live` mode (to
+                        # skip the fixture read and regenerate) and `live` no
+                        # longer persists — a deployed instance must write
+                        # nothing. Writing fixtures is this script's purpose.
+                        persist=True,
+                    )
+                    assert response.status_code == 200
+                    label = f"{scenario.slug}/{preset}"
+                    written.append(label if scale == 1.0 else f"{label} x{scale}")
     finally:
         await fx._client.aclose()
         fx._client = original_client

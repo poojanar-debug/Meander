@@ -25,6 +25,7 @@ import re
 
 import pytest
 
+import backend.routing as routing
 from backend.config import TEST_LOCATIONS_BY_SLUG
 from backend.geometry import (
     ROAD_CLASS_AIR_PROXY,
@@ -45,6 +46,7 @@ from backend.routing import (
     GH_SURFACE_VALUES,
     PRESET_NOTES,
     PRESETS,
+    RawRoute,
     accessible_custom_model,
     air_custom_model,
     build_request_body,
@@ -461,9 +463,138 @@ def test_a_preference_route_says_what_it_inferred_its_objective_from(preset: str
 
     None of the three can be measured directly, and a bare number under the word
     "Shade" invites a reader to assume a survey that does not exist.
+
+    ``startswith`` rather than equality: a loop that misses the time budget
+    appends a second sentence about the miss, and both sentences are true at
+    once. Pinning the whole string would make the budget caveat untestable
+    without also making this fail.
     """
     origin_loc = TEST_LOCATIONS_BY_SLUG["hyde-park-london"]
     origin = LatLon(origin_loc.lat, origin_loc.lon)
     route = asyncio.run(PRESETS[preset](origin, None, 35, "foot"))
 
-    assert route.preset_note == PRESET_NOTES[preset]
+    assert route.preset_note.startswith(PRESET_NOTES[preset])
+
+
+# --- the round-trip candidate search ---------------------------------------
+
+
+def _fake_loop(duration_min: float) -> RawRoute:
+    """A RawRoute carrying nothing but the one field the search reads."""
+    return RawRoute(
+        points=[LatLon(51.5, -0.12), LatLon(51.51, -0.12)],
+        distance_m=duration_min * 75.0,
+        duration_min=duration_min,
+        mode="foot",
+    )
+
+
+@pytest.fixture
+def loops_by_scale(monkeypatch):
+    """Drive `_route_preference`'s search with a duration per round_trip scale.
+
+    Patched at `_post_route` rather than at the transport, because the scale is
+    only legible in the assembled body — `round_trip.distance` is what changes,
+    and reading it back is what proves the search varied the thing it meant to.
+    """
+    def install(durations: dict[float, float], *, self_hosted: bool = True):
+        seen: list[float] = []
+        base = 75.0 * 30  # LOOP_SPEED_M_PER_MIN["foot"] * the minutes used below
+
+        async def fake_post(body, mode, preset):
+            scale = round(body["round_trip.distance"] / base, 2)
+            seen.append(scale)
+            return _fake_loop(durations[scale])
+
+        monkeypatch.setattr(routing, "_post_route", fake_post)
+        monkeypatch.setattr(routing, "graphhopper_is_self_hosted", lambda: self_hosted)
+        return seen
+
+    return install
+
+
+def test_a_loop_takes_the_candidate_that_best_fits_the_time_asked_for(loops_by_scale) -> None:
+    """The defect this search exists to fix, in the shape it was measured in.
+
+    Against the real self-hosted graph at Colombo Fort, a 30-minute foot loop
+    returned **108.4 minutes** for quiet, 118.0 for shade and 114.7 for air.
+    The function sent one request at scale 1.0 and returned whatever came back.
+    GraphHopper's round_trip picks a candidate loop, and a custom model that
+    reweights the graph sends it to an entirely different one rather than a
+    slower version of the same one, so `distance_influence` does not restrain it.
+    """
+    seen = loops_by_scale({1.0: 108.4, 0.7: 61.0, 0.45: 28.0})
+    route = asyncio.run(routing.route_quiet(LatLon(6.9271, 79.8612), None, 30, "foot"))
+
+    assert sorted(seen) == [0.45, 0.7, 1.0]
+    assert route.duration_min == 28.0
+
+
+def test_a_point_to_point_trip_is_still_one_request(loops_by_scale) -> None:
+    """Its length is set by where the user is going, so there is nothing to search.
+
+    Scoring candidates on `_budget_fit` here would rank them against a dial that
+    means nothing for this shape of request.
+    """
+    calls = []
+
+    async def fake_post(body, mode, preset):
+        calls.append(body)
+        return _fake_loop(12.0)
+
+    import backend.routing as r
+    original = r._post_route
+    r._post_route = fake_post
+    try:
+        asyncio.run(r.route_air(LatLon(51.5, -0.12), LatLon(51.52, -0.14), 35, "foot"))
+    finally:
+        r._post_route = original
+
+    assert len(calls) == 1
+    assert "round_trip.distance" not in calls[0]
+
+
+def test_the_metered_path_stops_at_the_first_candidate_that_fits(loops_by_scale) -> None:
+    """Three credits a request against the hosted API, and free against your own.
+
+    The same split route_scenic makes. A hosted package pays per candidate, so
+    it takes the first one inside the overshoot threshold rather than buying a
+    better fit it did not need.
+    """
+    seen = loops_by_scale({1.0: 31.0, 0.7: 20.0, 0.45: 13.0}, self_hosted=False)
+    route = asyncio.run(routing.route_shade(LatLon(51.5, -0.12), None, 30, "foot"))
+
+    assert seen == [1.0]
+    assert route.duration_min == 31.0
+
+
+def test_a_loop_that_misses_the_budget_says_so_on_the_card(loops_by_scale) -> None:
+    """Three candidates is a search, not a guarantee.
+
+    Colombo is the real case: every preset there, scenic included, returns an
+    18-minute loop against a 30-minute request, because that is what the network
+    offers. The closest available fit is still the right answer; presenting it
+    without the caveat would let the number beside the label stand for the dial.
+    """
+    loops_by_scale({1.0: 18.0, 0.7: 12.0, 0.45: 8.0})
+    short = asyncio.run(routing.route_quiet(LatLon(6.9271, 79.8612), None, 30, "foot"))
+
+    assert short.preset_note.startswith(PRESET_NOTES["quiet"])
+    assert "shorter than the time you asked for" in short.preset_note
+
+
+def test_a_loop_that_cannot_fit_at_any_scale_says_that_instead(loops_by_scale) -> None:
+    loops_by_scale({1.0: 90.0, 0.7: 70.0, 0.45: 55.0})
+    long_route = asyncio.run(routing.route_air(LatLon(6.9271, 79.8612), None, 30, "foot"))
+
+    assert long_route.preset_note.startswith(PRESET_NOTES["air"])
+    assert "longer than you asked for" in long_route.preset_note
+
+
+def test_a_loop_inside_the_budget_carries_the_basis_note_and_nothing_else(
+    loops_by_scale,
+) -> None:
+    loops_by_scale({1.0: 29.0, 0.7: 20.0, 0.45: 13.0})
+    route = asyncio.run(routing.route_shade(LatLon(51.5, -0.12), None, 30, "foot"))
+
+    assert route.preset_note == PRESET_NOTES["shade"]

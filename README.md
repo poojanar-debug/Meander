@@ -89,18 +89,23 @@ bundle.
 used to sit here said axe-core was "still a devDependency and nothing runs it", which was true when
 the gate left the tree in the reconciliation merge and stopped being true when it came back.
 
-All three presets route against a self-hosted server. `scripts/verify_selfhosted.py` asserted it at
-**three** of its four locations under the default `demo` region set: all three presets answer, their
-geometries differ, and `smoothness` comes back as a path detail — which is the fifth hard
-accessibility constraint, and the one the hosted API cannot supply at all.
+All six presets route against a self-hosted server. `scripts/verify_selfhosted.py` asserts it at
+**three** of its four locations under the default `demo` region set: every preset answers, all five
+steered geometries differ from `fastest`, and `smoothness` comes back as a path detail — which is the
+fifth hard accessibility constraint, and the one the hosted API cannot supply at all.
 
-⚠ **That run was against three presets and there are now six.** The script was widened with them and
-has not been re-run: no self-hosted graph has been up since. What it now checks is every preset
-against `fastest` rather than all of them against each other, because two preference presets landing
-on the same line is honest where either matching `fastest` is the custom-model-ignored failure. Until
-someone runs it, "all six route against a self-hosted server" is an expectation, not a result. The
-three new presets are proven only against synthetic fixtures and by
-[the tests](backend/tests/test_preference_presets.py).
+It compares each steered preset against `fastest` rather than all of them against each other. Two
+preference presets landing on the same line is honest — without a tunnel near the origin there is
+nothing for `air` and `shade` to disagree about, and at Hyde Park `quiet` and `air` do return the
+same route — where either one matching `fastest` is the custom-model-ignored failure the script
+exists to catch.
+
+**That run is what caught the worst defect in the three new presets.** They shipped their first
+version sending one round-trip request and keeping it, and the synthetic fixtures made that look
+fine. Against the real graph at Colombo Fort, a 30-minute foot loop came back at **108 minutes** for
+Quiet, 118 for Shade and 115 for Clean air. They search three round-trip lengths now and keep the
+best fit, which is 18 minutes there — the same 18-minute loop Scenic returns, because that is what
+that network has. [docs/adr/0007](docs/adr/0007-preference-presets-are-proxies.md) has the table.
 
 The fourth, Edinburgh, is skipped rather than failed, and `scripts/verify_selfhosted.py:43-55`
 explains why. `demo` imports three bounding boxes — Sri Lanka, Greater London, Noord-Holland — while

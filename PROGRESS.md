@@ -4838,18 +4838,19 @@ returns more than 2,000 barrier nodes and truncates. Trees are denser than
 barriers, and a truncated answer is a biased sample of the bbox rather than a
 short one.
 
-### The self-hosted verification is now wider and unrun
+### The self-hosted verification is wider, and it was run
 
 `scripts/verify_selfhosted.py` checked three presets; it checks six. It also
 stopped requiring every geometry to differ from every other, and now requires
 each steered preset to differ from **`fastest`** — because a graph with no
 tunnel near the origin will answer `air` and `shade` identically and be right
 to, while either matching `fastest` is the custom-model-ignored failure the
-script exists to catch.
+script exists to catch. Hyde Park proved that immediately: `quiet` and `air`
+return the same 2,539 m line there, and the old assertion would have failed a
+correct result.
 
-**It has not been re-run.** No self-hosted graph has been up. "All six route
-against a self-hosted server" is an expectation, not a result, and README.md
-says so in those words.
+**It ran against the production graph, and it caught the worst defect in this
+change.** See the entry below.
 
 `backend/record_fixtures.py` was widened the same way; its worst-case credit
 estimate went from five requests per scenario to eight (five single-shot presets
@@ -4902,3 +4903,69 @@ actually painted.
 fixture, every enrichment call degraded to null against a missing one, and the
 gate ran against `VITE_MOCK_API=1`. No self-hosted graph was available, which is
 why the widened `verify_selfhosted.py` is unrun and said to be.
+
+## §16 — The first real graph said 108 minutes · 2026-08-26
+
+Everything in §15 was measured against synthetic fixtures, because no
+self-hosted GraphHopper had been up for any session that touched the presets.
+One was up for this one — `meander-graphhopper-1`, healthy, on the deployment
+VM — so `scripts/verify_selfhosted.py` ran before the deploy rather than after.
+
+It failed the presets in the only way that matters. Colombo Fort, 30 minutes on
+foot, a round trip:
+
+| preset | one request | three candidates |
+|---|---|---|
+| `fastest` | 42.8 min | — |
+| `scenic` | 18.0 min | — |
+| `accessible` | 41.9 min | — |
+| `quiet` | **108.4 min** | 18.0 min |
+| `shade` | **118.0 min** | 17.5 min |
+| `air` | **114.7 min** | 18.0 min |
+
+Nearly four times the time asked for, from presets whose docstring said in as
+many words that they did not need a cap because their `distance_influence`
+values were restrictive enough. That reasoning was wrong, and the synthetic
+fixtures could not have caught it: they generate the loop *from*
+`round_trip.distance`, so the geometry always matched the budget by
+construction and `shade` came back at a placid 1.24x.
+
+**`distance_influence` never restrained it, because the loop's length does not
+come from `distance_influence`.** It comes from `round_trip.distance`, and
+GraphHopper's round_trip algorithm picks a candidate loop: reweight the graph
+with a custom model and it goes to an entirely different loop rather than a
+slower version of the same one. `SCENIC_LOOP_CANDIDATES` documents exactly this
+discontinuity and the presets were written as though it applied only to scenic.
+
+So the same remedy in its smallest form. `PREFERENCE_LOOP_SCALES` is three
+round-trip lengths; the search keeps whichever has the best `_budget_fit`. No
+greenness floor and no baseline request, because the only question here is
+whether it fits in thirty minutes, and the dial answers that without one. Free
+against a server you run yourself and gathered concurrently; sequential against
+the hosted API, stopping at the first candidate inside the threshold, which is
+the split `route_scenic` already makes.
+
+Colombo now **undershoots** — 18 minutes against 30 — and that is what that
+network has: `scenic` returns 18.0 there too, and has since it was written. The
+card says so, in the sentence scenic has always used for it. A second sentence
+covers the other direction for a network that overshoots at every scale.
+
+**Vondelpark and Hyde Park never showed the defect at all.** Both fit at scale
+1.0 and are unchanged by the fix, which is the other half of why one location is
+not a test: had the script checked only London and Amsterdam it would have
+passed a preset that answers 108 minutes to a half-hour request.
+
+Also worth recording: at Hyde Park `quiet` and `air` return the **same** route,
+2,539 m and 93 points, and the widened script is right not to fail it. The two
+share their dominant term — `road_class` is the only proxy for motor traffic
+either has — and a network with no tunnel near the origin gives them nothing to
+disagree about. §15 says the same thing about the score tables; this is that
+prediction meeting a real graph.
+
+**Live API calls:** none billed. Every routing call went to the self-hosted
+GraphHopper on the same VM, which is unmetered; `MEANDER_FIXTURES=live` no
+longer persists, so nothing was written to `fixtures/`.
+
+18 more synthetic fixtures, one per loop scenario per preference preset per
+scale, because a fixture is keyed on the request body and the runtime can now
+send three bodies where it sent one.
