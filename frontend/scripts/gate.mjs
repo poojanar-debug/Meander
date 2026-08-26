@@ -42,11 +42,17 @@ const PLAN_MANIFEST = [
   ['.sheet', 'Sheet.jsx — the mobile bottom sheet'],
   ['.plan', 'PlanSheet.jsx'],
   ['.plan__search-field', 'PlanSheet.jsx — the doorway to place search'],
+  ['.plan__search--dest', 'PlanSheet.jsx — the destination field'],
   ['[aria-label="Use my location"]', 'PlanSheet.jsx — the location arrow'],
   ['.dial__slider', 'TimeDial.jsx — the native range input'],
   ['.mode__seg', 'ModeControl.jsx'],
   ['.chip', 'ObjectiveChips.jsx'],
   ['[role="status"][aria-live="polite"]', 'App.jsx — the one live region'],
+]
+
+const DEST_MANIFEST = [
+  ['.plan__search-clear', 'PlanSheet.jsx — clearing the destination'],
+  ['.plan__budget-note', 'PlanSheet.jsx — what stands where the dial stood'],
 ]
 
 const RESULTS_MANIFEST = [
@@ -192,6 +198,68 @@ async function driveToResults(mobile) {
   if (!first) return false
   await waitFor(`document.querySelectorAll('button.route').length >= 3`, 60)
   return true
+}
+
+/**
+ * Block until the bottom sheet has stopped moving.
+ *
+ * Not a nicety. Picking a place unmounts the search screen and remounts the
+ * sheet, whose height is an inline style with a transition on it, and a sweep
+ * that lands mid-transition measures the sticky grabber at 43.999996 px
+ * against a 44 px minimum. That is not a target-size defect — the resting
+ * height is exactly 44 in every state — but it fails the sweep about half the
+ * time, and a gate that fails at random teaches people to re-run it until it
+ * is green, which is the same as not having it.
+ *
+ * Two equal readings rather than a fixed sleep, so it is the sheet that says
+ * when it is done.
+ */
+async function sheetSettled() {
+  let last = null
+  for (let i = 0; i < 25; i += 1) {
+    const h = await cdp.evaluate(
+      `(() => { const el = document.querySelector('.sheet'); return el ? el.getBoundingClientRect().height : -1 })()`,
+    )
+    if (last !== null && h === last) return true
+    last = h
+    await new Promise((r) => setTimeout(r, 100))
+  }
+  return false
+}
+
+/**
+ * Pick a destination on the phone plan sheet, through the screen a user goes
+ * through: the field opens the full-surface place search, a name is typed into
+ * the real combobox, and the first result is chosen.
+ *
+ * `input.value = x` is deliberately not what happens here. React installs its
+ * own value setter on the element, so assigning through the instance property
+ * updates the DOM and never tells React, and the combobox would search for an
+ * empty string. The prototype setter plus a bubbling `input` event is the one
+ * way to type into a React-controlled field from outside React.
+ *
+ * The result rows commit on `mousedown`, not `click` — the input's blur would
+ * close the list before a click ever landed — so that is what is dispatched.
+ */
+async function pickDestination(query = 'Vondelpark') {
+  await cdp.evaluate(
+    `(()=>{document.querySelector('.plan__search--dest .plan__search-field')?.click()})()`,
+  )
+  if (!(await waitFor(`!!document.querySelector('.search .place__input')`, 40, 100))) return false
+  await cdp.evaluate(`(() => {
+    const input = document.querySelector('.search .place__input')
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set
+    setter.call(input, ${JSON.stringify(query)})
+    input.dispatchEvent(new Event('input', { bubbles: true }))
+    return true })()`)
+  // 500 ms debounce, then the mock geocoder's own 220 ms.
+  if (!(await waitFor(`!!document.querySelector('.place__row')`, 40, 100))) return false
+  await cdp.evaluate(`(() => {
+    const row = document.querySelector('.place__row')
+    row.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }))
+    return true })()`)
+  if (!(await waitFor(`!!document.querySelector('.plan__search-clear')`, 40, 100))) return false
+  return sheetSettled()
 }
 
 async function setTheme(theme) {
@@ -344,6 +412,53 @@ async function a11yPass(label) {
 await load(390, 844, true)
 await a11yPass('plan')
 
+// 3b. THE PLAN WITH A DESTINATION — a distinct screen, so it is graded as one.
+//
+// It was reachable before this only through a shared link, which the gate has
+// no way to open, so the whole point-to-point half of the app was ungraded:
+// the clear control, the sentence that stands where the dial stands for a
+// loop, and the fact that the dial is *gone* rather than disabled.
+await load(390, 844, true)
+// The origin first, because the screen this grades is the one with both ends
+// filled in and because Find routes is disabled without one — a destination
+// pass that skipped it would click a disabled button and report the miss as a
+// routing failure.
+await cdp.evaluate(`(()=>{document.querySelector('[aria-label="Use my location"]')?.click()})()`)
+await waitFor(
+  `!![...document.querySelectorAll('button')].find(x=>/find routes/i.test(x.textContent||'')&&!x.disabled)`,
+  60,
+)
+const destPicked = await pickDestination()
+check('[destination] picking one on the plan sheet sets it', destPicked)
+
+if (destPicked) {
+  const destCounts = await countSelectors(DEST_MANIFEST)
+  const destOk = checkManifest('destination', DEST_MANIFEST, destCounts)
+
+  // The dial is not disabled here, it is absent. `buildRouteRequest` omits
+  // `minutes` from a point-to-point body, so a slider on this screen would be
+  // a control that moves and changes nothing.
+  const dial = await cdp.evaluate(`document.querySelectorAll('.dial__slider').length`)
+  check('[destination] the time dial is gone, not disabled', dial === 0, `${dial} found`)
+
+  const overflow = await cdp.evaluate(overflowCheck)
+  check(
+    '[destination] no horizontal scroll at 390px',
+    overflow.scrollW <= overflow.clientW + 1,
+    `${overflow.scrollW} vs ${overflow.clientW}${overflow.wide.length ? ` — ${overflow.wide.join(', ')}` : ''}`,
+  )
+
+  if (destOk) await a11yPass('destination')
+
+  // And it still routes. A destination that sets state and never reaches the
+  // request is the failure this whole screen exists to avoid.
+  await cdp.evaluate(
+    `(()=>{const b=[...document.querySelectorAll('button')].find(x=>/find routes/i.test(x.textContent||'')&&!x.disabled);if(b)b.click()})()`,
+  )
+  const routed = await waitFor(`document.querySelectorAll('button.route').length >= 1`, 80)
+  check('[destination] Find routes still streams cards for a trip with one', routed)
+}
+
 // 4. THE RESULTS — driven, then graded.
 await load(390, 844, true)
 const arrived = await driveToResults(true)
@@ -393,6 +508,8 @@ if (detailUp) {
 await load(1200, 900, false)
 const capsule = await cdp.evaluate(`!!document.querySelector('.capsule')`)
 check('[desktop] the plan capsule renders at 1200px', capsule)
+const capsuleDest = await cdp.evaluate(`!!document.querySelector('.capsule__seg--dest')`)
+check('[desktop] the capsule carries a destination segment', capsuleDest)
 if (capsule) {
   const arrived = await driveToResults(false)
   check('[desktop] the stream delivers cards', arrived)

@@ -342,11 +342,30 @@ class Settings:
     # change that.
     geocode_bucket_capacity: int = 40
     geocode_refill_per_min: float = 20.0
-    # Seven days, deliberately not the route cache's six hours. A route payload
-    # embeds weather, daylight and air quality and goes stale as they do; a
-    # name-to-coordinate mapping embeds none of them. Places do move in OSM, so
-    # this is not infinite.
-    geocode_cache_ttl_s: int = 7 * 24 * 60 * 60
+    # One day, deliberately not the route cache's six hours and no longer the
+    # seven days this held. A route payload embeds weather, daylight and air
+    # quality and goes stale as they do; a name-to-coordinate mapping embeds
+    # none of them, which is the argument that bought seven days.
+    #
+    # What that argument missed is that OSM is edited continuously and
+    # Nominatim picks the edits up within hours, so the cache decides how old
+    # the place list a user picks a destination from is allowed to be. At seven
+    # days, a park mapped on Monday could not be found until the Monday after
+    # for anyone whose search string was already in the table. A day still
+    # absorbs the case this cache exists for — backspacing and re-typing, which
+    # happens over seconds — and costs at most one upstream call per distinct
+    # name per day.
+    geocode_cache_ttl_s: int = 24 * 60 * 60
+    # How long "nowhere is called that" stands, which is a different question
+    # and has a much shorter answer.
+    #
+    # An empty result is the one answer that a single OSM edit turns into a
+    # wrong one, and it is the answer a newly mapped place gets. It was sharing
+    # the TTL above, so the same table that saved a few requests on a
+    # misspelling also hid a real place for a week. Ten minutes still covers the
+    # keystrokes of a misspelling, which is all that caching a miss was ever
+    # for.
+    geocode_empty_cache_ttl_s: int = 10 * 60
 
     log_level: str = "INFO"
 
@@ -459,7 +478,8 @@ def load_settings() -> Settings:
         route_cache_ttl_s=_env_int("MEANDER_ROUTE_CACHE_TTL_S", 6 * 60 * 60),
         geocode_bucket_capacity=_env_int("MEANDER_GEOCODE_RATE_CAPACITY", 40),
         geocode_refill_per_min=_env_float("MEANDER_GEOCODE_RATE_REFILL_PER_MIN", 20.0),
-        geocode_cache_ttl_s=_env_int("MEANDER_GEOCODE_CACHE_TTL_S", 7 * 24 * 60 * 60),
+        geocode_cache_ttl_s=_env_int("MEANDER_GEOCODE_CACHE_TTL_S", 24 * 60 * 60),
+        geocode_empty_cache_ttl_s=_env_int("MEANDER_GEOCODE_EMPTY_CACHE_TTL_S", 10 * 60),
         log_level=os.environ.get("MEANDER_LOG_LEVEL", "INFO").upper(),
     )
 

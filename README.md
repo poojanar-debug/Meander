@@ -1,6 +1,7 @@
 # Meander
 
 **Give it where you are and how long you have. It gives you three routes back.**
+**Give it somewhere to be as well, and it gives you three ways there.**
 
 | id | label | what it optimises |
 |---|---|---|
@@ -8,7 +9,9 @@
 | `scenic` | Scenic | Maximum greenery, capped at 1.6× the fastest duration. |
 | `accessible` | Accessible | Hard accessibility constraints first, then greenery within them. May return no route at all. |
 
-One dial, 20–360 minutes. No destination means a round trip from where you started.
+One dial, 20–360 minutes. No destination means a round trip from where you started; naming one
+puts the same three routes on the way there, and the dial steps aside because the destination is
+what sets the length.
 
 ---
 

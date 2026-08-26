@@ -80,6 +80,25 @@ function boundsOf(coordinates) {
   )
 }
 
+/**
+ * The part of the map a person can actually see.
+ *
+ * The camera frames content in that part, not in the whole viewport. Below the
+ * breakpoint the bottom sheet owns a bit over half the stage at its resting
+ * height; above it, the capsule claims the top and the card row the bottom.
+ * Framing to the full viewport put every loop squarely behind the sheet —
+ * measured, on the first screenshot pass.
+ *
+ * One function because there are now two callers: the route fit, and the
+ * before-any-route frame that has to hold both ends of a point-to-point trip.
+ */
+function framePadding(map, isMobile) {
+  const height = map.getContainer().clientHeight
+  return isMobile
+    ? { top: 70, left: 40, right: 40, bottom: Math.round(height * 0.6) }
+    : { top: 140, left: 60, right: 60, bottom: 360 }
+}
+
 function markerElement(className, label) {
   const el = document.createElement('div')
   el.className = `marker ${className}`
@@ -775,16 +794,7 @@ export default function MapView({
         : routes.flatMap((r) => (r.geometry?.length > 1 ? r.geometry : []))
     if (coordinates.length < 2) return
 
-    // The camera frames the routes in the part of the map a person can see,
-    // not the part the UI is standing on. Below the breakpoint the bottom
-    // sheet owns a bit over half the stage at its resting height; above it,
-    // the capsule claims the top and the card row the bottom. Framing to the
-    // full viewport put every loop squarely behind the sheet — measured, on
-    // the first screenshot pass.
-    const height = map.getContainer().clientHeight
-    const padding = isMobile
-      ? { top: 70, left: 40, right: 40, bottom: Math.round(height * 0.6) }
-      : { top: 140, left: 60, right: 60, bottom: 360 }
+    const padding = framePadding(map, isMobile)
     // Jump rather than fly when nobody can see it. MapLibre animates the camera
     // with requestAnimationFrame, which does not run in a hidden tab — so an
     // animated fitBounds started while the page is backgrounded never
@@ -823,12 +833,35 @@ export default function MapView({
 
   // Centre on the origin before any route exists, so the plan screen's map is
   // the neighbourhood the walk would start in rather than the initial city.
+  //
+  // With a destination it frames both ends instead. The two markers are the
+  // only confirmation this app gives that it understood where the trip runs
+  // between, and at zoom 14 a destination more than about a kilometre off is
+  // simply not on the screen — so the user picks a place, the map does not
+  // move, and nothing tells them it landed.
   useEffect(() => {
     const map = mapRef.current
     if (!map || !ready || !origin || routes.length > 0) return
     const instant = prefersReducedMotion() || document.hidden
+    if (dest) {
+      map.fitBounds(
+        boundsOf([
+          [origin.lon, origin.lat],
+          [dest.lon, dest.lat],
+        ]),
+        {
+          padding: framePadding(map, isMobile),
+          duration: instant ? 0 : 500,
+          // One step shy of the route fit's 16: this frames a straight line
+          // between two points, and the route that ends up drawn between them
+          // is longer than it in every case.
+          maxZoom: 15,
+        },
+      )
+      return
+    }
     map.easeTo({ center: [origin.lon, origin.lat], zoom: 14, duration: instant ? 0 : 500 })
-  }, [origin, routes.length, ready])
+  }, [origin, dest, routes.length, isMobile, ready])
 
   // --- markers -------------------------------------------------------------
 

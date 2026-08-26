@@ -136,6 +136,8 @@ const APPROVED_COPY = [
   // Plan and search surfaces.
   'Optimise for — up to 3',
   'searches are your own words — never stored, never sent to analytics',
+  // The destination drawer's hint, from DESIGN-HANDOFF §4.3's segment table.
+  'Empty means a round trip — Meander brings you back to where you started.',
   // Result cards.
   'Step-free as far as the data goes — it covers',
   'kept in its slot — tap a blocker to see it on the map',
