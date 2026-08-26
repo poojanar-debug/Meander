@@ -6,7 +6,7 @@ import LayerPicker from './LayerPicker.jsx'
 import ManoeuvreIcon, { MANOEUVRE_NAME } from './ManoeuvreIcon.jsx'
 import { CompassIcon } from './Icons.jsx'
 import { isViewpoint, shortLabel } from '../lib/amenities.js'
-import { STYLE_URL, basemapFor } from '../lib/basemap.js'
+import { STYLE_URL, basemapFor, referrerPolicyFor } from '../lib/basemap.js'
 import { routeColor, styleFor } from '../lib/dash.js'
 import { pointAtDistance } from '../lib/follow.js'
 import { MOBILE_LAYOUT, useMatchMedia } from '../lib/media.js'
@@ -479,6 +479,25 @@ export default function MapView({
           // The design's own centered line replaces the injected control; the
           // sentence it renders is the attribution OpenStreetMap asks for.
           attributionControl: false,
+          // The one place this app sends a referrer, and it is a targeted
+          // exception rather than a relaxation.
+          //
+          // `public/_headers` and the Caddyfile both set
+          // `Referrer-Policy: no-referrer`, which is right and stays. But an
+          // ArcGIS "public application" key is secured by a referrer allowlist,
+          // and an allowlist cannot match a header the browser never sends —
+          // so a keyed satellite layer would fail on every tile, with no error
+          // in the console naming the cause. `referrerPolicyFor` returns
+          // `origin` for the keyed imagery host and null for everything else,
+          // so this sends `https://host/` to Esri and nothing to anyone,
+          // including no path, no route and no coordinate.
+          //
+          // Returning undefined leaves the request exactly as MapLibre built
+          // it, which is what every other request here wants.
+          transformRequest: (url) => {
+            const referrerPolicy = referrerPolicyFor(url)
+            return referrerPolicy ? { url, referrerPolicy } : undefined
+          },
         })
       } catch (err) {
         // WebGL unavailable, or the style host is blocked. The result cards

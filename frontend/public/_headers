@@ -63,6 +63,18 @@
 # *, which was confirmed against a live response rather than assumed, because a
 # fetch-based tile loader needs that as well as the CSP entry.
 #
+# ibasemaps-api.arcgis.com is the SAME imagery, authenticated, and both origins
+# are named here on purpose even though only one is ever used by a given build.
+# Which one is live is decided by VITE_ARCGIS_API_KEY at build time, and a
+# policy that covered only the active one would produce a blank satellite layer
+# the first time that variable changed, with no error naming the cause. A
+# contract test (src/lib/basemap-contract.test.js) fails if either goes missing.
+#
+# Note that this origin needs a referrer to work at all: an ArcGIS public key is
+# constrained by a referrer allowlist, and Referrer-Policy below is no-referrer.
+# The exception is made per request in MapView's transformRequest rather than by
+# weakening the header. See lib/basemap.js.
+#
 # It is reachable only when someone chooses Satellite in the layer picker: the
 # raster source is added lazily on first selection, so a visitor who never opens
 # that menu makes no request to this origin at all. The licensing position for
@@ -92,7 +104,7 @@
 # otherwise would mean shipping a policy that blocks the map.
 
 /*
-  Content-Security-Policy: default-src 'self'; script-src 'self' 'sha256-rXb3GrH6fQu5rzdJqUPl87syYzPxM2UTz++hiaG3xVo='; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://tiles.openfreemap.org https://server.arcgisonline.com https://meander-app.duckdns.org; font-src 'self'; worker-src 'self' blob:; child-src 'self' blob:; connect-src 'self' https://tiles.openfreemap.org https://server.arcgisonline.com https://meander-app.duckdns.org; frame-ancestors 'none'; base-uri 'self'; form-action 'none'
+  Content-Security-Policy: default-src 'self'; script-src 'self' 'sha256-rXb3GrH6fQu5rzdJqUPl87syYzPxM2UTz++hiaG3xVo='; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://tiles.openfreemap.org https://server.arcgisonline.com https://ibasemaps-api.arcgis.com https://meander-app.duckdns.org; font-src 'self'; worker-src 'self' blob:; child-src 'self' blob:; connect-src 'self' https://tiles.openfreemap.org https://server.arcgisonline.com https://ibasemaps-api.arcgis.com https://meander-app.duckdns.org; frame-ancestors 'none'; base-uri 'self'; form-action 'none'
   X-Content-Type-Options: nosniff
   Referrer-Policy: no-referrer
   X-Frame-Options: DENY

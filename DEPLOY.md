@@ -91,7 +91,7 @@ case, and for that Esri asks for four things together:
 
 | | | |
 |---|---|---|
-| a free ArcGIS Developer account | **not done** | a human registration at https://developers.arcgis.com — the only one of the four this repository cannot satisfy on its own |
+| a free ArcGIS Developer account | **done, 2026-08-26** | registered. See `VITE_ARCGIS_API_KEY` below for the key that follows from it |
 | no revenue generation | true | the project takes none |
 | under 1,000,000 tiles a month | true | the raster source is added **lazily**, on first selection, so a visitor who never opens the layer menu makes no request to this origin at all |
 | attribution | true | `frontend/src/lib/basemap.js` carries the credit and the footer renders it; the OpenStreetMap credit survives the switch, because the labels over the imagery are still OSM's |
@@ -105,9 +105,71 @@ merely an old one. Re-read the field before editing it. `frontend/scripts/gate.m
 asserts the attribution line changes and still names OpenStreetMap, which
 catches a deletion but cannot catch a wrong string.
 
-**What to do:** register the free developer account. It costs nothing and takes
-a person a few minutes. Until somebody does, this deployment is serving a layer
-on three of four conditions. [BLOCKED.md](BLOCKED.md) §13 tracks it.
+**What to do:** the account exists. What remains is to mint a key and set
+`VITE_ARCGIS_API_KEY` in the Pages build environment.
+
+### `VITE_ARCGIS_API_KEY` — the keyed imagery host
+
+Unset, the build uses the anonymous host and behaves exactly as it did before
+this variable existed. Set, it uses the authenticated one:
+
+```
+unset  →  https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}
+set    →  https://ibasemaps-api.arcgis.com/arcgis/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}?token=…
+```
+
+Both are raster XYZ templates, which is why this is a one-row change in
+`frontend/src/lib/basemap.js` rather than a rewrite. The other authenticated
+route Esri documents — `basemapstyles-api.arcgis.com/.../styles/arcgis/imagery`
+— returns a **MapLibre style document** rather than tiles, and consuming that
+means either `setStyle()` (which destroys every source and layer this app has)
+or lifting sources out of it by hand. Both were rejected.
+
+**Minting the key.** ArcGIS Location Platform dashboard → **Content → New item
+→ Developer credentials → API key credentials**. Set **Application type =
+Public application**, grant the **Basemaps** privilege (`premium:user:basemaps`),
+and fill in the **Referrers** allowlist with the deploy origins:
+
+```
+meander-eoc.pages.dev
+*.meander-eoc.pages.dev      ← Pages preview deployments get their own subdomain
+localhost                     ← only if you want `npm run preview` to use the keyed host
+```
+
+**Leaving the referrer list empty is not a neutral default.** An unrestricted
+public key is usable by anyone who reads it out of the bundle, and it is in the
+bundle by design — see below.
+
+⚠ **The key is public, and that is Esri's model rather than an oversight.** A
+"Public application" credential is meant to be embedded in client code and is
+secured by the referrer allowlist rather than by secrecy. It is not
+secret-grade: Esri's own security guidance notes a referrer header can be
+spoofed. For a free, non-commercial, low-traffic app that is the documented
+trade. It is *not* a credential of the kind `MAPILLARY_TOKEN` is — that one is
+server-side only and must never reach the bundle.
+
+⚠⚠ **The referrer allowlist needs a referrer, and this site sends none.** Both
+`frontend/public/_headers` and the Caddyfile set `Referrer-Policy: no-referrer`.
+Under that policy the browser sends no `Referer` at all, so a restricted key is
+rejected on every single tile — a blank satellite layer, and nothing in the
+console names the cause. The header is right and stays; the exception is made
+per request in `MapView`'s `transformRequest`, which returns
+`referrerPolicy: 'origin'` for the keyed host and nothing for anything else. So
+Esri receives `https://meander-eoc.pages.dev/` and never a path, a route or a
+coordinate. `basemap-contract.test.js` pins that the exception stays narrow.
+
+**Free tier:** 2,000,000 basemap tiles a month. Exceeding it converts to
+pay-as-you-go, which is off by default on a new account — so with no payment
+method on file the practical failure mode is requests failing rather than a
+surprise bill. Verify that against your own account settings rather than
+trusting this paragraph.
+
+**Both origins are named in the CSP**, not only the active one. Which host is
+live is decided by this variable at *build* time, and a policy covering only
+the active one would blank the satellite layer the first time the variable
+changed. A contract test fails if either goes missing.
+
+[BLOCKED.md](BLOCKED.md) §13 tracks what remains.
 
 **If it ever becomes untenable** — the project takes revenue, or Esri changes
 the terms — the swap is one line in `frontend/src/lib/basemap.js`, plus the

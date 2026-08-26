@@ -1041,6 +1041,18 @@ why the worker's version had to start tracking contents rather than filenames.
 Same convention as "The iOS run" above: a divider for the round of work these
 entries came out of, not a change of subject.
 
+## 13 · The satellite basemap's ArcGIS key is not yet set — OPEN, narrowed
+
+> **Update, 2026-08-26.** The account has been registered, so three of Esri's
+> four conditions became four. What is left is narrower and purely operational:
+> mint a Public-application key with the Basemaps privilege, set a referrer
+> allowlist on it, and put it in the Pages build as `VITE_ARCGIS_API_KEY`.
+> DEPLOY.md carries the click path and the two traps — an empty referrer list
+> leaves the key usable by anyone, and `Referrer-Policy: no-referrer` means a
+> restricted key would be rejected on every tile were it not for the per-request
+> exception in `MapView`'s `transformRequest`. Unset, the build keeps using the
+> anonymous host and nothing regresses. The original text follows.
+
 ## 13 · The satellite basemap has no ArcGIS Developer account — OPEN
 
 **What is blocked:** nothing, functionally. The layer works. What is unresolved

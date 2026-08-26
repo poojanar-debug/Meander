@@ -86,8 +86,74 @@ export const STYLE_URL = 'https://tiles.openfreemap.org/styles/positron'
  * At that zoom Sentinel-2 is an upsampled blur, which for a walking app is the
  * difference between seeing the path and seeing a green smear.
  */
-const ESRI_IMAGERY =
+const ESRI_IMAGERY_ANON =
   'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'
+
+/**
+ * The same imagery, authenticated.
+ *
+ * `ibasemaps-api.arcgis.com` is the keyed sibling of the anonymous host and it
+ * is still a raster XYZ template, which is the whole reason this is a two-line
+ * change rather than a rewrite. The other authenticated route Esri documents is
+ * the basemap styles service:
+ *
+ *   https://basemapstyles-api.arcgis.com/arcgis/rest/services/styles/v2/styles/arcgis/imagery?token=…
+ *
+ * That one returns a **MapLibre style document**, not tiles, so consuming it
+ * means either `map.setStyle()` — which destroys every source and layer this
+ * app has, see the note in MapView's basemap effect — or fetching the style and
+ * lifting its sources out by hand. Both were rejected. The raster host gives
+ * identical imagery through the source type already in use.
+ *
+ * Verified live rather than read off a page: no token returns
+ * `{"code":499,"message":"Token Required."}`, a token returns `image/jpeg`, and
+ * the response carries `access-control-allow-origin: *`, which a fetch-based
+ * tile loader needs as much as it needs the CSP entry.
+ */
+const ESRI_IMAGERY_KEYED =
+  'https://ibasemaps-api.arcgis.com/arcgis/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'
+
+/**
+ * The ArcGIS key, or empty.
+ *
+ * **Public by design, and that is Esri's model rather than a compromise.** A
+ * "Public application" credential is meant to be embedded in client code and
+ * is constrained by an HTTP referrer allowlist rather than by secrecy. It is
+ * not secret-grade: a referrer header can be spoofed, and Esri's own security
+ * guidance says so. For a free, low-traffic, non-commercial app that is the
+ * documented trade.
+ *
+ * ⚠ **A referrer allowlist needs a referrer, and this site sends none.**
+ * `public/_headers` and the Caddyfile both set `Referrer-Policy: no-referrer`,
+ * so a restricted key would be rejected on every single tile with nothing in
+ * the console naming the cause. `referrerPolicyFor` below is the exception
+ * that fixes it, applied per request through MapLibre's `transformRequest` so
+ * the site-wide policy is not weakened for anything else.
+ *
+ * Unset is the supported state and the default: the anonymous host is used,
+ * which is exactly what shipped before this existed.
+ */
+export const ARCGIS_KEY = (import.meta.env.VITE_ARCGIS_API_KEY ?? '').trim()
+
+/** Both origins, always. The CSP names both regardless of which is active,
+ *  because which one is active is decided by a build-time environment variable
+ *  and a policy that only covered the active one would produce a blank
+ *  satellite layer the first time that variable changed. */
+export const ESRI_ANON_ORIGIN = 'https://server.arcgisonline.com'
+export const ESRI_KEYED_ORIGIN = 'https://ibasemaps-api.arcgis.com'
+export const ESRI_ORIGINS = [ESRI_ANON_ORIGIN, ESRI_KEYED_ORIGIN]
+
+/**
+ * The referrer policy to use for one URL, or null to leave it alone.
+ *
+ * Only the keyed host gets an exception, and it gets the narrowest one that
+ * works: `origin` sends `https://host/` and never a path, so Esri can match
+ * the allowlist without learning which page, which route or which coordinate
+ * anybody was looking at. Every other request on the site keeps `no-referrer`.
+ */
+export function referrerPolicyFor(url) {
+  return typeof url === 'string' && url.startsWith(ESRI_KEYED_ORIGIN) ? 'origin' : null
+}
 
 /** The origin the CSP has to name, in `img-src` and `connect-src` both.
  *
@@ -97,7 +163,7 @@ const ESRI_IMAGERY =
  *  basemap after a twenty-second timeout, with no error anywhere. The service
  *  sends `Access-Control-Allow-Origin: *`, which is the other half of what a
  *  fetch-based tile loader needs and was confirmed against live responses. */
-export const ESRI_ORIGIN = 'https://server.arcgisonline.com'
+export const ESRI_ORIGIN = ARCGIS_KEY ? ESRI_KEYED_ORIGIN : ESRI_ANON_ORIGIN
 
 /**
  * The recolour applied to the vector layers under each basemap.
@@ -189,7 +255,11 @@ export const BASEMAPS = [
     hint: 'Aerial imagery. Fetches tiles as you move, including while following.',
     palette: PALETTES.satellite,
     raster: {
-      tiles: [ESRI_IMAGERY],
+      tiles: [
+        ARCGIS_KEY
+          ? `${ESRI_IMAGERY_KEYED}?token=${encodeURIComponent(ARCGIS_KEY)}`
+          : ESRI_IMAGERY_ANON,
+      ],
       tileSize: 256,
       maxzoom: 19,
     },

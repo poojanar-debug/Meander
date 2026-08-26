@@ -3,7 +3,16 @@ import { fileURLToPath } from 'node:url'
 
 import { describe, expect, it } from 'vitest'
 
-import { BASEMAPS, DEFAULT_BASEMAP, ESRI_ORIGIN, STYLE_URL, basemapFor, streamsWhileFollowing } from './basemap.js'
+import {
+  BASEMAPS,
+  DEFAULT_BASEMAP,
+  ESRI_ORIGIN,
+  ESRI_ORIGINS,
+  STYLE_URL,
+  basemapFor,
+  referrerPolicyFor,
+  streamsWhileFollowing,
+} from './basemap.js'
 
 /**
  * `lib/basemap.js` is a table precisely so that adding a row is the only thing
@@ -106,6 +115,34 @@ describe('every basemap origin is in the CSP, in both directives that matter', (
 
   it.each([...hostsInUse()])('%s is allowed in connect-src', (host) => {
     expect(connectSrc, host).toContain(host)
+  })
+
+  // Both ArcGIS origins, not merely the active one.
+  //
+  // Which of the two is live is decided by VITE_ARCGIS_API_KEY at BUILD time,
+  // and this suite runs with it unset — so a test that only checked the hosts
+  // actually present in BASEMAPS would pass here and ship a policy that blanks
+  // the satellite layer the moment the key is set in CI. Both are asserted
+  // unconditionally for that reason.
+  it.each(ESRI_ORIGINS)('%s is allowed in img-src whichever host is active', (origin) => {
+    expect(imgSrc).toContain(origin)
+  })
+
+  it.each(ESRI_ORIGINS)('%s is allowed in connect-src whichever host is active', (origin) => {
+    expect(connectSrc).toContain(origin)
+  })
+
+  it('makes a referrer exception for the keyed host and for nothing else', () => {
+    // An ArcGIS public key is secured by a referrer allowlist, and this site
+    // sets Referrer-Policy: no-referrer in both public/_headers and the
+    // Caddyfile. Without this exception a keyed build fails on every tile with
+    // nothing in the console naming the cause. It must stay narrow: `origin`
+    // sends the host and never a path, and no other URL gets a referrer at all.
+    const keyed = ESRI_ORIGINS.find((o) => o.includes('ibasemaps'))
+    expect(referrerPolicyFor(`${keyed}/arcgis/rest/services/x/MapServer/tile/1/2/3`)).toBe('origin')
+    expect(referrerPolicyFor('https://tiles.openfreemap.org/styles/positron')).toBeNull()
+    expect(referrerPolicyFor('https://server.arcgisonline.com/anything')).toBeNull()
+    expect(referrerPolicyFor(undefined)).toBeNull()
   })
 
   it('names ESRI_ORIGIN as exactly the origin the raster tiles are served from', () => {
