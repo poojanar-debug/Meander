@@ -211,3 +211,67 @@ def test_the_parameter_name_survives_so_the_log_still_explains_itself() -> None:
     out = scrub("?latitude=51.5074&longitude=-0.1278")
     assert out.count("<redacted>") == 2
     assert "latitude=" in out and "longitude=" in out
+
+
+# ---------------------------------------------------------------------------
+# The type gap, which is the one the live leak actually came through
+# ---------------------------------------------------------------------------
+#
+# The tests above cover the *pattern*: given a string, is the credential found.
+# They all passed while the token was still being written to the production log
+# 49 times, because the value reaching the filter was never a string.
+#
+# JsonFormatter renders with record.getMessage(), which does `msg % args` and
+# stringifies each argument at THAT moment — after PrivacyFilter has inspected
+# it. So an argument whose type scrub() did not handle was returned untouched
+# and printed in full a moment later.
+
+
+def test_a_url_object_is_scrubbed_even_though_it_is_not_a_str() -> None:
+    """httpx logs `request.url`, and that is an httpx.URL, not a str.
+
+    Measured on the running container: isinstance(httpx.URL(...), str) is
+    False, so every isinstance branch missed it. This is the assertion that
+    would have failed while the leak was live.
+    """
+    httpx = pytest.importorskip("httpx")
+    url = httpx.URL("https://graph.mapillary.com/images?bbox=4.86,52.35&access_token=MLY%7C1%7Csecret")
+    assert not isinstance(url, str)
+    out = str(scrub(url))
+    assert "secret" not in out
+    assert "MLY" not in out
+    assert "access_token=<redacted>" in out
+    assert "bbox=<redacted>" in out
+
+
+def test_the_whole_httpx_log_record_is_clean_end_to_end(emit) -> None:
+    """The real shape, through the real filter and the real formatter.
+
+    httpx's call is `logger.info('HTTP Request: %s %s "%s %d %s"', method, url,
+    ...)`. Asserting on scrub() alone would not have caught the leak either,
+    because the leak was in how the record was assembled, not in the function.
+    """
+    httpx = pytest.importorskip("httpx")
+    url = httpx.URL("https://api.open-meteo.com/v1/forecast?latitude=51.471&longitude=-0.112&hourly=cloud_cover")
+    line = json.loads(
+        emit(lambda log: log.info('HTTP Request: %s %s "%s %d %s"', "GET", url, "HTTP/1.1", 200, "OK"))
+    )
+    assert "51.471" not in line["msg"]
+    assert "-0.112" not in line["msg"]
+    assert "latitude=<redacted>" in line["msg"]
+    # Still an operationally useful line.
+    assert "api.open-meteo.com" in line["msg"]
+    assert "200" in line["msg"]
+
+
+def test_an_ordinary_object_is_handed_back_unchanged() -> None:
+    """The fallback must not quietly restringify every object in every log.
+
+    Only records that were leaking may change; anything with nothing to hide
+    keeps its type, so an existing log line cannot silently alter shape.
+    """
+    from pathlib import Path
+
+    for value in (Path("/app/backend"), 200, True, None, b"bytes"):
+        assert scrub(value) is value or scrub(value) == value
+        assert type(scrub(value)) is type(value)
