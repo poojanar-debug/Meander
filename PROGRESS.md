@@ -4525,3 +4525,71 @@ geolocated search clearing the address bar and a reload booting nothing, the
 sheet scrolling internally inside the viewport, and a 17-entry shell precache
 that now carries all six self-hosted font files — so follow mode's no-network
 promise covers the type as well as the tiles.
+
+---
+
+## §14 — Somewhere to go, and a place list that is not a week old · 2026-08-26
+
+Two changes, one feature. The UI half is logged in `frontend/PROGRESS.md`; what
+belongs here is the API half and the one thing that was quietly wrong about it.
+
+### The destination could not be asked for
+
+`RouteRequest.destination` has existed since Phase C. `models.py` carries
+`is_loop()`, `budget_minutes()` and `straight_line_m()`; `derive_mode_for_distance`
+exists precisely because a point-to-point trip has no time budget to read;
+`test_api_routes.py` asserts the dial is ignored when a destination is present,
+and `test_cache_key.py` asserts the two are keyed differently. **No screen could
+set one.** The frontend has now grown the control on both plan surfaces, which
+needed no backend change at all — the request body it sends is the one
+`buildRouteRequest` has been building since the cache-key work, and every
+backend test that describes a point-to-point trip already passes against it.
+
+Worth recording as a class of gap rather than as this instance of it. BLOCKED.md
+§5 closed by `git grep`-ing each endpoint and each `models.py` response field
+against `frontend/src`, which is how `ElevationProfile` and `ReportBarrier` were
+found. That sweep reads **responses**. `destination` is a *request* field, and
+nothing was sweeping those. Two other request fields survive the same sweep and
+are genuinely reachable — `depart_at` through the departure strip, `objectives`
+through the chips — so `destination` was the only one, but the sweep that would
+have found it does not exist yet.
+
+### An empty place search stood for a week
+
+Found while checking that the destination picker offers current places, which
+is a fair question of any search box that decides where a person walks.
+
+In production `MEANDER_FIXTURES=live`, so `/api/geocode` reaches
+`nominatim.openstreetmap.org` and the data is as current as OpenStreetMap. The
+staleness was entirely ours: `geocode_cache_ttl_s` was **seven days**, and it
+governed both answers.
+
+For a coordinate that is defensible, and the reasoning was written down: a
+name-to-coordinate mapping embeds none of the weather, daylight or air quality
+that makes a route payload go stale in six hours. For an **empty** result it is
+not, and nobody had separated the two. "Nowhere is called that" is exactly what
+a place mapped this week returns, and one OSM edit is enough to make it false —
+so a park added on Monday could not be found until the Monday after by anyone
+whose search string was already in the table. The cache was hiding real places
+from the very field this feature adds.
+
+- `geocode_cache_ttl_s` 7 days → **1 day**. It still absorbs the case the cache
+  exists for — backspacing and re-typing, which happens over seconds — and costs
+  at most one upstream call per distinct name per day, well inside the 40-token
+  bucket and Nominatim's one-per-second policy.
+- New `geocode_empty_cache_ttl_s`, **10 minutes**. Long enough to cover the
+  keystrokes of a misspelling, which is all that caching a miss was ever for.
+- Both are `MEANDER_GEOCODE_CACHE_TTL_S` / `MEANDER_GEOCODE_EMPTY_CACHE_TTL_S`
+  in `.env.example`, so a deployment can shorten either.
+
+**Verified**
+
+- 740 backend tests pass and 2 skip. Two of the 740 are new in `test_geocode.py`: one spies on
+  `Cache.put_geocode` and asserts a found place and a miss are written with
+  different TTLs, the other puts a ceiling on both numbers so seven days cannot
+  come quietly back. Neither asserts an exact value — the point is the bound.
+- 547 frontend tests and `scripts/gate.mjs` at 69 of 69 in a real headless
+  Chrome, including a new destination pass.
+
+**Live API calls:** none. The suite runs in replay and the frontend was verified
+against `VITE_MOCK_API=1`.

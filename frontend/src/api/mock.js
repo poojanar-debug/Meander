@@ -10,7 +10,14 @@
  * confidence 0.41 and two blockers.
  */
 
+import { deriveMode, deriveModeForDistance } from '../lib/format.js'
+
 const COLOMBO = { lat: 6.9271, lon: 79.8612 }
+
+/** The length the point-to-point fixtures were drawn at, before a real
+ *  destination started setting it. Durations are still expressed as a
+ *  multiple of it so the three routes keep their relative shape. */
+const BASE_TRIP_M = 2100
 
 const sleep = (ms, signal) =>
   new Promise((resolve, reject) => {
@@ -28,6 +35,24 @@ const sleep = (ms, signal) =>
       { once: true },
     )
   })
+
+/**
+ * Crow-flight bearing and length from one point to another, in the same flat
+ * approximation `polyline` below undoes.
+ *
+ * This is what makes a demo destination a destination. Before it, the mock
+ * drew every point-to-point route on a fixed bearing of 22° at a fixed
+ * length, so the line went nowhere near the place the user had picked and the
+ * feature looked broken on the one build that ships without a backend.
+ */
+function aimAt(origin, dest) {
+  const dNorth = (dest.lat - origin.lat) * 111320
+  const dEast = (dest.lon - origin.lon) * 111320 * Math.cos((origin.lat * Math.PI) / 180)
+  return {
+    bearingDeg: (Math.atan2(dEast, dNorth) * 180) / Math.PI,
+    lengthM: Math.hypot(dNorth, dEast),
+  }
+}
 
 /** Deterministic wiggly polyline, so a given route id always looks the same. */
 function polyline(origin, bearingDeg, lengthM, bow, points = 48) {
@@ -127,22 +152,47 @@ function steps(geometry, distanceM, durationMin, streets) {
   return out
 }
 
-function buildRoutes(req) {
+/**
+ * The three fixture routes for one request.
+ *
+ * Exported for the test suite only — nothing but `mockFetchRoutes` below calls
+ * it in the app. The suite needs it directly because the streaming path it
+ * normally arrives through takes about four seconds of real timers to deliver
+ * a route, and what is worth asserting here is the geometry, not the cadence.
+ */
+export function buildRoutes(req) {
   const origin = req.origin ?? COLOMBO
-  const isLoop = !req.destination
+  const dest = req.destination ?? null
+  const isLoop = !dest
   const minutes = req.minutes ?? 35
-  const mode = req.mode === 'auto' ? (minutes <= 45 ? 'foot' : minutes <= 120 ? 'bike' : 'car') : req.mode
-  const scale = minutes / 35
+  // `polyline` puts its bow at zero at t=1, so all three of these end on the
+  // destination however far they wander on the way. That is the property the
+  // map, the arrival latch and the last step all read.
+  const aim = dest ? aimAt(origin, dest) : null
+  // The dial does not describe a trip with a destination and does not scale
+  // one: `buildRouteRequest` does not even send it. The trip is as long as
+  // the distance makes it. Floored so a destination on top of the origin
+  // still yields a drawable line rather than 48 identical points.
+  const scale = isLoop ? minutes / 35 : Math.max(0.1, aim.lengthM / BASE_TRIP_M)
+  // Must agree with `effectiveMode` in lib/format.js, which reads the straight
+  // line once there is a destination and the budget when there is not. The
+  // constants are imported rather than restated for exactly that reason.
+  const mode =
+    req.mode === 'auto'
+      ? isLoop
+        ? deriveMode(minutes)
+        : deriveModeForDistance(aim.lengthM)
+      : req.mode
 
   const fastestGeom = isLoop
     ? loop(origin, 420 * scale, 0)
-    : polyline(origin, 22, 2100 * scale, 0.02)
+    : polyline(origin, aim.bearingDeg, aim.lengthM, 0.02)
   const scenicGeom = isLoop
     ? loop(origin, 520 * scale, 3)
-    : polyline(origin, 22, 2100 * scale, 0.22)
+    : polyline(origin, aim.bearingDeg, aim.lengthM, 0.22)
   const accessibleGeom = isLoop
     ? loop(origin, 380 * scale, 0)
-    : polyline(origin, 22, 2100 * scale, -0.09)
+    : polyline(origin, aim.bearingDeg, aim.lengthM, -0.09)
 
   // Distances are measured from the drawn geometry rather than declared
   // separately. When they disagreed, the rail said 1.4 km and follow mode's

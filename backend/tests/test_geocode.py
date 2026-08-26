@@ -155,3 +155,56 @@ def test_place_search_does_not_spend_the_route_bucket(api_client, monkeypatch) -
     # The route bucket still holds every one of its twelve tokens.
     decision = main.limiter.check("test-client")
     assert decision.allowed
+
+
+def test_a_found_place_and_a_miss_do_not_share_an_expiry(api_client, monkeypatch) -> None:
+    """Two answers, two questions, two expiries.
+
+    They used to share one, and it was seven days. The argument for seven days
+    is sound for a coordinate — a name-to-coordinate mapping embeds none of the
+    weather, daylight or air quality that makes a route payload go stale in
+    six hours — and it is wrong for an empty result, because an empty result is
+    exactly what a place mapped this week returns. One OSM edit is enough to
+    make it false, and until it expired nobody who had already typed that name
+    could find the place at all.
+    """
+    from backend import cache as cache_mod
+    from backend.config import settings
+
+    ttls: list[int] = []
+    real = cache_mod.Cache.put_geocode
+
+    def spy(self, query_key, payload, ttl_s):  # type: ignore[no-untyped-def]
+        ttls.append(ttl_s)
+        return real(self, query_key, payload, ttl_s)
+
+    monkeypatch.setattr(cache_mod.Cache, "put_geocode", spy)
+
+    assert api_client.get("/api/geocode", params={"q": "Hyde Park, London"}).status_code == 200
+    assert ttls == [settings.geocode_cache_ttl_s]
+
+    async def nothing(query: str):
+        return []
+
+    monkeypatch.setattr("backend.routing.geocode_search", nothing)
+    empty = api_client.get("/api/geocode", params={"q": "Somewhere Nobody Has Mapped"})
+
+    assert empty.status_code == 200
+    assert empty.json()["results"] == []
+    assert ttls[-1] == settings.geocode_empty_cache_ttl_s
+    assert settings.geocode_empty_cache_ttl_s < settings.geocode_cache_ttl_s
+
+
+def test_the_place_list_cannot_go_stale_by_more_than_a_day() -> None:
+    """A ceiling on both TTLs, so the seven days cannot come quietly back.
+
+    Neither number is asserted exactly — a deployment may shorten either, and
+    `MEANDER_GEOCODE_CACHE_TTL_S` exists so it can. What is asserted is the
+    bound: the list of places a user picks a destination from is at most a day
+    behind OpenStreetMap, and a "nowhere is called that" at most a quarter of
+    an hour behind it.
+    """
+    from backend.config import settings
+
+    assert settings.geocode_cache_ttl_s <= 24 * 60 * 60
+    assert settings.geocode_empty_cache_ttl_s <= 15 * 60

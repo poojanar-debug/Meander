@@ -43,11 +43,17 @@ const PLAN_MANIFEST = [
   ['.plan', 'PlanSheet.jsx'],
   ['.wordmark', 'Wordmark.jsx — the lockup at the head of the plan'],
   ['.plan__search-field', 'PlanSheet.jsx — the doorway to place search'],
+  ['.plan__search--dest', 'PlanSheet.jsx — the destination field'],
   ['[aria-label="Use my location"]', 'PlanSheet.jsx — the location arrow'],
   ['.dial__slider', 'TimeDial.jsx — the native range input'],
   ['.mode__seg', 'ModeControl.jsx'],
   ['.chip', 'ObjectiveChips.jsx'],
   ['[role="status"][aria-live="polite"]', 'App.jsx — the one live region'],
+]
+
+const DEST_MANIFEST = [
+  ['.plan__search-clear', 'PlanSheet.jsx — clearing the destination'],
+  ['.plan__budget-note', 'PlanSheet.jsx — what stands where the dial stood'],
 ]
 
 const RESULTS_MANIFEST = [
@@ -70,42 +76,154 @@ const check = (name, ok, detail) => {
 
 // ------------------------------------------------------------------ CDP glue
 
-async function launch(port = 9444) {
+/**
+ * How long Chrome gets to open its debugging port.
+ *
+ * **Thirty seconds, and it used to be ten.** Ten lost the race on a GitHub
+ * runner on 2026-08-26 (run 32969563724), and the same commit had passed the
+ * same gate half an hour earlier, so it is a cold-start race rather than
+ * anything about the build being graded. A re-run went green and told nobody
+ * anything, which is the failure mode this whole file exists to refuse.
+ *
+ * The number is patience, not tolerance: nothing about what the gate accepts
+ * changes, only how long it is willing to wait for a browser to exist.
+ */
+const LAUNCH_TIMEOUT_MS = 30000
+const LAUNCH_POLL_MS = 100
+
+/** Chrome's own announcement of the port it actually opened. */
+const DEVTOOLS_LINE = /DevTools listening on ws:\/\/127\.0\.0\.1:(\d+)\//
+
+/** Exit code for "this gate could not run at all", as distinct from 1, which
+ *  means it ran and something failed. `No Chrome at ...` has always used it. */
+const CANNOT_RUN = 2
+
+function cannotRun(lines) {
+  console.error('')
+  for (const line of lines) console.error(line)
+  console.error('')
+  process.exit(CANNOT_RUN)
+}
+
+async function launch() {
   if (!existsSync(CHROME)) {
     console.error(`No Chrome at ${CHROME}. Set CHROME_PATH.`)
-    process.exit(2)
+    process.exit(CANNOT_RUN)
   }
+  // stderr is piped and kept rather than discarded, and it is now load-bearing
+  // rather than only diagnostic: it carries the port. `stdio: 'ignore'` threw
+  // away the one thing that explains a launch that fails for a real reason —
+  // a missing shared library, a sandbox refusal, a profile another instance
+  // holds — and left the run to die later on a bare ECONNREFUSED naming
+  // nothing.
+  const noise = []
   const proc = spawn(
     CHROME,
     [
       '--headless=new',
-      `--remote-debugging-port=${port}`,
+      // Port 0, not 9444, and this is the fix for something worse than a slow
+      // start. On a fixed port `launch()` polled `/json/version` and accepted
+      // ANY browser that answered — including one a previous run leaked, which
+      // it had not started and whose page it knew nothing about. Demonstrated
+      // on purpose: pointing CHROME_PATH at `/bin/false`, which cannot serve
+      // anything, still produced a connected gate and twelve graded checks,
+      // because a stale Chrome was still holding 9444. Where that stale
+      // browser happens to sit on the right page, the same path reports a
+      // PASS that means nothing.
+      //
+      // Asking for 0 makes the kernel pick a free port and makes Chrome
+      // announce it on stderr, so the port the gate connects to is by
+      // construction the port of the browser it just spawned.
+      '--remote-debugging-port=0',
       '--no-first-run',
       '--no-default-browser-check',
       '--user-data-dir=/tmp/meander-gate-profile',
       '--hide-scrollbars',
       'about:blank',
     ],
-    { stdio: 'ignore' },
+    { stdio: ['ignore', 'ignore', 'pipe'] },
   )
-  for (let i = 0; i < 100; i += 1) {
-    try {
-      if ((await fetch(`http://127.0.0.1:${port}/json/version`)).ok) break
-    } catch {
-      /* not up yet */
+  // Always consumed, only the first lines kept: an unread pipe fills its
+  // buffer and blocks the process writing to it, which would turn a
+  // diagnostic aid into a hang.
+  let port = null
+  proc.stderr.setEncoding('utf8')
+  proc.stderr.on('data', (chunk) => {
+    if (noise.length < 40) noise.push(chunk)
+    const found = String(chunk).match(DEVTOOLS_LINE)
+    if (found && port === null) port = Number(found[1])
+  })
+  // A browser that died is a different failure from a browser that is slow,
+  // and it is knowable immediately rather than in thirty seconds.
+  let died = null
+  proc.on('exit', (code, signal) => {
+    died = signal ? `killed by ${signal}` : `exited with code ${code}`
+  })
+  proc.on('error', (err) => {
+    died = `could not be spawned: ${err.message}`
+  })
+
+  const deadline = Date.now() + LAUNCH_TIMEOUT_MS
+  while (Date.now() < deadline) {
+    if (died) break
+    // Nothing is probed until this browser has said which port is its own.
+    if (port !== null) {
+      try {
+        // The only path out of this function that reports success. The version
+        // this replaces `break`-ed out of a bounded loop and then returned the
+        // same value whether it had reached Chrome or given up, so the next
+        // call to the port threw ECONNREFUSED and the run ended with a stack
+        // trace about `fetch` instead of a sentence about Chrome.
+        if ((await fetch(`http://127.0.0.1:${port}/json/version`)).ok) return { proc, port }
+      } catch {
+        /* announced but not answering yet */
+      }
     }
-    await new Promise((r) => setTimeout(r, 100))
+    await new Promise((r) => setTimeout(r, LAUNCH_POLL_MS))
   }
-  return { proc, port }
+
+  const why =
+    died ??
+    (port === null
+      ? `never announced a debugging port within ${LAUNCH_TIMEOUT_MS / 1000}s`
+      : `announced port ${port} but never answered on it within ${LAUNCH_TIMEOUT_MS / 1000}s`)
+  proc.kill()
+  cannotRun([
+    `The gate could not start a browser: Chrome ${why}.`,
+    `  binary  ${CHROME}`,
+    ...(noise.length ? ['  chrome said:', ...noise.join('').trimEnd().split('\n').slice(0, 20).map((l) => `    ${l}`)] : ['  chrome said nothing on stderr.']),
+    'Nothing was graded. This is not a pass and it is not a layout failure.',
+  ])
 }
 
 async function connect(port) {
-  const targets = await (await fetch(`http://127.0.0.1:${port}/json/list`)).json()
+  let targets
+  try {
+    targets = await (await fetch(`http://127.0.0.1:${port}/json/list`)).json()
+  } catch (err) {
+    cannotRun([
+      `Chrome answered on port ${port} but its target list did not: ${err.message}`,
+      'Nothing was graded.',
+    ])
+  }
   const page = targets.find((t) => t.type === 'page')
+  // `page` was dereferenced unguarded, so a browser with no page target — it
+  // happens when another instance holds the profile — died on
+  // "Cannot read properties of undefined", which names neither Chrome nor the
+  // gate.
+  if (!page?.webSocketDebuggerUrl) {
+    cannotRun([
+      `Chrome is up on port ${port} but offers no page target to drive.`,
+      `  targets  ${JSON.stringify(targets.map((t) => t.type))}`,
+      'Nothing was graded.',
+    ])
+  }
   const ws = new WebSocket(page.webSocketDebuggerUrl)
   await new Promise((res, rej) => {
     ws.onopen = res
-    ws.onerror = rej
+    // An Event, not an Error: rejecting with it produced an unreadable
+    // "[object Event]" wherever it surfaced.
+    ws.onerror = () => rej(new Error(`Could not open a CDP socket to ${page.webSocketDebuggerUrl}`))
   })
   let id = 0
   const pending = new Map()
@@ -137,6 +255,45 @@ async function connect(port) {
 // -------------------------------------------------------------------- checks
 
 const { proc, port } = await launch()
+
+// The browser is killed however this process ends, not only when it ends well.
+//
+// `proc.kill()` used to run in exactly one place — the last two lines, after
+// the report — so any throw in between left a headless Chrome running. That is
+// not a tidiness problem: a leaked browser is what put a stranger on the fixed
+// debugging port that `launch()` then adopted, and a run of this very gate is
+// what leaked it (a CDP "Inspected target navigated or closed" on 2026-08-26).
+// The port is ephemeral now, so a leak can no longer be adopted; it should
+// still not happen.
+const reap = () => {
+  try {
+    proc.kill()
+  } catch {
+    /* already gone */
+  }
+}
+process.on('exit', reap)
+process.on('SIGINT', () => {
+  reap()
+  process.exit(130)
+})
+process.on('SIGTERM', () => {
+  reap()
+  process.exit(143)
+})
+process.on('uncaughtException', (err) => {
+  reap()
+  console.error('\nThe gate crashed rather than finishing. Nothing below was graded.\n')
+  console.error(err)
+  process.exit(CANNOT_RUN)
+})
+process.on('unhandledRejection', (err) => {
+  reap()
+  console.error('\nThe gate crashed rather than finishing. Nothing below was graded.\n')
+  console.error(err)
+  process.exit(CANNOT_RUN)
+})
+
 const cdp = await connect(port)
 await cdp.send('Page.enable')
 await cdp.send('Runtime.enable')
@@ -193,6 +350,68 @@ async function driveToResults(mobile) {
   if (!first) return false
   await waitFor(`document.querySelectorAll('button.route').length >= 3`, 60)
   return true
+}
+
+/**
+ * Block until the bottom sheet has stopped moving.
+ *
+ * Not a nicety. Picking a place unmounts the search screen and remounts the
+ * sheet, whose height is an inline style with a transition on it, and a sweep
+ * that lands mid-transition measures the sticky grabber at 43.999996 px
+ * against a 44 px minimum. That is not a target-size defect — the resting
+ * height is exactly 44 in every state — but it fails the sweep about half the
+ * time, and a gate that fails at random teaches people to re-run it until it
+ * is green, which is the same as not having it.
+ *
+ * Two equal readings rather than a fixed sleep, so it is the sheet that says
+ * when it is done.
+ */
+async function sheetSettled() {
+  let last = null
+  for (let i = 0; i < 25; i += 1) {
+    const h = await cdp.evaluate(
+      `(() => { const el = document.querySelector('.sheet'); return el ? el.getBoundingClientRect().height : -1 })()`,
+    )
+    if (last !== null && h === last) return true
+    last = h
+    await new Promise((r) => setTimeout(r, 100))
+  }
+  return false
+}
+
+/**
+ * Pick a destination on the phone plan sheet, through the screen a user goes
+ * through: the field opens the full-surface place search, a name is typed into
+ * the real combobox, and the first result is chosen.
+ *
+ * `input.value = x` is deliberately not what happens here. React installs its
+ * own value setter on the element, so assigning through the instance property
+ * updates the DOM and never tells React, and the combobox would search for an
+ * empty string. The prototype setter plus a bubbling `input` event is the one
+ * way to type into a React-controlled field from outside React.
+ *
+ * The result rows commit on `mousedown`, not `click` — the input's blur would
+ * close the list before a click ever landed — so that is what is dispatched.
+ */
+async function pickDestination(query = 'Vondelpark') {
+  await cdp.evaluate(
+    `(()=>{document.querySelector('.plan__search--dest .plan__search-field')?.click()})()`,
+  )
+  if (!(await waitFor(`!!document.querySelector('.search .place__input')`, 40, 100))) return false
+  await cdp.evaluate(`(() => {
+    const input = document.querySelector('.search .place__input')
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set
+    setter.call(input, ${JSON.stringify(query)})
+    input.dispatchEvent(new Event('input', { bubbles: true }))
+    return true })()`)
+  // 500 ms debounce, then the mock geocoder's own 220 ms.
+  if (!(await waitFor(`!!document.querySelector('.place__row')`, 40, 100))) return false
+  await cdp.evaluate(`(() => {
+    const row = document.querySelector('.place__row')
+    row.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }))
+    return true })()`)
+  if (!(await waitFor(`!!document.querySelector('.plan__search-clear')`, 40, 100))) return false
+  return sheetSettled()
 }
 
 async function setTheme(theme) {
@@ -345,6 +564,53 @@ async function a11yPass(label) {
 await load(390, 844, true)
 await a11yPass('plan')
 
+// 3b. THE PLAN WITH A DESTINATION — a distinct screen, so it is graded as one.
+//
+// It was reachable before this only through a shared link, which the gate has
+// no way to open, so the whole point-to-point half of the app was ungraded:
+// the clear control, the sentence that stands where the dial stands for a
+// loop, and the fact that the dial is *gone* rather than disabled.
+await load(390, 844, true)
+// The origin first, because the screen this grades is the one with both ends
+// filled in and because Find routes is disabled without one — a destination
+// pass that skipped it would click a disabled button and report the miss as a
+// routing failure.
+await cdp.evaluate(`(()=>{document.querySelector('[aria-label="Use my location"]')?.click()})()`)
+await waitFor(
+  `!![...document.querySelectorAll('button')].find(x=>/find routes/i.test(x.textContent||'')&&!x.disabled)`,
+  60,
+)
+const destPicked = await pickDestination()
+check('[destination] picking one on the plan sheet sets it', destPicked)
+
+if (destPicked) {
+  const destCounts = await countSelectors(DEST_MANIFEST)
+  const destOk = checkManifest('destination', DEST_MANIFEST, destCounts)
+
+  // The dial is not disabled here, it is absent. `buildRouteRequest` omits
+  // `minutes` from a point-to-point body, so a slider on this screen would be
+  // a control that moves and changes nothing.
+  const dial = await cdp.evaluate(`document.querySelectorAll('.dial__slider').length`)
+  check('[destination] the time dial is gone, not disabled', dial === 0, `${dial} found`)
+
+  const overflow = await cdp.evaluate(overflowCheck)
+  check(
+    '[destination] no horizontal scroll at 390px',
+    overflow.scrollW <= overflow.clientW + 1,
+    `${overflow.scrollW} vs ${overflow.clientW}${overflow.wide.length ? ` — ${overflow.wide.join(', ')}` : ''}`,
+  )
+
+  if (destOk) await a11yPass('destination')
+
+  // And it still routes. A destination that sets state and never reaches the
+  // request is the failure this whole screen exists to avoid.
+  await cdp.evaluate(
+    `(()=>{const b=[...document.querySelectorAll('button')].find(x=>/find routes/i.test(x.textContent||'')&&!x.disabled);if(b)b.click()})()`,
+  )
+  const routed = await waitFor(`document.querySelectorAll('button.route').length >= 1`, 80)
+  check('[destination] Find routes still streams cards for a trip with one', routed)
+}
+
 // 4. THE RESULTS — driven, then graded.
 await load(390, 844, true)
 const arrived = await driveToResults(true)
@@ -394,6 +660,8 @@ if (detailUp) {
 await load(1200, 900, false)
 const capsule = await cdp.evaluate(`!!document.querySelector('.capsule')`)
 check('[desktop] the plan capsule renders at 1200px', capsule)
+const capsuleDest = await cdp.evaluate(`!!document.querySelector('.capsule__seg--dest')`)
+check('[desktop] the capsule carries a destination segment', capsuleDest)
 if (capsule) {
   const arrived = await driveToResults(false)
   check('[desktop] the stream delivers cards', arrived)

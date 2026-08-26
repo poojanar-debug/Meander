@@ -684,8 +684,25 @@ a {
   position: absolute;
   z-index: 40;
   top: calc(var(--safe-top) + 22px);
-  left: 50%;
-  transform: translateX(-50%);
+  /* Centred by auto margins between two zero offsets, not by `left: 50%` and
+   * a translate. Two reasons, and the first is measured.
+   *
+   * An absolutely positioned box with `left: 50%` and `right: auto` shrinks to
+   * fit *the space left of it*, which is half the viewport. The capsule's
+   * content wanted 657px at HEAD and the cap at 1280 is 640, so **Find routes
+   * broke onto two lines on every desktop window under about 1600px** and the
+   * pill stood 77px tall instead of 60. The destination segment widens the
+   * content and would have made it worse; it did not cause it.
+   *
+   * The second: `drop-in` ends on `transform: none`, which cancelled the
+   * centring translate for the length of the animation, so the capsule slid
+   * sideways into place on every mount.
+   */
+  left: 0;
+  right: 0;
+  margin-inline: auto;
+  width: max-content;
+  max-width: calc(100% - 32px);
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -717,15 +734,26 @@ a {
   }
 }
 
-.capsule__seg--origin {
+.capsule__seg--origin,
+.capsule__seg--dest {
   font-size: 14.5px;
   font-weight: 600;
-  max-width: 240px;
+  /* Two place names now share the pill, so neither may claim 240px of it.
+   * 200 each still fits "Viharamahadevi Park" whole and keeps the capsule
+   * inside a 1024px viewport with the minutes segment also up. */
+  max-width: 200px;
 }
 
-.capsule__origin-name {
+.capsule__place-name {
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+/* "Round trip" is the default value rather than a prompt, so it takes the
+ * placeholder weight the trip bar has always given one. */
+.capsule__place-name.is-placeholder {
+  font-weight: 400;
+  color: var(--ink-2);
 }
 
 .capsule__seg--minutes {
@@ -755,6 +783,9 @@ a {
 
 .capsule__find {
   margin-left: 10px;
+  /* The segments have said `nowrap` since the redesign; the action on the end
+   * never did, so it was the one thing in the pill that could break in two. */
+  white-space: nowrap;
 }
 
 .capsule__popover {
@@ -866,6 +897,15 @@ a {
   margin-bottom: 4px;
 }
 
+/* A place name can be long; the row must not push the Edit control off the
+ * sheet. */
+.rail__plan-summary {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .rail__edit {
   min-height: var(--target);
   display: inline-flex;
@@ -874,6 +914,11 @@ a {
   font-size: 13px;
   font-weight: 600;
   color: var(--sky-link);
+  /* The summary beside it truncates; this does not. The row read "35 min ·
+   * Auto" until a destination name could stand there, and a name long enough
+   * to fill the row broke "Edit plan" over two lines. */
+  flex: none;
+  white-space: nowrap;
 }
 
 .card {
@@ -1557,6 +1602,41 @@ a {
   justify-content: center;
   color: var(--sky-deep);
   flex: none;
+}
+
+/* The destination row carries no location arrow, so its field would otherwise
+ * run to the rounded edge. */
+.plan__search--dest .plan__search-field {
+  padding-right: 15px;
+}
+
+.plan__search--dest.has-clear .plan__search-field {
+  padding-right: 0;
+}
+
+/* Same 44px box as the locate arrow, in the secondary ink: clearing a
+ * destination is not the primary act on this row. */
+.plan__search-clear {
+  width: var(--target);
+  min-height: var(--target);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--ink-2);
+  flex: none;
+}
+
+/* What stands where the dial stands for a loop. The dial is not disabled
+ * here, it is absent: `buildRouteRequest` omits `minutes` from a
+ * point-to-point body, so there is no budget to set. */
+.plan__budget-note {
+  margin: 0;
+  font-size: 10.5px;
+  color: var(--ink-2);
+  text-align: center;
+  /* One line at 320px in Space Mono at this size, which is the whole point of
+   * it: it stands in for the dial, and a three-line paragraph does not. */
+  max-width: 42ch;
 }
 
 .plan__hint {

@@ -1,6 +1,201 @@
 
 ---
 
+## The gate could drive a browser it did not start · 2026-08-26
+
+`main`'s CI went red on the commit that had just passed the same gate on its
+own PR. The frontend job died at the layout gate with:
+
+```
+TypeError: fetch failed
+  [cause]: Error: connect ECONNREFUSED 127.0.0.1:9444
+```
+
+A re-run went green, which is the worst possible outcome: nothing was wrong
+with the build, nothing was learned, and the lesson on offer was "press the
+button again". Pulling the thread found four defects in about forty lines of
+CDP glue, none of them touched since `73a7386` wrote the gate on 2026-08-08.
+
+**1. `launch()` reported success whether or not it had reached a browser.**
+It polled `/json/version` a hundred times at 100 ms and `break`-ed out of the
+loop either way, then returned the same `{ proc, port }` in both cases. The
+ECONNREFUSED came from the *next* call, so the run ended with a stack trace
+about `fetch` rather than a sentence about Chrome. Success is now the only
+path that returns; every other outcome prints what happened and exits 2.
+
+**2. Ten seconds was not enough for a cold runner.** Now thirty. The number is
+patience, not tolerance: nothing the gate accepts has changed, only how long
+it waits for a browser to exist.
+
+**3. `stdio: 'ignore'` threw away the reason.** A launch that fails for a real
+reason — a missing shared library, a sandbox refusal, a profile another
+instance holds — says so on stderr, and the gate was discarding it. stderr is
+piped and the first lines are reported. Proved with a fake browser that exits
+127 after writing `error while loading shared libraries: libnss3.so`; the
+gate now prints that line back.
+
+**4. The one that matters: a fixed port let the gate adopt a stranger.**
+`--remote-debugging-port=9444` plus "poll until something answers" does not
+identify the browser that answered. **Demonstrated on purpose**: with a Chrome
+left over from an earlier run holding 9444, pointing `CHROME_PATH` at
+`/bin/false` — a binary that cannot serve anything — still produced a
+connected gate and twelve graded checks. Where the stale browser happens to
+sit on the right page, the same path reports a **pass that means nothing**,
+which is the exact failure this file's header was written to refuse.
+
+The port is now `0`. The kernel picks a free one, Chrome announces it on
+stderr, and the gate connects to that — so the port it drives is by
+construction the port of the browser it spawned. Re-running the `/bin/false`
+demonstration with a live decoy on 9444 now exits 2 and grades nothing.
+
+**And the leak that manufactured the stranger.** `proc.kill()` ran in exactly
+one place, after the report, so any throw in between left a headless Chrome
+running — and a crashed run of this gate is what leaked the browser found on
+9444 (`Inspected target navigated or closed`, from two gates sharing a port
+and a profile). The browser is now reaped on `exit`, `SIGINT`, `SIGTERM`, and
+on an uncaught throw or rejection, which also stops "the gate crashed" from
+being reported as "checks failed".
+
+Two smaller ones in `connect()`, both silent for the same reason:
+`targets.find(t => t.type === 'page')` was dereferenced unguarded, so a
+browser with no page target died on `Cannot read properties of undefined`;
+and `ws.onerror = rej` rejected with an `Event`, which renders as
+`[object Event]` wherever it surfaces.
+
+**Verified, each failure path made to fail on purpose before the gate was
+trusted again** — the rule BLOCKED.md §5 states and this is the first change
+to actually apply it to `gate.mjs` itself:
+
+| provoked | reported |
+|---|---|
+| `CHROME_PATH=/bin/false` | `Chrome exited with code 1`, exit 2 |
+| a browser exiting 127 with a linker error | the linker error, verbatim, exit 2 |
+| a browser that starts and never announces a port | `never announced a debugging port within 30s`, exit 2, after exactly 30 s |
+| a live decoy on 9444 plus `/bin/false` | exit 2, nothing graded (was: 12 checks graded) |
+
+And the happy path is unchanged: 69 of 69 green in a real headless Chrome.
+
+**No application code changed.** This is entirely the harness that grades it.
+
+---
+
+## Somewhere to go — the destination end of a trip · 2026-08-26
+
+The backend has accepted a `destination` since Phase C, `models.py` has
+`is_loop()`, `budget_minutes()` and `straight_line_m()` built around it, and
+`buildRouteRequest`, `encodeState`, `resultsStore.js`, `MapView`, `RouteDetail`
+and `ExportPills` all already handled one. **Nothing on screen could set it.**
+The only way to ask for a point-to-point trip was to hand-write a `?to=` link,
+which App.jsx said out loud in a comment: "a destination can only arrive
+through a permalink in this design".
+
+This is the missing control, on both plan surfaces, in the 2026 language.
+
+**Done**
+
+- **Desktop capsule** gains a destination segment between the origin and the
+  minutes, split by the same 1x22 hairline, wearing an ink dot to match the
+  map's own `marker--dest`. Its popover is the same `PlaceInput` combobox the
+  origin uses, plus the hint DESIGN-HANDOFF §4.3 wrote for this exact drawer:
+  "Empty means a round trip — Meander brings you back to where you started."
+- **Mobile plan sheet** gains a second search field under the first, the same
+  input-fill row with the same magnifier, and a 44x44 clear control once a
+  destination is set. It opens the same full-surface place screen.
+- `PlaceSearch` now serves both ends. One `FIELDS` table decides the label, the
+  placeholder and the dialog's accessible name; an unknown key falls back to
+  the origin, which is the one input the app cannot run without.
+- Both place segments carry a visually-hidden key ("Starting point:",
+  "Destination:"), so a screen reader gets "Destination, Round trip" rather
+  than a button called "Round trip".
+- The mobile results summary reads `to Vondelpark · Auto` for a point-to-point
+  trip instead of a dial position that did not describe it.
+- `api/mock.js` draws to the destination. It used to draw every point-to-point
+  route on a **fixed bearing of 22 degrees at a fixed 2100 m** whatever was
+  asked for, which nothing noticed because nothing could ask. Its auto mode now
+  reads the straight line through the same `deriveModeForDistance` the app
+  uses, imported rather than restated.
+- `gate.mjs` grades the new screen: the destination field is in the plan
+  manifest, and a new `[destination]` pass picks a place through the real
+  combobox, checks the clear control and the budget note exist, asserts the
+  dial is *gone*, sweeps 44x44 and axe in both themes, and presses Find routes
+  to prove a destination still reaches the request. 69 checks, from 56.
+
+**Decisions**
+
+- **The time dial is absent, not disabled, once there is a destination.**
+  `buildRouteRequest` omits `minutes` from a point-to-point body and
+  `encodeState` omits it from the link, so the dial cannot change that
+  request — not its length, not its mode, not even its cache row. A control
+  that moves and changes nothing is the one thing this UI is not allowed to
+  be. The precedent is `BestWindow`, which does not render at all rather than
+  name a time it cannot stand behind. On the capsule the segment goes; on the
+  sheet one mono sentence stands where the dial stood.
+- **No "use my location" beside the destination**, and that absence is
+  load-bearing rather than an oversight. `resultsStore.js` hashes the
+  destination byte-exact while snapping the origin to an ~11 m grid, and the
+  reason it is allowed to is written in its own header: a device fix cannot
+  reach that field. `destination-contract.test.js` asserts the `onLocate`
+  handler still dispatches `type: 'origin'` and nothing else.
+- **Two place names now share the capsule**, so neither keeps the 240 px it
+  had. 200 each still fits "Viharamahadevi Park" whole, and because the cap is
+  a hard `max-width` the pill's width is bounded by construction rather than by
+  the data: measured at **840 px** with two names long enough to hit both caps,
+  which leaves 92 px either side at 1024 and no horizontal scroll. "Round
+  trip" takes the placeholder weight §4.3 gives a placeholder value.
+- The `nonce` model is untouched. Picking a destination changes state and
+  nothing else; **Find routes** is still the only thing that asks.
+
+**Verified**
+
+- 547 frontend tests pass, 14 of them new in
+  `src/lib/destination-contract.test.js`: the mock's three routes each end
+  within 5 m of the chosen point, a loop still returns to its origin, auto mode
+  reads the straight line rather than the dial's default (Colombo to Kandy is a
+  drive, not a walk), and both plan surfaces, the place screen and App's
+  `planProps` all carry the handler.
+- `node scripts/gate.mjs` — 69 of 69 green in a real headless Chrome, both
+  themes, including the new destination pass.
+- `npm run build` clean.
+
+**Four things found on the way, three of them older than this change.**
+
+- **`Find routes` broke onto two lines on every desktop window under about
+  1600 px**, and had since the redesign shipped. `.capsule-wrap` is absolutely
+  positioned with `left: 50%`, and an abspos box with `left` set and `right:
+  auto` shrinks to fit *the space left of it* — half the viewport. The pill
+  wanted 657 px at HEAD against a 640 px cap at 1280, so it squeezed the one
+  child that could reflow and stood 77 px tall instead of 60. Measured against
+  a build of HEAD's own sources before touching it, because a second place
+  name makes the pill wider and it would have been easy to call this a
+  regression. Centred with `left: 0; right: 0; margin-inline: auto; width:
+  max-content` instead, which also fixes a second symptom nobody had named:
+  `drop-in` ends on `transform: none`, so the centring translate was cancelled
+  for the 220 ms of the animation and the capsule slid sideways into place on
+  every mount. Now 776 x 60 at every width from 1024 up, and the action is one
+  line and 44 px tall.
+- **"Finding you…" never went away.** `onLocate` set `phase: 'locating'` and
+  the `origin` case that answers it left the phase alone, so the hint sat under
+  a field already showing the place it had found until Find routes moved the
+  phase on. The `geoDenied` case had the right shape all along; `origin` now
+  matches it.
+- **`Edit plan` wrapped** once the summary beside it could hold a place name.
+  That one is this change's: the row read `35 min · Auto` before, which never
+  filled it. The summary truncates, the control does not.
+- **And one that was the gate's own.** The first run failed
+`[destination][light] every target clears 44x44` on `.sheet__grabber-hit` at
+**43.999996 px** against a 44 px minimum, and passed in dark. The resting
+height is exactly 44 in every state measured; picking a place unmounts the
+search screen and remounts the sheet, whose height is an inline style with a
+transition on it, and the sweep was landing mid-transition. It failed about
+half the time. Fixed by making `pickDestination` wait for two equal readings of
+the sheet's height before returning, rather than by sleeping and hoping — a
+gate that fails at random teaches people to re-run it until it is green, which
+is the same as not having one. Five consecutive runs green after it.
+
+**Live API calls:** none. Verified against `VITE_MOCK_API=1`.
+
+---
+
 ## The 2026 UI — full presentation rewrite · 2026-08-25
 
 The presentation layer replaced wholesale with the approved 2026 mockups

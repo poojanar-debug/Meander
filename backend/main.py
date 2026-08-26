@@ -1693,13 +1693,22 @@ async def geocode(request: Request, q: str = Query(min_length=2, max_length=120)
     two place names spent more tokens than the bucket held, so the route request
     that followed was refused. See `geocode_limiter` for the measurement.
 
-    Answers are cached for a week. A name-to-coordinate mapping embeds none of
-    the weather, daylight or air quality that makes a route payload go stale in
-    six hours, and the case this actually serves is backspacing and re-typing:
-    of the 12 distinct queries in the recorded burst in `fixtures/nominatim/`,
-    case-folding gives 12 distinct keys, so normalisation alone saves almost
-    nothing. What saves is that a user who deletes three characters and puts
-    them back asks the same question twice.
+    Answers are cached for a day, and answers that found nothing for ten
+    minutes. A name-to-coordinate mapping embeds none of the weather, daylight
+    or air quality that makes a route payload go stale in six hours, and the
+    case this actually serves is backspacing and re-typing: of the 12 distinct
+    queries in the recorded burst in `fixtures/nominatim/`, case-folding gives
+    12 distinct keys, so normalisation alone saves almost nothing. What saves is
+    that a user who deletes three characters and puts them back asks the same
+    question twice.
+
+    The two TTLs are two different questions. How long a coordinate is good for
+    is bounded by how often OSM moves a place, which is rarely. How long
+    "nowhere is called that" is good for is bounded by how often OSM *gains*
+    one, which is constantly — and that answer is what a user searching for a
+    destination hits when the place they want was mapped this week. Both are
+    `settings`, so a deployment can lengthen either; neither shares a number
+    with the other any more.
     """
     decision = geocode_limiter.check(_client_ip(request), counts_against_ceiling=False)
     if not decision.allowed:
@@ -1737,12 +1746,15 @@ async def geocode(request: Request, q: str = Query(min_length=2, max_length=120)
 
     # An empty result is cached too. "Nowhere is called that" is an answer, and
     # re-asking Nominatim for it on every keystroke of a misspelling is exactly
-    # the traffic this is here to stop.
+    # the traffic this is here to stop — but only for as long as the misspelling
+    # is being typed. It used to stand as long as a found place did, which is
+    # how a place added to OSM this week stayed unfindable for the rest of it.
+    ttl = settings.geocode_cache_ttl_s if results else settings.geocode_empty_cache_ttl_s
     await run_in_threadpool(
         cache.put_geocode,
         key,
         [item.model_dump() for item in results],
-        settings.geocode_cache_ttl_s,
+        ttl,
     )
     return GeocodeResponse(results=results)
 

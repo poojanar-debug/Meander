@@ -31,7 +31,7 @@ Every error uses one envelope:
 |---|---|---|
 | `origin` | yes | `lat` −90…90, `lon` −180…180 |
 | `destination` | no | **Omit entirely for a round-trip loop.** `null` is also accepted. |
-| `minutes` | no | 20–360, default 35. The time budget, and the primary input. |
+| `minutes` | no | 20–360, default 35. The time budget, and the primary input **for a loop**. It has a default, so it is always populated; read `budget_minutes()`, which is `None` when there is a destination. The client omits it entirely from a point-to-point body, and the plan surfaces hide the dial rather than show one that changes nothing. |
 | `mode` | no | `auto` \| `foot` \| `bike` \| `car`. Default `auto`. |
 | `depart_at` | no | ISO 8601. Used for sun position and air quality. |
 | `objectives` | no | Up to three of `fastest` `scenic` `accessible` `quiet` `shade` `air`. Defaults to the first three. |
@@ -153,13 +153,20 @@ and never stored.
 
 ## `GET /api/geocode?q=<string>`
 
-`q` is 2–120 characters. Debounce 300 ms client-side and abort in-flight requests.
+`q` is 2–120 characters. Debounce 500 ms client-side and abort in-flight requests. It was 300 ms,
+which sits exactly on the median inter-keystroke gap of a 40 wpm typist and made the cost of a name
+knife-edge bimodal — see `PlaceInput.jsx`'s header for the measurement and the incident.
 
 ```json
 { "results": [{ "name": "Colombo Fort, Colombo, Sri Lanka", "lat": 6.9344, "lon": 79.8428 }] }
 ```
 
 Backed by Nominatim, not GraphHopper: it needs no key and spends nothing from the routing quota.
+
+Answers are cached server-side for **one day**, and answers that found nothing for **ten minutes**.
+The two are different questions: how long a coordinate stays right is bounded by how often OSM
+*moves* a place, and how long "nowhere is called that" stays right is bounded by how often OSM
+*gains* one. `MEANDER_GEOCODE_CACHE_TTL_S` and `MEANDER_GEOCODE_EMPTY_CACHE_TTL_S` shorten either.
 
 ---
 
