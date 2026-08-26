@@ -129,3 +129,85 @@ def test_scrub_leaves_everything_that_is_not_coordinate_shaped(value, expected) 
 
 def test_scrub_reaches_inside_containers() -> None:
     assert scrub({"a": [f"{LAT},{LON}"]}) == {"a": ["<redacted>,<redacted>"]}
+
+
+# ---------------------------------------------------------------------------
+# What a library logs, which is the half the call-site audit could not cover
+# ---------------------------------------------------------------------------
+#
+# Every test above this line exercises a log line THIS codebase formats, and the
+# comment above COORDINATE_SHAPED is right that all such call sites are clean.
+# The leak found in production came from somewhere else entirely: httpx emits
+# `INFO HTTP Request: GET <full url>` for every outbound call, so the query
+# string of every upstream request is logged by code nobody here wrote.
+#
+# These are transcribed from lines actually found in the running container's
+# json-file log on 2026-08-26, with the real credential replaced.
+
+
+def test_a_credential_in_a_query_string_is_redacted() -> None:
+    """The Mapillary token rode in a query parameter, in cleartext, 49 times.
+
+    A token is not coordinate-shaped and never will be, so COORDINATE_SHAPED
+    could not have caught this at any threshold. The parameter *name* is the
+    signal.
+    """
+    line = (
+        "HTTP Request: GET https://graph.mapillary.com/images"
+        "?fields=id&bbox=4.86,52.35,4.87,52.36&access_token=MLY%7C123%7Csecret "
+        '"HTTP/1.1 200 OK"'
+    )
+    out = scrub(line)
+    assert "secret" not in out
+    assert "MLY" not in out
+    assert "access_token=<redacted>" in out
+    # The line is still worth having: which host, which endpoint, what status.
+    assert "graph.mapillary.com/images" in out
+    assert "HTTP/1.1 200 OK" in out
+
+
+def test_a_three_decimal_coordinate_in_a_query_string_is_redacted() -> None:
+    """enrich.py rounds to three decimals before calling Open-Meteo.
+
+    COORDINATE_SHAPED wants four or more, so `latitude=51.522` sailed through
+    it. Three decimals is about 111 m — a city block rather than a street, and
+    still a place a person was. Matching the parameter name closes it without
+    loosening the numeric threshold and redacting every duration in the build.
+    """
+    line = (
+        "HTTP Request: GET https://air-quality-api.open-meteo.com/v1/air-quality"
+        "?latitude=51.522&longitude=-0.162&hourly=pm2_5"
+    )
+    out = scrub(line)
+    assert "51.522" not in out
+    assert "-0.162" not in out
+    assert "latitude=<redacted>" in out
+    assert "longitude=<redacted>" in out
+    assert "hourly=pm2_5" in out
+
+
+def test_a_pipe_separated_coordinate_pair_is_redacted() -> None:
+    """Commons geosearch takes `ggscoord=lat|lon`, which is one parameter."""
+    out = scrub("GET https://commons.wikimedia.org/w/api.php?ggscoord=51.5074%7C-0.1278&ggsradius=400")
+    assert "51.5074" not in out
+    assert "ggscoord=<redacted>" in out
+    # A radius is not a position. Over-redaction has a cost too.
+    assert "ggsradius=400" in out
+
+
+def test_a_credential_that_looks_like_a_coordinate_is_redacted_as_a_credential() -> None:
+    """Ordering: the query pass runs before the numeric pass.
+
+    Reversed, the coordinate pass would eat the middle of the token and leave a
+    recognisable stub of it behind, which is worse than either outcome alone.
+    """
+    out = scrub("?token=51.50741234")
+    assert out == "?token=<redacted>"
+
+
+def test_the_parameter_name_survives_so_the_log_still_explains_itself() -> None:
+    """"We called Open-Meteo with a latitude" is the operational fact a log is
+    for. It is the value that must not survive, not the shape of the call."""
+    out = scrub("?latitude=51.5074&longitude=-0.1278")
+    assert out.count("<redacted>") == 2
+    assert "latitude=" in out and "longitude=" in out

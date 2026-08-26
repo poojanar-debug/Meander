@@ -93,10 +93,80 @@ def _could_carry_a_coordinate(value: Any) -> bool:
 COORDINATE_SHAPED = re.compile(r"-?\d+\.\d{4,}")
 
 
+# The value of a query parameter whose *name* says what it carries.
+#
+# ## Why the coordinate heuristic above was not enough, measured in production
+#
+# That heuristic is the second half of a guarantee whose first half is a banned
+# *key* list, and the comment above it says "all 60 call sites are clean today".
+# They are. What it did not anticipate is a **library** logging a URL:
+# `httpx` emits `INFO HTTP Request: GET <full url>` for every outbound call, so
+# the query string of every upstream request lands in the log without any code
+# in this repository formatting it.
+#
+# Two things then slipped through, both found in the live container's own logs
+# rather than reasoned about:
+#
+#   1. `?latitude=51.522&longitude=-0.162` — enrich.py rounds to three decimals
+#      before calling Open-Meteo, and COORDINATE_SHAPED requires four or more.
+#      Three decimals is about 111 m: a city block, not a street, but still a
+#      place somebody was. 18 such lines were in the buffer.
+#
+#   2. `?access_token=MLY|...` — the Mapillary credential. A token is not
+#      coordinate-shaped and never could be, so no amount of tuning the numeric
+#      pattern would have caught it. 49 such lines were in the buffer, in
+#      cleartext, on disk, in the container's json-file log.
+#
+# ## Why match on the parameter name rather than on the value
+#
+# The value of a credential has no shape worth matching — that is the point of a
+# credential. The *name* is the reliable signal, and it is the one part of a
+# query string that library code does not obfuscate. Matching by name also means
+# a coordinate is redacted at any precision, which closes case 1 without
+# loosening COORDINATE_SHAPED to three decimals and redacting every ordinary
+# duration and score in the process.
+#
+# Everything up to the next `&`, `#`, quote or whitespace is taken. Leaving the
+# name visible is deliberate: "we called Open-Meteo with a latitude" is exactly
+# the operational fact a log is for, and it is the value that must not survive.
+SENSITIVE_QUERY_KEYS = (
+    # credentials
+    "access_token",
+    "api_key",
+    "apikey",
+    "auth",
+    "key",
+    "password",
+    "secret",
+    "signature",
+    "token",
+    # position, at any precision
+    "bbox",
+    "ggscoord",
+    "lat",
+    "latitude",
+    "lon",
+    "lng",
+    "longitude",
+    "point",
+)
+
+SENSITIVE_QUERY = re.compile(
+    r"(?i)\b(" + "|".join(SENSITIVE_QUERY_KEYS) + r")=([^&#\s\"'<>]+)"
+)
+
+
 def scrub(value: Any) -> Any:
-    """Replace anything coordinate-shaped inside ``value``, at any depth."""
+    """Replace anything coordinate-shaped or credential-shaped, at any depth.
+
+    Two passes over a string, and the order matters. The query-parameter pass
+    runs first so that `?token=51.50741234` is redacted as a credential rather
+    than being half-eaten by the coordinate pass and leaving a recognisable
+    stub behind.
+    """
     if isinstance(value, str):
-        return COORDINATE_SHAPED.sub("<redacted>", value)
+        redacted = SENSITIVE_QUERY.sub(r"\1=<redacted>", value)
+        return COORDINATE_SHAPED.sub("<redacted>", redacted)
     if isinstance(value, float):
         return "<redacted>" if COORDINATE_SHAPED.fullmatch(repr(value)) else value
     if isinstance(value, tuple):
