@@ -162,6 +162,49 @@ response still carries `X-Meander-Cached-At`.
 
 ---
 
+## Deploying the API on the VM, and the two ways it lies to you
+
+```bash
+cd ~/Meander
+git status --short && git log --oneline -1     # <- do not skip this line
+git reset --hard origin/main                   # only if the line above was not clean
+docker compose -f docker-compose.yml -f compose.prod.yml build api
+docker compose -f docker-compose.yml -f compose.prod.yml up -d --force-recreate api
+```
+
+**`build` before `up`, always.** `--force-recreate` replaces the container, not
+the image, and the backend is baked into the image rather than mounted. On its
+own it restarts the old code, healthily, and reports success. BLOCKED.md §7 has
+the session where that cost an afternoon.
+
+**Check `git status` before you build, and check `HEAD` is what you mean to
+ship.** On 2026-08-26 this checkout was found with `HEAD` at `origin/main` and
+its *working tree* four commits behind, 33 files staged as a wholesale revert.
+Nothing reports that: `git log`, `git branch` and the status branch line all
+read correctly, because only the files were wrong. `git checkout <old> -- .`
+produces it, and `docker compose build` would have shipped it without a murmur.
+The image is built from this directory and nothing in the deploy path compares
+it to `HEAD`.
+
+**Recreate `caddy` only if `Caddyfile` changed** — and if it did, you must,
+because the file is a single-file bind mount. That binds the *inode*: `git pull`
+writes a new file and renames it over the old one, so the container keeps the
+one it started with and `caddy reload` cheerfully re-reads the config it already
+had. Recreating the container re-resolves the path.
+
+Then verify **over the wire**, never on an exit code:
+
+```bash
+curl -s https://meander-app.duckdns.org/healthz
+curl -s -X POST https://meander-app.duckdns.org/api/routes \
+  -H 'Content-Type: application/json' -H 'Origin: https://meander-eoc.pages.dev' \
+  -d '{"origin":{"lat":51.5074,"lon":-0.1657},"minutes":35,"mode":"foot"}' | head -c 400
+```
+
+and for the app, `node frontend/scripts/live-gate.mjs`, which is the only thing
+here that checks CORS, the CSP, the service worker and the offline open — none
+of which curl can see. 28 passed / 0 failed is the current baseline.
+
 ## Rolling back
 
 Images are tagged with the commit SHA and the ECR repositories are

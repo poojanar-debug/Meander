@@ -167,16 +167,31 @@ safe-area insets and this frontend has no `env(safe-area-inset-*)` in it at all.
 
 ### What is deployed
 
-Nothing. [`infra/`](infra/) is four CloudFormation stacks that would deploy it —
-ECS Fargate for the API and the router, CloudFront and S3 for the app, GitHub
-OIDC for CI with no stored AWS credentials — and none has been applied.
-[DEPLOY.md](DEPLOY.md) is written to be followed without guessing.
+**All six objectives are live**, on a topology that is not the one in `infra/`:
 
-What *has* run end to end is the same stack under `docker compose`: both images
-build, both containers reach healthy, and a real request returns three routes
-with real CLIP scores. [PROGRESS.md](PROGRESS.md) is the full build log,
-including the hostile self-audit and what a reviewer should still be sceptical
-about. [docs/adr/](docs/adr/) has the seven decisions worth questioning.
+| | where | how it ships |
+|---|---|---|
+| the app | [`meander-eoc.pages.dev`](https://meander-eoc.pages.dev) | Cloudflare Pages, built from `main` by the GitHub integration |
+| the API and the router | `meander-app.duckdns.org` | one VM, `docker compose` behind Caddy: `api`, `graphhopper`, `caddy` |
+
+Verified on 2026-08-26, after the preference presets landed: `POST /api/routes`
+returns real routes for `quiet`, `shade` and `air` from the public host, the
+default three are unchanged, and `frontend/scripts/live-gate.mjs` reports **28
+passed, 0 failed** against production in a real browser — CORS, CSP, the
+service worker, the offline open and a permalink among them.
+
+**The AWS path in [`infra/`](infra/) is still unapplied.** Four CloudFormation
+stacks that would deploy it — ECS Fargate for the API and the router, CloudFront
+and S3 for the app, GitHub OIDC for CI with no stored AWS credentials — and none
+has been applied; `.github/workflows/deploy.yml` has never got past assuming its
+role, because the repository has no AWS secrets set. [DEPLOY.md](DEPLOY.md) is
+written to be followed without guessing, and documents the Cloudflare path that
+is actually serving traffic alongside it.
+
+This section said "Nothing" for several sessions after that stopped being true.
+[PROGRESS.md](PROGRESS.md) is the full build log, including the hostile
+self-audit and what a reviewer should still be sceptical about.
+[docs/adr/](docs/adr/) has the seven decisions worth questioning.
 
 ### What the redesign added
 

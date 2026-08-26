@@ -12,10 +12,28 @@ cross-origin request.
 > gate table in [`infra/README.md`](infra/README.md) lists all seventeen things
 > that would have to be checked afterwards and marks every one UNVERIFIED.
 >
-> What *has* been verified end to end is the same stack under `docker compose`
-> on a laptop: both images build, both containers reach healthy, and
-> `POST /api/routes` returns three routes with real CLIP scores. That is the
-> strongest claim available without spending money.
+> What *has* been verified end to end is the same stack under `docker compose`:
+> both images build, both containers reach healthy, and `POST /api/routes`
+> returns real routes with real CLIP scores.
+
+> ## Meanwhile, something else is actually serving traffic.
+>
+> **This document is about the AWS path, which is unbuilt. It is not the
+> deployment people are using.** That one is:
+>
+> | | where | how it ships |
+> |---|---|---|
+> | the app | `meander-eoc.pages.dev` | Cloudflare Pages, built from `main` by the GitHub integration — merging to `main` deploys it |
+> | the API and the router | `meander-app.duckdns.org` | one VM, `docker compose` behind Caddy: `api`, `graphhopper`, `caddy` |
+>
+> Its procedure lives in [`docs/RUNBOOK.md`](docs/RUNBOOK.md) under "Deploying
+> the API on the VM", because it is an operational routine rather than a
+> first-time build. Read it before running anything against that box: two of its
+> commands report success while changing nothing, and a third would have shipped
+> a four-commit-old backend from a checkout whose `git log` read correctly.
+>
+> The sections below on **CORS**, **preview deployments** and **rolling back**
+> apply to both topologies and are the ones worth reading either way.
 
 The old two-host deployment — Render for the API, Vercel for the frontend — is
 in [`docs/legacy/`](docs/legacy/) with its own notes. It worked and it was
