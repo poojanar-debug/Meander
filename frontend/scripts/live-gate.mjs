@@ -359,7 +359,7 @@ if (chunks.length && responseAt !== null) {
       `the server replayed a cached route (${chunks.length} chunks in ${spread.toFixed(2)}s) — ` +
         'too fast to distinguish from buffering. Re-run against an uncached origin to grade this.',
     )
-  } else if (chunks.length === 1 && ttfb < 0.25) {
+  } else if (ttfb < 0.25) {
     // **The same reasoning as the cached branch, keyed on the condition rather
     // than on one of its causes.** That branch says chunk count "cannot
     // distinguish a fast replay from buffering", and it is right — but a cache
@@ -367,6 +367,20 @@ if (chunks.length && responseAt !== null) {
     // a warm self-hosted graph does it too: measured here at 74,727 bytes in a
     // single `Network.dataReceived`, on a deployment whose streaming was
     // demonstrably fine.
+    //
+    // ⚠ **This condition said `chunks.length === 1 && ttfb < 0.25` and was the
+    // very mistake the paragraph above warns about, one level down.** Chunk
+    // count is a cause; arriving too fast to grade is the condition. Measured
+    // on 2026-08-26 against production: Chrome coalesced a 0.01 s first byte
+    // into *two* `Network.dataReceived` events rather than one, the run fell
+    // through to the graded branch, and `spread > 0.25` failed a deployment
+    // whose streaming was fine — 2 chunks, 25,074 bytes, whole answer 0.19 s
+    // after the headers. Two events instead of one is a paint boundary, not a
+    // fact about the server.
+    //
+    // So the gate keys on the first-byte time alone. Below 0.25 s nothing
+    // about the chunking is informative, whether Chrome delivered it in one
+    // event or five.
     //
     // Demonstrably, because it was checked another way rather than assumed.
     // `curl -sN --no-buffer` against the same public origin, with the route
@@ -382,7 +396,7 @@ if (chunks.length && responseAt !== null) {
     skip(
       'SSE arrived in more than one chunk',
       `the whole answer arrived ${ttfb.toFixed(2)}s after the headers ` +
-        `(${chunks.length} chunk, ${bytes} bytes) — too fast for chunk count to ` +
+        `(${chunks.length} chunk(s), ${bytes} bytes) — too fast for chunk count to ` +
         'distinguish streaming from buffering. See the note in this file.',
     )
     skip(
