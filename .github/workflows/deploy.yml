@@ -140,10 +140,28 @@ jobs:
         run: |
           set -euo pipefail
           SITE="${{ secrets.SITE_URL }}"
-          curl -fsS "$SITE/api/healthz" | tee /dev/stderr | grep -q '"status":"ok"'
+          # /healthz, not /api/healthz. There has never been an /api/healthz:
+          # backend/main.py mounts the liveness probe unprefixed at /healthz
+          # (:1883) and /readyz (:1895), and only the three working endpoints
+          # plus the rich diagnostic carry the /api prefix. This line would
+          # have 404'd under any topology, and could not be found out because
+          # the job has never reached this step — see the note below.
+          curl -fsS "$SITE/healthz" | tee /dev/stderr | grep -q '"status":"ok"'
           # Not just 200. This asserts the deployed instance is configured the
           # way the task definition claims: without self_hosted the accessible
           # preset silently stops excluding impassable surfaces, and nothing
           # else in the response would tell you.
+          #
+          # ⚠ **Confirm /api/health is reachable here before trusting these two,
+          # and think about whether it should be.** On the VM deployment it is
+          # deliberately NOT public: the Caddyfile allowlists exactly
+          # /api/routes, /api/geocode, /api/report-barrier and /healthz, and
+          # default-denies the rest, with a long argument for why /api/health
+          # and /metrics are firewalled — it publishes the router's identity and
+          # which keys are set. If CloudFront fronts the API without the same
+          # allowlist, these two curls will pass by exposing the diagnostic to
+          # the internet, which is the thing that file spent sixty lines
+          # refusing. The check is worth keeping; reaching it from inside, or
+          # through an authenticated path, is the part to settle first.
           curl -fsS "$SITE/api/health" | jq -e '.routing.self_hosted == true' >/dev/null
           curl -fsS "$SITE/api/health" | jq -e '.routing.self_hosted_source == "env"' >/dev/null

@@ -4645,6 +4645,12 @@ and failed a `spread > 0.25` threshold it was never meant to face. A buffered
 response cannot deliver its first byte in 0.01s; the deployment is fine and the
 condition wants to be the first-byte time alone.
 
+**Fixed in the same session, so the record and the gate do not disagree.** The
+branch now reads `else if (ttfb < 0.25)`: below a quarter-second first byte
+nothing about the chunking is informative, whether Chrome delivered it in one
+event or five. Re-run against production afterwards to confirm it, rather than
+reasoning that it must now pass.
+
 ## The AWS deploy workflow has never been configured
 
 Worth recording where the next person will look, because nothing else says so.
@@ -4666,13 +4672,25 @@ Nothing about it is caused by this change: in that same run the backend tests,
 step. The live site is Cloudflare Pages, which is what `_headers`, `DEPLOY.md`
 and the deployed origin all point at.
 
-One thing to check when the AWS path is wired, rather than discovering it then:
-the workflow's `Prove it is actually serving` step curls `$SITE/api/healthz`,
-and on the API host today that path is a **404**. Health is served unprefixed —
-`GET /healthz` returns `{"status":"ok","version":"0.1.0"}` — while `/api/routes`
-answers 405 to a GET, so the route exists and only the health path differs.
-Whether CloudFront would rewrite the prefix is exactly the assumption that step
-is making.
+Its `Prove it is actually serving` step also curls a path that does not exist.
+**There has never been an `/api/healthz`**: `main.py` mounts the liveness probe
+unprefixed at `/healthz` (:1883) and `/readyz` (:1895), and only the three
+working endpoints plus the rich diagnostic carry the `/api` prefix. That line
+would 404 under any topology, and nobody could find out because the job has
+never reached the step. Fixed to `/healthz`.
+
+The same step's other two curls hit `/api/health`, and that one is a design
+question rather than a typo. On the VM it is deliberately not public: the
+Caddyfile allowlists exactly `/api/routes`, `/api/geocode`,
+`/api/report-barrier` and `/healthz`, default-denies the rest, and spends sixty
+lines on why `/api/health` and `/metrics` are firewalled — including a verified
+bypass, `GET /api/health%0a`, which defeats a `not path` exclusion because
+Starlette's compiled `$` also matches before a trailing newline. So the live
+404s on `/api/health` and `/readyz` are the allowlist working, not a gap. If
+CloudFront ever fronts the API without the same rule, those two curls would
+pass by publishing the diagnostic to the internet. The check is worth keeping;
+where it runs from is the part to settle. Left in place with the hazard written
+beside it rather than quietly deleted.
 
 **Live API calls:** the live gate's, and the health probes above. The API half
 was untouched: this change is frontend-only and moved no wire field.
