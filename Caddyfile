@@ -62,6 +62,7 @@ meander-app.duckdns.org {
 	# registers by itself and nothing in backend/ turns off:
 	#
 	#   /api/routes  /api/geocode  /api/report-barrier              ← wanted
+	#   /api/photos  /api/photo/*                                   ← wanted
 	#   /healthz                                                    ← wanted
 	#   /api/health  /readyz      /metrics                          ← not
 	#   /docs        /docs/oauth2-redirect   /redoc   /openapi.json ← not
@@ -124,7 +125,15 @@ meander-app.duckdns.org {
 	# An allowlist of literals has neither problem: an unlisted spelling matches
 	# nothing and falls to the deny below. The cost is that a new public endpoint
 	# needs a line here, which is the intended cost.
-	@public path /api/routes /api/geocode /api/report-barrier /healthz
+	# /api/photo/* is the one wildcard here, and it is a path segment rather
+	# than a namespace. The route is GET /api/photo/{ref} where ref is an
+	# opaque signed reference to one upstream image URL, so there is no fixed
+	# literal to list. It is not the `/api/*` mistake argued against above:
+	# `/api/photo/` is a single endpoint whose last segment is an argument,
+	# and a route added in future still does not ship public without a line
+	# here. `/api/photos` (plural, the metadata POST) is a separate literal —
+	# they are two endpoints, and neither spelling matches the other's rule.
+	@public path /api/routes /api/geocode /api/report-barrier /api/photos /api/photo/* /healthz
 
 	handle @public {
 		# 64 KB, matching the app's own ceiling. The app enforces that from the

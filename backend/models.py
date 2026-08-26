@@ -344,3 +344,166 @@ def effective_mode(mode: Mode, minutes: int, straight_line_m: float | None = Non
     if straight_line_m is not None:
         return derive_mode_for_distance(straight_line_m)
     return derive_mode(minutes)
+
+
+# ---------------------------------------------------------------------------
+# route photos
+# ---------------------------------------------------------------------------
+#
+# Appended rather than woven into the models above, because a photo is not part
+# of a route: /api/routes never carries one. The frontend asks for photos in a
+# second call once the user has picked a route, so that a slow or unreachable
+# image host cannot delay the thing the user actually asked for.
+
+PhotoSource = Literal["wikimedia_commons", "mapillary"]
+
+# How the hero photo was picked. This is a claim about *method*, and it exists
+# because the alternative is a caption that makes a claim about the world.
+#
+# The distinction is the whole of the accessibility-tagging discipline applied
+# to imagery. "The greenest point on this route" is a measurement, and nothing
+# in this codebase measures greenery point by point: `Scores` is one number for
+# a whole route, and the per-way tag spans that produce it are consumed inside
+# `main._scored_route` and never reach `Route`. So that caption cannot be
+# written honestly, and the type refuses to let anyone write it by accident.
+#
+#   first_barrier      The first obstruction on the route, by distance along
+#                      it. Measured: `Route.blockers` carries real coordinates
+#                      from the Overpass barrier query.
+#   midpoint           Halfway along the route by distance. Measured, in the
+#                      sense that a midpoint is arithmetic rather than a claim.
+#   most_photographed  The anchor point that Wikimedia Commons holds the most
+#                      photographs near. A measurement of Commons, not of the
+#                      route, and the copy says so.
+#   sampled            An evenly spaced point with no property behind the
+#                      choice. The honest fallback.
+#   none               No photo was found at all.
+HeroBasis = Literal["first_barrier", "midpoint", "most_photographed", "sampled", "none"]
+
+# Upper bound on the geometry a photo request may carry. A 6-hour drive can run
+# to several thousand vertices, and this endpoint only needs the *shape* of the
+# route in order to place a handful of anchor points on it, so the frontend is
+# free to thin the line before sending it. 800 vertices is roughly 18 KB of
+# JSON, comfortably inside main.MAX_BODY_BYTES.
+MAX_PHOTO_GEOMETRY_POINTS = 800
+
+
+class Photo(BaseModel):
+    """One image, with everything needed to display it lawfully.
+
+    ``licence`` is not optional and has no default. Both source licences
+    (CC BY-SA for Mapillary, whatever `extmetadata` reports for Commons)
+    require attribution, so an image whose licence could not be determined is
+    dropped in photos.py rather than shown uncredited. Making the field
+    required is what stops a later refactor reintroducing that: there is no
+    way to construct a Photo that does not say what it is licensed under.
+    """
+
+    # Opaque and origin-relative. See `url`.
+    id: str
+    # **A path on this service, never an upstream URL.** The reason the backend
+    # proxies at all is that the image host must see this server and not the
+    # user, and returning a upload.wikimedia.org or scontent-*.xx.fbcdn.net URL
+    # here would hand the browser the job of contacting it, which is precisely
+    # what was being avoided. It is `/api/photo/<ref>`, where ref is a signed
+    # reference that only /api/photo can decode.
+    url: str
+    source: PhotoSource
+    # Where the photograph is, when the source says. Wikimedia Commons carries
+    # a coordinate per file and Mapillary carries one per frame, so this is
+    # normally the picture's own position. It falls back to the anchor point on
+    # the route when a file has no coordinate of its own, which for a Commons
+    # geosearch result is rare but possible: geosearch can match on a coordinate
+    # the API then declines to return.
+    lat: float
+    lon: float
+    # Distance along the route, in metres, of the anchor point this photo was
+    # found near. The strip is ordered by it.
+    at_m: float
+    width: int | None = None
+    height: int | None = None
+    title: str | None = None
+    licence: str
+    licence_url: str | None = None
+    author: str | None = None
+    # The credit line, already assembled. Rendered verbatim, so the frontend
+    # cannot get the attribution wrong by reassembling the parts differently.
+    attribution: str
+    # Where a reader can go to check the licence and the author for themselves.
+    # An attribution nobody can verify is decoration.
+    source_page: str | None = None
+    captured_at: str | None = None
+
+
+class PhotosRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    # GeoJSON order, `[[lon, lat], ...]`, exactly as `Route.geometry` carries
+    # it. The frontend can therefore pass a route's geometry straight through
+    # without a conversion, and there is no second place in the codebase where
+    # the lon/lat ordering can be got wrong.
+    geometry: list[list[float]]
+    # Which route this is. It decides the hero, and nothing else.
+    objective: RouteId = "fastest"
+    # Passed through from `Route.blockers` so that the `accessible` hero can be
+    # a photo of the thing that actually blocks the route.
+    #
+    # Optional, and the difference between empty and absent is not modelled
+    # here on purpose: this endpoint never reports "no barriers on this route",
+    # it only picks a photo, so an empty list simply means it has no barrier to
+    # aim at and falls back to an evenly spaced point.
+    blockers: list[Blocker] = Field(default_factory=list)
+
+    @field_validator("geometry")
+    @classmethod
+    def _usable_line(cls, v: list[list[float]]) -> list[list[float]]:
+        if len(v) < 2:
+            raise ValueError("geometry needs at least two points")
+        if len(v) > MAX_PHOTO_GEOMETRY_POINTS:
+            raise ValueError(
+                f"geometry has more than {MAX_PHOTO_GEOMETRY_POINTS} points; "
+                "thin the line before sending it"
+            )
+        for pair in v:
+            if len(pair) != 2:
+                raise ValueError("each geometry entry must be [lon, lat]")
+            lon, lat = pair
+            if not (-180.0 <= lon <= 180.0) or not (-90.0 <= lat <= 90.0):
+                raise ValueError("each geometry entry must be [lon, lat] in degrees")
+        return v
+
+
+class PhotosResponse(BaseModel):
+    """Photos along one route.
+
+    Every field that could be mistaken for a measurement is paired with one
+    that says whether it is. ``hero_basis`` and ``objective_measured`` are that
+    pair, and they are the reason this response is honest about the fact that
+    per-segment greenery, shade and quiet do not exist anywhere in this
+    codebase to choose a hero from.
+    """
+
+    # Null when nothing was found or every source was unreachable. The two are
+    # distinguished by `sources_used`: empty means nobody answered.
+    hero: Photo | None = None
+    # Three to five more, ordered by distance along the route.
+    strip: list[Photo] = Field(default_factory=list)
+    hero_basis: HeroBasis = "none"
+    # One sentence, rendered verbatim as the hero's caption. It states the
+    # method, never a property of the place.
+    hero_reason: str = ""
+    # **True only when the hero was chosen by something that measures what this
+    # route was optimised for.** False for scenic, shade, quiet and air, which
+    # have no per-segment data behind them. The UI must not present the hero as
+    # "the shadiest spot" when this is false.
+    objective_measured: bool = False
+    # Which sources actually answered. An empty list means neither did, which is
+    # a different thing from both answering with nothing.
+    sources_used: list[PhotoSource] = Field(default_factory=list)
+    # False when MAPILLARY_TOKEN is unset. Commons-only results are the normal
+    # keyless configuration, not a failure, and this says so without the
+    # frontend having to guess from an empty `sources_used`.
+    mapillary_enabled: bool = False
+    # Said out loud when something is worth saying, null otherwise. Rendered
+    # verbatim.
+    note: str | None = None

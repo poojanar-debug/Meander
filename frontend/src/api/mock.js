@@ -580,3 +580,35 @@ export async function mockReportBarrier(report, { signal } = {}) {
   }
   return { note_id: 4471 }
 }
+
+/**
+ * Photos, mocked.
+ *
+ * Returns no photos, and that is the right mock rather than a lazy one.
+ *
+ * The alternative is inventing image URLs, and every one of them would either
+ * be a real remote image — which makes the offline suite and the offline gate
+ * open a socket, the one thing this project checks with `unshare -n` — or a
+ * data URI of a fake photograph, which would put a fabricated picture of a
+ * place on a screen that is otherwise scrupulous about never showing invented
+ * data. `Ribbon` exists precisely because synthetic route geometry has to
+ * announce itself; a synthetic photograph could not.
+ *
+ * So the mock exercises the empty path, which is also the commonest real one:
+ * most of the world has no Commons photo within the search radius, and the UI
+ * has to be correct when there is nothing to show. The shape matches the real
+ * response so the caller cannot tell the difference.
+ */
+export async function mockFetchPhotos(_body, { signal } = {}) {
+  await sleep(180, signal)
+  return {
+    hero: null,
+    strip: [],
+    hero_basis: null,
+    hero_reason: null,
+    objective_measured: false,
+    sources_used: [],
+    mapillary_enabled: false,
+    note: null,
+  }
+}

@@ -7,6 +7,7 @@ disk, and no default value is ever a real key.
 from __future__ import annotations
 
 import os
+import secrets
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Literal
@@ -102,6 +103,11 @@ OPEN_METEO_URL = "https://api.open-meteo.com/v1/forecast"
 OPEN_METEO_AQ_URL = "https://air-quality-api.open-meteo.com/v1/air-quality"
 NOMINATIM_URL = "https://nominatim.openstreetmap.org/search"
 OSM_DEV_API_URL = "https://api06.dev.openstreetmap.org/api/0.6"
+# The MediaWiki API on Wikimedia Commons, used by photos.py for geosearch. No
+# key and no account: `action=query&generator=geosearch` answers anonymously,
+# which is why it is the source that always works and Mapillary is the one that
+# is allowed to be absent.
+WIKIMEDIA_COMMONS_API_URL = "https://commons.wikimedia.org/w/api.php"
 
 SERVICE_HOSTS: dict[str, str] = {
     "graphhopper.com": "graphhopper",
@@ -112,6 +118,18 @@ SERVICE_HOSTS: dict[str, str] = {
     "nominatim.openstreetmap.org": "nominatim",
     "api.anthropic.com": "anthropic",
     "api06.dev.openstreetmap.org": "osm_dev",
+    "commons.wikimedia.org": "wikimedia_commons",
+    # Where Commons actually serves the pixels from. It is a separate budget
+    # line from the API above because the two have wildly different call
+    # counts: one geosearch produces up to a dozen thumbnails, and metering
+    # them together would make the API's cap meaningless.
+    #
+    # Mapillary's thumbnails have no entry here and cannot have one. They come
+    # from rotating `scontent-*.xx.fbcdn.net` hostnames, so photos.py passes
+    # `service="mapillary_images"` explicitly at the call site rather than
+    # letting `service_for_url` invent a new directory (and a zero cap) for
+    # every CDN edge that answers.
+    "upload.wikimedia.org": "wikimedia_images",
 }
 
 def _env_flag(name: str, default: bool = False) -> bool:
@@ -170,6 +188,19 @@ _DEV_LIVE_CALL_BUDGET: dict[str, int] = {
     "open_meteo": 100,
     "nominatim": 40,
     "osm_dev": 20,
+    # Route photos. The geosearch caps are per *anchor point* along a route and
+    # photos.py asks at most PHOTO_MAX_ANCHORS of them per request, so 150 is
+    # roughly forty route-photo requests in a recording session.
+    #
+    # The two image caps are deliberately much larger than the geosearch ones:
+    # one answered geosearch yields several thumbnails, and every one of them
+    # that the browser actually displays is a second call through
+    # /api/photo/{ref}. Sizing them equal would exhaust the image budget while
+    # the search budget still had room, which shows up as a page of broken
+    # thumbnails under a working hero.
+    "wikimedia_commons": 150,
+    "wikimedia_images": 600,
+    "mapillary_images": 600,
 }
 
 
@@ -235,6 +266,91 @@ HTTP_CONNECT_TIMEOUT_S = _env_float("MEANDER_HTTP_CONNECT_TIMEOUT_S", 5.0)
 # best-effort and degrades to null, so a partial answer is a real answer.
 # Deliberately under a typical 60 s proxy idle timeout.
 REQUEST_DEADLINE_S = _env_float("MEANDER_REQUEST_DEADLINE_S", 45.0)
+
+# ---------------------------------------------------------------------------
+# route photos
+# ---------------------------------------------------------------------------
+#
+# The whole point of the photos feature is that **the image host sees this
+# server and never the user**, so every number below is a limit on what this
+# server will do on a stranger's behalf. /api/photo/{ref} is a proxy, and a
+# proxy without limits is somebody else's bandwidth.
+
+# How many places along a route are asked about. Each anchor costs one Commons
+# geosearch and, when a token exists, one Mapillary bbox query, so this is the
+# multiplier on every upstream number in this feature. Ten calls is the same
+# order as one uncached /api/routes, and they are all issued together.
+#
+# **Odd on purpose.** photos.py places anchors at (i + 0.5) / n along the
+# route, so an odd n puts one of them exactly halfway and an even n does not.
+# The `fastest` hero is the midpoint, and "about halfway" reading as 37.5% of
+# the way along is the kind of quiet inaccuracy this project does not ship.
+PHOTO_MAX_ANCHORS = _env_int("MEANDER_PHOTO_MAX_ANCHORS", 5)
+
+# How far from an anchor point a photo may be and still count as "along this
+# route". 400 m is about five minutes' walk, which is the distance at which a
+# photo stops being of somewhere you pass and starts being of somewhere else.
+PHOTO_SEARCH_RADIUS_M = _env_int("MEANDER_PHOTO_SEARCH_RADIUS_M", 400)
+
+# Ceiling on one proxied image, in bytes.
+#
+# The thumbnails asked for are 640 px (Commons) and 1024 px (Mapillary), which
+# measure in the low hundreds of kilobytes. 5 MB is therefore not a working
+# limit, it is a refusal: anything this large is not the thumbnail that was
+# asked for, and streaming it would mean this service is being used to move
+# somebody else's file.
+#
+# fixtures.MAX_RESPONSE_BYTES (32 MB) is the memory bound that actually stops a
+# hostile body mid-flight. This is the policy limit applied to what arrives.
+PHOTO_MAX_IMAGE_BYTES = _env_int("MEANDER_PHOTO_MAX_IMAGE_BYTES", 5 * 1024 * 1024)
+
+# Cache-Control max-age on a proxied image. A day, and `immutable`: the
+# reference in the URL pins one exact upstream URL, so the bytes behind a given
+# /api/photo/{ref} cannot change without the reference changing too.
+PHOTO_CACHE_MAX_AGE_S = _env_int("MEANDER_PHOTO_CACHE_MAX_AGE_S", 24 * 60 * 60)
+
+# Token bucket for /api/photo/{ref}, which needs its own and cannot share the
+# route one.
+#
+# One route view asks for up to six images at once against a route bucket whose
+# whole capacity is twelve, so putting images on that bucket would empty it
+# before the user picked a second route. This is the same lesson place search
+# already taught (see geocode_bucket_capacity): an endpoint whose natural unit
+# is "several per interaction" cannot share a bucket with one whose unit is
+# "one per interaction".
+PHOTO_BUCKET_CAPACITY = _env_int("MEANDER_PHOTO_RATE_CAPACITY", 60)
+PHOTO_REFILL_PER_MIN = _env_float("MEANDER_PHOTO_RATE_REFILL_PER_MIN", 60.0)
+
+
+def _photo_signing_key() -> bytes:
+    """Key for the HMAC on an image reference.
+
+    **Not a secret in the sense a credential is.** Forging a reference buys an
+    attacker nothing that the host allowlist in photos.py does not already
+    refuse: the decoded URL is checked against exactly two upstreams whatever
+    the signature says. The HMAC is the second lock, not the only one, and it is
+    here so that a reference cannot be edited into a *different* URL on those
+    hosts (a 200 MB media file on upload.wikimedia.org is still on the
+    allowlist).
+
+    Unset, it is generated per process. That is the right default for a single
+    uvicorn worker, which is what this service runs: references stay valid for
+    the life of the process and are invalidated by a restart, which shows up as
+    a photo that fails to load and is then refetched by the next /api/photos
+    call.
+
+    **Set MEANDER_PHOTO_SIGNING_KEY when running more than one worker or more
+    than one instance.** Without it each worker mints references the others
+    reject, so roughly (n-1)/n of image loads 404 at random, which looks like a
+    flaky CDN rather than a configuration error.
+    """
+    configured = (os.environ.get("MEANDER_PHOTO_SIGNING_KEY") or "").strip()
+    if configured:
+        return configured.encode("utf-8")
+    return secrets.token_bytes(32)
+
+
+PHOTO_SIGNING_KEY: bytes = _photo_signing_key()
 
 # How many proxies of *your own* sit in front of this service.
 #

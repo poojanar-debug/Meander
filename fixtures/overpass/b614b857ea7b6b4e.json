@@ -1,6 +1,6 @@
 {
   "_meander_provenance": "recorded",
-  "_meander_recorded_at": "2026-08-11T08:49:21.238776+00:00",
+  "_meander_recorded_at": "2026-08-26T17:09:47.341583+00:00",
   "_meander_note": "Written by backend/fixtures.py. Secrets are redacted and excluded from the request signature.",
   "request": {
     "method": "POST",
@@ -8,7 +8,7 @@
     "params": {},
     "json": null,
     "data": {
-      "data": "[out:json][timeout:25];node[\"amenity\"~\"^(bench|drinking_water|toilets|shelter)$\"](6.91390,79.84707,6.93473,79.86236);out body 6000;"
+      "data": "[out:json][timeout:25];(node[\"amenity\"~\"^(bench|drinking_water|toilets|shelter)$\"](6.91390,79.84707,6.93473,79.86236);node[\"tourism\"~\"^(viewpoint)$\"](6.91390,79.84707,6.93473,79.86236););out body 6000;"
     },
     "content": null,
     "headers": {
@@ -18,14 +18,14 @@
   "response": {
     "status": 200,
     "headers": {
-      "date": "Tue, 11 Aug 2026 08:49:18 GMT",
+      "date": "Wed, 26 Aug 2026 17:09:47 GMT",
       "content-type": "application/json"
     },
     "json": {
       "version": 0.6,
       "generator": "Overpass API 0.7.62.11 87bfad18",
       "osm3s": {
-        "timestamp_osm_base": "2026-08-11T08:48:05Z",
+        "timestamp_osm_base": "2026-08-26T17:08:24Z",
         "copyright": "The data included in this document is from www.openstreetmap.org. The data is made available under ODbL."
       },
       "elements": [
@@ -55,6 +55,18 @@
           "lon": 79.8534631,
           "tags": {
             "amenity": "bench"
+          }
+        },
+        {
+          "type": "node",
+          "id": 3307527165,
+          "lat": 6.9270265,
+          "lon": 79.8583147,
+          "tags": {
+            "access": "no",
+            "name:en": "Lotus Tower",
+            "note": "not open to the public yet",
+            "tourism": "viewpoint"
           }
         },
         {
@@ -123,6 +135,15 @@
         },
         {
           "type": "node",
+          "id": 9691453341,
+          "lat": 6.9177039,
+          "lon": 79.8505598,
+          "tags": {
+            "tourism": "viewpoint"
+          }
+        },
+        {
+          "type": "node",
           "id": 10137867366,
           "lat": 6.9184744,
           "lon": 79.8511613,
@@ -141,6 +162,16 @@
             "amenity": "bench",
             "backrest": "no",
             "material": "wood"
+          }
+        },
+        {
+          "type": "node",
+          "id": 10137897143,
+          "lat": 6.916577,
+          "lon": 79.8527009,
+          "tags": {
+            "direction": "N",
+            "tourism": "viewpoint"
           }
         },
         {
@@ -181,6 +212,16 @@
           "lon": 79.8617309,
           "tags": {
             "amenity": "drinking_water"
+          }
+        },
+        {
+          "type": "node",
+          "id": 13233966301,
+          "lat": 6.928196,
+          "lon": 79.8599153,
+          "tags": {
+            "name": "Train Viewpoint",
+            "tourism": "viewpoint"
           }
         }
       ]

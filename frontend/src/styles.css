@@ -168,6 +168,25 @@
   --map-follow-behind: #b8b6ac; /* follow mode: the stretch already walked */
   --map-connector: #9a988e; /* off-route dashed connector back to the line */
 
+  /* -- map: the green-cover layer ------------------------------------------
+   * The same OpenFreeMap vector tiles under a second set of paint properties,
+   * so this layer costs exactly what the default costs: no new host, no CSP
+   * entry, and no tile request while following. It is the layer that shows
+   * what the scenic and shade presets are actually steering on.
+   *
+   * The move is relative, not absolute. Park gains saturation while land,
+   * road and building all step *toward* each other, so a wooded corridor
+   * reads as a shape rather than as one more colour in a street grid. Making
+   * the green louder on its own does not work — it competes.
+   *
+   * Labels keep --ink here rather than dropping to --ink-2. --ink-2 on
+   * --map-green-land is 3.9:1, which is under the 4.5 a street name someone
+   * is hunting for deserves, and the receding roads already do the job. */
+  --map-green-land: #f4f3ed;
+  --map-green-park: #b7d9a8;
+  --map-green-water: #cfe0e9;
+  --map-green-road: #faf9f5;
+
   /* -- route identity -----------------------------------------------------
    * Mirrored in lib/dash.js, where the MapLibre layers read them — a WebGL
    * paint property cannot resolve var(). dash-palette.test.js holds the two
@@ -435,13 +454,36 @@ a {
   color: inherit;
 }
 
-/* Re-centre, follow mode only, only after a gesture took the camera. */
-.map__recentre {
+/* Every map control, in one right-edge stack, in both states.
+ *
+ * Deliberately not top-right, which is where a layer switcher usually goes.
+ * In follow mode the turn banner is a full-width card at the top of the
+ * `.follow` layer, so a top-right control would sit on the distance figure —
+ * the largest thing on a screen somebody is walking by, and the one element
+ * that must never be covered.
+ *
+ * `align-items: flex-end` rather than a fixed width: the layer toggle is a
+ * 44px square and Re-centre is a wider pill, and they should share a right
+ * edge rather than a centre line.
+ *
+ * z-index 25 keeps it under `.follow` (45). That is deliberate and it works
+ * because `.follow` sets `pointer-events: none` on itself and `auto` only on
+ * its children, so the empty middle of the follow layer passes clicks
+ * straight through to these buttons. */
+.map__controls {
   position: absolute;
   z-index: 25;
   right: calc(var(--safe-right) + 16px);
   top: 50%;
   transform: translateY(-50%);
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 10px;
+}
+
+/* Re-centre, follow mode only, only after a gesture took the camera. */
+.map__recentre {
   min-width: var(--target);
   min-height: var(--target);
   display: inline-flex;
@@ -454,6 +496,120 @@ a {
   box-shadow: var(--shadow-float);
   font-weight: 600;
   font-size: 13px;
+}
+
+/* Course-up toggle, follow mode only. Pressed is the default state, so the
+ * pressed treatment has to be the calm one: a sky wash rather than the filled
+ * accent an unpressed-by-default toggle would use. A control that is loud
+ * whenever it is doing its job is a control that reads as a warning. */
+.map__compass {
+  width: var(--target);
+  height: var(--target);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--surface);
+  color: var(--ink-2);
+  border-radius: var(--r-input);
+  box-shadow: var(--shadow-float);
+}
+
+.map__compass--on {
+  background: var(--sky-wash);
+  color: var(--sky-on-wash);
+}
+
+/* ------------------------------------------------------------ layer picker */
+
+.layers {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+}
+
+.layers__toggle {
+  width: var(--target);
+  height: var(--target);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--surface);
+  color: var(--ink);
+  border-radius: var(--r-input);
+  box-shadow: var(--shadow-float);
+}
+
+/* Opens to the LEFT of its toggle, not below it.
+ *
+ * The stack is vertically centred on a full-bleed map, so a menu dropping
+ * downward has roughly half the viewport under it on a phone and is fine —
+ * until the viewport is a landscape phone at 390px tall, where it is not.
+ * Opening leftward into the map is the direction that always has room, and
+ * the map is the thing this menu is about. */
+.layers__menu {
+  position: absolute;
+  right: calc(var(--target) + 10px);
+  top: 0;
+  width: 236px;
+  display: flex;
+  flex-direction: column;
+  padding: 6px;
+  gap: 2px;
+  background: var(--surface);
+  border-radius: var(--r-card);
+  box-shadow: var(--shadow-float);
+}
+
+.layers__option {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-height: var(--target);
+  padding: 9px 10px;
+  border-radius: var(--r-chip);
+  text-align: left;
+}
+
+.layers__option:hover {
+  background: var(--hover-fill);
+}
+
+.layers__option--on {
+  background: var(--sky-wash);
+}
+
+.layers__option-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.layers__option-label {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.layers__option-tick {
+  display: inline-flex;
+  color: var(--sky-on-wash);
+}
+
+.layers__hint {
+  font-size: 11.5px;
+  line-height: 1.35;
+  color: var(--ink-2);
+}
+
+/* The satellite warning. Amber carries it for anyone who sees colour, and the
+ * sentence itself carries it for everyone else: "Fetches tiles as you move"
+ * says the whole thing without the colour. Colour is never the only channel
+ * anywhere else in this app and it is not here either. */
+.layers__hint--warn {
+  color: var(--amber-on-wash);
+  font-weight: 500;
 }
 
 /* Map markers (DOM, so they carry aria-labels). */
@@ -490,6 +646,39 @@ a {
   height: 10px;
   background: var(--ink);
   border: 3px solid var(--surface);
+}
+
+/* The next turn, drawn on the line at the corner it happens at.
+ *
+ * Mint, matching the "ahead" stretch of the followed route rather than the
+ * sky the puck is drawn in: this badge belongs to the road in front of you,
+ * not to you. A 30px disc so the glyph inside clears the line beneath it —
+ * `follow-ahead` is an 11px stroke and a smaller badge sits inside it and
+ * disappears.
+ *
+ * NOT sized to the 44px target: it is a marker, not a control. Nothing here
+ * is clickable and nothing is focusable, and the same instruction is in the
+ * banner as real text with a real glyph. The 44px sweep in the gate reads
+ * interactive elements, so this is outside its scope by construction rather
+ * than by exemption. */
+.marker--turn {
+  width: 30px;
+  height: 30px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--mint-deep);
+  color: var(--on-dark);
+  border: 2.5px solid var(--surface);
+  box-shadow: var(--shadow-card);
+}
+
+/* ManoeuvreIcon sizes itself in em and strokes currentColor, so the glyph is
+ * whatever this rule says it is. 17px inside a 30px disc leaves the arrow room
+ * to read at arm's length on a phone in daylight. */
+.marker__turn-glyph {
+  width: 17px;
+  height: 17px;
 }
 
 /* --------------------------------------------------------------- ribbon */
@@ -2418,13 +2607,29 @@ a {
 
 /* The provenance line, centered above the dock. `margin-top: auto` is what
  * pushes it and the dock to the foot of the column. */
+/* `white-space: nowrap` was here and had to go.
+ *
+ * It was safe while there was one sentence, 59 characters, which fits one line
+ * of 9px mono inside 390px. There are two now, and the satellite one is longer
+ * because it has more to say: it was rendering clipped at both edges on a
+ * phone, which is the worst possible failure for a line whose entire job is to
+ * disclose something. Caught on a screenshot, not by the gate — the overflow
+ * check measures scrollWidth against clientWidth, and text clipped by nowrap
+ * does not scroll the document, so it passed at 390 vs 390 while being
+ * unreadable.
+ *
+ * Wrapping costs nothing here: the layer is a flex column with `margin: auto`
+ * above this line, so a second line is absorbed by the gap in the middle
+ * rather than pushing the dock off the screen. */
 .follow__provenance {
   margin: auto 0 0;
   align-self: center;
+  max-width: 100%;
+  text-align: center;
   font-size: 9px;
+  line-height: 1.4;
   color: var(--ink);
   opacity: 0.7;
-  white-space: nowrap;
   order: 8;
 }
 
@@ -2700,4 +2905,198 @@ a {
   .printsheet {
     display: block;
   }
+}
+
+/* The provenance line, when the chosen basemap is fetching tiles as the walker
+ * moves. Amber rather than the ordinary muted grey, because it has stopped
+ * being a reassurance and become a disclosure — and the two should not look
+ * alike at a glance on a screen someone is walking with. The sentence carries
+ * the meaning without the colour, as everywhere else in this app. */
+.follow__provenance--warn {
+  color: var(--amber-on-wash);
+}
+
+/* --------------------------------------------------- amenities on the route */
+
+/* The glyph in an amenity pill. Inherits the pill's colour, so it is the mint
+ * the pill already is, and there is no second colour to keep in step. */
+.rests__glyph {
+  display: inline-flex;
+  align-items: center;
+}
+
+/* A viewpoint is not a rest stop and does not look like one.
+ *
+ * The other four are facilities: somewhere to sit, drink, shelter. A viewpoint
+ * is a reason to take the route at all, and it reaches the frontend from
+ * `tourism=viewpoint` rather than `amenity=*`. Amber rather than mint, so the
+ * one entry in the list that is worth a detour is the one that catches the eye
+ * — and the word "Viewpoint" carries it for anyone the colour does not. */
+.rests__pill--viewpoint {
+  background: var(--amber-wash);
+  color: var(--amber-on-wash);
+}
+
+/* The compact profile, in follow mode: the line and the marker, sized to a
+ * strip rather than a chart. It sits in the flex column between the barrier
+ * card and the dock, so it must not grow — the gate asserts the whole layer
+ * fits the viewport at 390x844, and a profile that claimed its natural height
+ * would push the dock off the bottom of a phone. */
+.profile--compact {
+  flex: none;
+  height: 34px;
+  padding: 6px 10px;
+  background: var(--surface);
+  border-radius: var(--r-chip);
+  box-shadow: var(--shadow-card);
+}
+
+.profile--compact .profile__svg {
+  height: 22px;
+}
+
+/* The stretch already walked, under the live line. Same token as the map's
+ * follow-behind line, so the two surfaces tell one story about what is
+ * behind you. */
+.profile__walked {
+  fill: none;
+  stroke: var(--map-follow-behind);
+  stroke-width: 4;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+/* Where you are on the climb. A rule rather than a dot: the profile SVG is
+ * drawn with preserveAspectRatio="none", so a circle is stretched into a
+ * visible ellipse and a vertical line is not distorted at all. */
+.profile__here {
+  stroke: var(--sky-deep);
+  stroke-width: 2;
+}
+
+/* The next amenity ahead. Deliberately quieter than .follow__barrier: a bench
+ * is information and a barrier is a warning, and a walker glancing down has to
+ * be able to tell them apart before reading either. No role="alert" for the
+ * same reason. */
+.follow__amenity {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  align-self: flex-start;
+  margin: 0;
+  padding: 8px 14px;
+  background: var(--mint-wash);
+  color: var(--mint-on-wash);
+  border-radius: var(--r-pill);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.follow__amenity-glyph {
+  display: inline-flex;
+}
+
+/* ------------------------------------------------------ photos on the route */
+
+/* What the route looks like. Below the measured half of the detail sheet, and
+ * absent entirely when there is nothing to show — which outside a city centre
+ * is most of the time, because Commons and Mapillary coverage is thin. */
+.photos {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.photos__hero {
+  margin: 0;
+  border-radius: var(--r-card);
+  overflow: hidden;
+  background: var(--input-fill);
+}
+
+/* A fixed aspect box rather than the image's own height.
+ *
+ * Commons returns whatever shape the photographer shot, portrait included, and
+ * a 3:4 photograph at full width pushes everything below it off a phone.
+ * `object-fit: cover` crops rather than letterboxes: a letterboxed photo in a
+ * sheet reads as a broken image, and nothing here depends on seeing the whole
+ * frame. */
+.photos__hero-img {
+  display: block;
+  width: 100%;
+  aspect-ratio: 16 / 10;
+  object-fit: cover;
+  background: var(--input-fill);
+}
+
+.photos__caption {
+  margin: 0;
+  padding: 8px 12px 10px;
+  font-size: 12.5px;
+  color: var(--ink-2);
+}
+
+/* Horizontal, and it scrolls rather than wrapping: a wrapping grid of
+ * thumbnails changes the sheet's height as images arrive, under a thumb that
+ * is already scrolling it. */
+.photos__strip {
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  list-style: none;
+  margin: 0;
+  padding: 0 0 4px;
+  scroll-snap-type: x proximity;
+}
+
+.photos__strip-item {
+  flex: none;
+  scroll-snap-align: start;
+}
+
+.photos__thumb {
+  width: 132px;
+  margin: 0;
+}
+
+.photos__thumb-img {
+  display: block;
+  width: 132px;
+  height: 88px;
+  object-fit: cover;
+  border-radius: var(--r-chip);
+  background: var(--input-fill);
+}
+
+.photos__thumb-caption {
+  display: block;
+  padding-top: 4px;
+  font-size: 10.5px;
+  color: var(--ink-2);
+}
+
+/* The credit line. Small, but never smaller than this and never hidden: it is
+ * a licence condition on somebody else's photograph, not a caption that can be
+ * trimmed for layout. */
+.photos__credit {
+  margin: 2px 0 0;
+  font-size: 10.5px;
+  line-height: 1.35;
+  color: var(--ink-3);
+}
+
+.photos__credit a {
+  color: inherit;
+}
+
+/* The sentence that keeps the hero from being read as a measurement. Present
+ * whenever the backend reports the anchor was not measured, which for the
+ * scenic, shade, quiet and clean-air presets is always: their scores reach the
+ * wire as one number per route, and there is no per-segment greenery for a
+ * photograph to be anchored to. */
+.photos__note {
+  margin: 0;
+  font-size: 11.5px;
+  line-height: 1.4;
+  color: var(--ink-2);
 }

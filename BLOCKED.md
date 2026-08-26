@@ -2,10 +2,12 @@
 
 Things this run could not finish, what was tried, and what needs a human.
 
-**Four entries are open — §5, a deliberate deferral with a list; §6, which
-needs one credential only a human can supply; and §10 and §11, both found by
-agents attacking the fix for §9 rather than reviewing it, and both needing a
-decision about the privacy surface rather than a patch.**
+**Six entries are open — §5, a deliberate deferral with a list; §6, which needs
+one credential only a human can supply; §10 and §11, both found by agents
+attacking the fix for §9 rather than reviewing it, and both needing a decision
+about the privacy surface rather than a patch; §13, a free registration that
+also only a human can do and that the satellite basemap is shipping without; and
+§14, a second line of defence that this environment could not exercise.**
 
 | | |
 |---|---|
@@ -21,6 +23,9 @@ decision about the privacy surface rather than a patch.**
 | §9 the address bar freezes on the search before a geolocated one | **resolved** — the refusal now clears the bar instead of declining to touch it, and the key rounds so a device fix can replay at all |
 | §10 the grid is calibrated for a precision this app does not ask for | **open** — `enableHighAccuracy: false` returns tens of metres, not fractions; ~53% replay at σ = 8 m. Three fixes, all of them privacy decisions |
 | §11 a geolocated search only replays with the controls at their defaults | **open** — an empty address bar carries no minutes or mode, so the reload rebuilds a different request |
+| §12 four findings from the review round were left unfixed | **resolved** — all four; see the entry |
+| §13 the satellite basemap has no ArcGIS Developer account | **open** — three of Esri's four conditions are met; the fourth is a free registration only a person can complete |
+| §14 `make test-sandboxed` could not run here | **open, and small** — `unshare -n` returns "Operation not permitted" in this environment. The in-suite socket guard still passed; the second line of defence went unexercised |
 
 ---
 
@@ -1028,3 +1033,112 @@ is cache-first, so a persisted Chrome profile served the *previous* build's
 shell and the probe compared a build against itself. A fresh profile and
 `Network.setBypassServiceWorker` fixed it — and it is a fair demonstration of
 why the worker's version had to start tracking contents rather than filenames.
+
+---
+
+# The map-layers run
+
+Same convention as "The iOS run" above: a divider for the round of work these
+entries came out of, not a change of subject.
+
+## 13 · The satellite basemap has no ArcGIS Developer account — OPEN
+
+**What is blocked:** nothing, functionally. The layer works. What is unresolved
+is whether it is licensed, and that is worse than a broken feature, because a
+broken feature announces itself.
+
+`frontend/src/lib/basemap.js` fetches Esri's World Imagery from
+
+```
+https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}
+```
+
+which is keyless. **Keyless is not the same as licensed**, and that distinction
+is the whole of this entry. Esri's published guidance permits unrestricted
+keyless use for OpenStreetMap *tracing and editing*; embedding the imagery in a
+third-party application is a different case, and for that Esri asks for four
+things **together**:
+
+| condition | status | who can satisfy it |
+|---|---|---|
+| a free ArcGIS Developer account | **not done** | a person, at https://developers.arcgis.com. Nothing in this repository can do it |
+| no revenue generation | met | the project takes none |
+| under 1,000,000 tiles a month | met, with room | the raster source is added **lazily** on first selection, so a visitor who never opens the layer menu makes no request to that origin at all |
+| attribution | met | the service's own `copyrightText`, read from `?f=json` and reproduced verbatim, rendered in the map footer beside OpenStreetMap's — the labels over the imagery are still OSM's, so both credits are owed |
+
+Three of four, and the fourth is a registration rather than a payment. It was
+not done because it needs a human with an email address, which is the same shape
+as §6.
+
+### What was considered
+
+**Ship it and say nothing.** Rejected. The whole argument of this codebase is
+that an unstated assumption is worse than a stated limitation, and a licensing
+condition is not a place to start making exceptions.
+
+**Drop the satellite layer.** Rejected for now, because the layer is genuinely
+useful for a walking app — it is the one basemap that shows whether a path
+exists — and because the condition that is unmet is the cheapest of the four to
+satisfy. If the account is refused, or if this project ever takes revenue, this
+becomes the answer rather than a fallback.
+
+**Swap to a verified alternative.** Kept ready rather than taken. EOX's
+Sentinel-2 cloudless is verified keyless, CC BY-NC-SA 4.0 and CORS-open:
+
+```
+https://tiles.maps.eox.at/wmts/1.0.0/s2cloudless-2020_3857/default/g/{z}/{y}/{x}.jpg
+EOxCloudless 2020 by EOX IT Services GmbH, contains modified Copernicus Sentinel data 2020
+```
+
+It is one line in `basemap.js` plus the matching origin in
+`frontend/public/_headers`. It is not the default because it is 10 m/pixel and
+EOX's own documentation says z13 best resembles the source resolution. Follow
+mode runs at about z17, where Sentinel-2 is an upsampled blur — for a walking
+app that is the difference between seeing the path and seeing a green smear. A
+worse map that is unambiguously licensed is a real option; it is just not a free
+one.
+
+### What a human should do
+
+Register the free account at https://developers.arcgis.com, then delete this
+entry. If registration is refused or the terms have moved, take the EOX swap
+above and record why here rather than in a commit message.
+
+⚠ **While you are in that file, do not "correct" the Esri credit string.** It is
+`copyrightText` read live from `.../World_Imagery/MapServer?f=json`. Maxar
+rebranded to Vantor in 2025 and the service updated its credit, so the familiar
+"Esri, Maxar, Earthstar Geographics" is now the **wrong** attribution rather
+than merely an old one. `frontend/scripts/gate.mjs` asserts the line changes on
+switching and still names OpenStreetMap, which catches a deletion and cannot
+catch a wrong string.
+
+---
+
+## 14 · `make test-sandboxed` could not run in this environment — OPEN, and small
+
+The backend suite claims it never opens a socket, and there are two things
+behind that claim: a socket guard in `conftest.py` that fails a test from
+inside, and a run under `unshare -n` that removes the network from underneath
+it. The first is the assertion; the second is the proof that the assertion is
+not the only thing being measured.
+
+Only the first was exercised for this round. `unshare -n` returns
+
+```
+unshare: unshare failed: Operation not permitted
+```
+
+in the container this work was done in — unprivileged user namespaces are not
+available to it. The suite passed with the guard active (845 passed, 2 skipped,
+both torch-related and both pre-existing), and `.github/workflows/ci.yml` still
+runs the sandboxed job on every push, so this is a gap in *this run's*
+verification rather than in the project's.
+
+It is recorded because the README says the network-less run happens, and a
+reader is entitled to know that the last person to touch these files did not
+watch it happen. Anyone with a machine that permits user namespaces can close
+this in one command:
+
+```bash
+make test-sandboxed
+```

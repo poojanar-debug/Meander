@@ -371,6 +371,35 @@ def test_overpass_query_covers_the_route_bbox() -> None:
     assert f"timeout:{25}" in query
 
 
+def test_the_query_asks_for_viewpoints_under_tourism_not_amenity() -> None:
+    """A viewpoint is `tourism=viewpoint` in OSM, never `amenity=viewpoint` — one
+    regex over the `amenity` key cannot ask for it, so this needs its own
+    `node["tourism"~...]` statement alongside the amenity one."""
+    query = overpass_query(_line(LONDON, 1000))
+
+    assert 'node["tourism"~"^(viewpoint)$"]' in query
+    # One query, not two: both node statements share the bbox and feed the same
+    # trailing `out body`, which is what keeps this to the one Overpass request
+    # per route-set that fetch_overpass()'s docstring insists on.
+    assert query.count("out body") == 1
+
+
+def test_the_two_node_statements_are_wrapped_in_an_explicit_union() -> None:
+    """Bare statements do not accumulate in Overpass QL — the second one
+    overwrites the implicit result set rather than adding to it, silently and
+    with no error. Queried live against a bbox holding both amenities and a
+    viewpoint, the unparenthesised form came back with only the viewpoint: the
+    tourism statement had wiped out the amenity statement's matches. Wrapping
+    both in `(...)` is what makes them union instead, and that parenthesis is
+    the whole of the fix — see overpass_query()'s docstring."""
+    query = overpass_query(_line(LONDON, 1000))
+
+    open_paren = query.index("(", query.index(";") + 1)
+    assert query[open_paren : open_paren + len('(node["amenity"')] == '(node["amenity"'
+    # The union closes, as its own statement, before `out body` — not after it.
+    assert query.index(");out body") > open_paren
+
+
 def test_only_amenities_inside_the_corridor_count() -> None:
     points = _line(LONDON, 1000)
     on_route = {"lat": points[10].lat, "lon": points[10].lon, "tags": {"amenity": "bench"}}
@@ -406,6 +435,35 @@ def test_underscores_in_amenity_names_are_made_readable() -> None:
     element = {"lat": points[3].lat, "lon": points[3].lon, "tags": {"amenity": "drinking_water"}}
 
     assert rest_stops_on_route(points, [element])[0].type == "drinking water"
+
+
+def test_a_viewpoint_is_not_dropped_for_lacking_an_amenity_tag() -> None:
+    """A viewpoint node carries `tourism=viewpoint` and no `amenity` tag at all.
+
+    This used to be the exact shape `rest_stops_on_route` discarded: it read
+    `tags.get("amenity")` and skipped anything falsy, so a viewpoint was fetched
+    by Overpass and then silently thrown away in the one place that would have
+    surfaced it. The fallback to `tourism` is what stops that."""
+    points = _line(LONDON, 1000)
+    element = {"lat": points[7].lat, "lon": points[7].lon, "tags": {"tourism": "viewpoint"}}
+
+    stops = rest_stops_on_route(points, [element])
+    assert [s.type for s in stops] == ["viewpoint"]
+
+
+def test_amenity_wins_over_tourism_when_a_node_carries_both() -> None:
+    """Not a shape Overpass is expected to hand back for this query — nothing
+    asked for here is both an amenity and a viewpoint — but the fallback order
+    is a deliberate choice and worth pinning down rather than leaving to
+    whichever branch happens to run first."""
+    points = _line(LONDON, 1000)
+    element = {
+        "lat": points[7].lat,
+        "lon": points[7].lon,
+        "tags": {"amenity": "bench", "tourism": "viewpoint"},
+    }
+
+    assert rest_stops_on_route(points, [element])[0].type == "bench"
 
 
 def test_the_corridor_is_narrow_enough_to_mean_something() -> None:

@@ -1,12 +1,14 @@
 import { useEffect, useRef } from 'react'
 
+import { isViewpoint, shortLabel } from '../lib/amenities.js'
 import { MODE_NOUN, confidenceSentence, fmtDist, fmtDur } from '../lib/format.js'
 import { UNKNOWN, formatElevation } from '../lib/units.js'
 import { bestWindowStat, BestWindow } from './DepartureStrip.jsx'
 import ElevationProfile from './ElevationProfile.jsx'
+import RoutePhotos from './RoutePhotos.jsx'
 import ExportPills from './ExportPills.jsx'
 import StepList from './StepList.jsx'
-import { ChevronRightIcon, CloseIcon } from './Icons.jsx'
+import { AmenityGlyph, ChevronRightIcon, CloseIcon } from './Icons.jsx'
 
 /** The design's method line, always visible near the scores. Lowercase mono,
  *  matching how the wire value reads; an unrecognised method renders as
@@ -28,17 +30,6 @@ const SCORE_ROWS = [
   ['shade', 'shade', 'lilac'],
   ['quiet', 'quiet', 'indigo'],
 ]
-
-/** `bench` → Bench, `drinking water` → Water, `toilets` → Toilets: the short
- *  pill vocabulary. An unknown amenity keeps its own name, made readable. */
-function restPillLabel(type) {
-  const t = String(type ?? '').toLowerCase()
-  if (t === 'bench') return 'Bench'
-  if (t === 'drinking water' || t === 'drinking_water' || t === 'fountain') return 'Water'
-  if (t === 'toilets') return 'Toilets'
-  const readable = t.replace(/_/g, ' ')
-  return readable.charAt(0).toUpperCase() + readable.slice(1)
-}
 
 /** The score bars: 58px label, 6px track, accent fill, mono value. A null
  *  score renders no bar at all — an empty track would claim a measurement of
@@ -115,8 +106,16 @@ function RestPills({ restStops, units, pending = false }) {
   return (
     <ul className="rests">
       {restStops.map((stop, i) => (
-        <li className="rests__pill" key={`${stop.type}-${i}`}>
-          {restPillLabel(stop.type)}
+        <li
+          className={
+            isViewpoint(stop.type) ? 'rests__pill rests__pill--viewpoint' : 'rests__pill'
+          }
+          key={`${stop.type}-${i}`}
+        >
+          <span className="rests__glyph" aria-hidden="true">
+            <AmenityGlyph type={stop.type} size={14} />
+          </span>
+          {shortLabel(stop.type)}
           {typeof stop.at_m === 'number' && (
             <span className="mono"> · {fmtDist(stop.at_m, units)}</span>
           )}
@@ -266,6 +265,13 @@ export default function RouteDetail({
         <CoverageCard route={route} />
         <ElevationProfile profile={route.elevation} units={units} />
         <RestPills restStops={route.rest_stops} units={units} pending={Boolean(route.enrichment_pending)} />
+        {/* Below the numbers, not above them. The climb, the barriers and
+            the rest stops are the answer; a photograph is what the answer
+            looks like, and putting it first would push the measured half of
+            this sheet under the fold on a phone. Renders nothing at all when
+            there is no photo, which outside a city centre is most of the
+            time. */}
+        <RoutePhotos route={route} units={units} />
 
         <BestWindow bestDeparture={bestDeparture} reason={reason} units={units} />
 
@@ -323,6 +329,7 @@ export default function RouteDetail({
             <CoverageCard route={route} />
             <ElevationProfile profile={route.elevation} units={units} />
             <RestPills restStops={route.rest_stops} units={units} pending={Boolean(route.enrichment_pending)} />
+            <RoutePhotos route={route} units={units} />
             <ExportPills
               route={route}
               origin={origin}

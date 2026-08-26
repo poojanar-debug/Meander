@@ -11,6 +11,7 @@ import RouteDetail from './components/RouteDetail.jsx'
 import RouteRail from './components/RouteRail.jsx'
 import Sheet from './components/Sheet.jsx'
 import StatusBanner from './components/StatusBanner.jsx'
+import { DEFAULT_BASEMAP, streamsWhileFollowing } from './lib/basemap.js'
 import { announceRoutes, announceSelection, effectiveMode } from './lib/format.js'
 import { haversineM } from './lib/follow.js'
 import { useFollowTracking } from './lib/followTracking.js'
@@ -235,6 +236,20 @@ export default function App() {
   // down, inside useFollowTracking.
   const [selected, setSelected] = useState(null)
   const [units] = useState(initialUnits)
+  // Which basemap the map is drawn on.
+  //
+  // **Deliberately not persisted, and that is a rule rather than an
+  // oversight.** RELEASE-SPECS R4 states it in as many words: localStorage is
+  // theme and units ONLY, and `offlineStore.js` records what happened the last
+  // time a third key was ported in. So the choice lasts a session. The cost is
+  // that someone who prefers satellite re-picks it each visit; the alternative
+  // is a third key and a promise this app makes in its own UI going quietly
+  // false.
+  //
+  // It lives here rather than in MapView because FollowMode reads it too: the
+  // provenance sentence printed while somebody walks is only true for the
+  // basemaps that fetch nothing.
+  const [layer, setLayer] = useState(DEFAULT_BASEMAP)
   const [follow, setFollow] = useState(null)
   const [detailOpen, setDetailOpen] = useState(false)
   // Which stretch of the selected route the map should emphasise, from the
@@ -635,6 +650,8 @@ export default function App() {
           focusPoint={focusPoint}
           onSelect={onSelect}
           follow={followRoute ? { route: followRoute, tracking } : null}
+          layer={layer}
+          onLayer={setLayer}
         />
 
         {followRoute && (
@@ -645,6 +662,7 @@ export default function App() {
             tracking={tracking}
             onExit={onExitFollow}
             onAnnounce={announceNow}
+            basemapStreams={streamsWhileFollowing(layer)}
           />
         )}
       </div>

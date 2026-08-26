@@ -56,6 +56,29 @@
 # than <img>-loaded; MapView.jsx:15 warns that a CSP which forgot connect-src
 # leaves a permanently blank basemap after a 20-second timeout and no error.
 #
+# server.arcgisonline.com is the satellite basemap, and it is in both for the
+# same reason: MapLibre v5 loads raster tiles through fetch, not through an
+# <img>, so img-src alone produces exactly the blank-map-after-20-seconds
+# failure described above. The service answers with Access-Control-Allow-Origin:
+# *, which was confirmed against a live response rather than assumed, because a
+# fetch-based tile loader needs that as well as the CSP entry.
+#
+# It is reachable only when someone chooses Satellite in the layer picker: the
+# raster source is added lazily on first selection, so a visitor who never opens
+# that menu makes no request to this origin at all. The licensing position for
+# it is written out at the top of frontend/src/lib/basemap.js and is the part of
+# this that needs a person rather than a header.
+#
+# meander-app.duckdns.org is in img-src as well as connect-src, and the reason
+# is the whole argument for how route photos are fetched. The images come from
+# Wikimedia Commons and Mapillary, and Mapillary serves its thumbnails from
+# rotating scontent-*.xx.fbcdn.net hostnames that no CSP can name without a
+# wildcard over Facebook's entire CDN. So the backend streams them instead:
+# GET /api/photo/{ref} on the API origin returns the bytes, and this policy has
+# one stable named host to allow rather than an unbounded set. The user's IP and
+# the route's coordinates never reach either image host, which is the same
+# reason stated from the privacy side.
+#
 # worker-src 'self' blob: is MapLibre, which builds its workers from blob URLs.
 # child-src repeats it for Safari before 15.4, which has no worker-src at all and
 # falls back child-src -> script-src -> default-src. Landing on script-src there
@@ -69,7 +92,7 @@
 # otherwise would mean shipping a policy that blocks the map.
 
 /*
-  Content-Security-Policy: default-src 'self'; script-src 'self' 'sha256-rXb3GrH6fQu5rzdJqUPl87syYzPxM2UTz++hiaG3xVo='; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://tiles.openfreemap.org; font-src 'self'; worker-src 'self' blob:; child-src 'self' blob:; connect-src 'self' https://tiles.openfreemap.org https://meander-app.duckdns.org; frame-ancestors 'none'; base-uri 'self'; form-action 'none'
+  Content-Security-Policy: default-src 'self'; script-src 'self' 'sha256-rXb3GrH6fQu5rzdJqUPl87syYzPxM2UTz++hiaG3xVo='; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://tiles.openfreemap.org https://server.arcgisonline.com https://meander-app.duckdns.org; font-src 'self'; worker-src 'self' blob:; child-src 'self' blob:; connect-src 'self' https://tiles.openfreemap.org https://server.arcgisonline.com https://meander-app.duckdns.org; frame-ancestors 'none'; base-uri 'self'; form-action 'none'
   X-Content-Type-Options: nosniff
   Referrer-Policy: no-referrer
   X-Frame-Options: DENY

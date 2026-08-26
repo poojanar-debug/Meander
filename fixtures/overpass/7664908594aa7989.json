@@ -1,6 +1,6 @@
 {
   "_meander_provenance": "recorded",
-  "_meander_recorded_at": "2026-08-11T08:50:07.297964+00:00",
+  "_meander_recorded_at": "2026-08-26T17:08:23.692090+00:00",
   "_meander_note": "Written by backend/fixtures.py. Secrets are redacted and excluded from the request signature.",
   "request": {
     "method": "POST",
@@ -8,7 +8,7 @@
     "params": {},
     "json": null,
     "data": {
-      "data": "[out:json][timeout:25];node[\"amenity\"~\"^(bench|drinking_water|toilets|shelter)$\"](51.49915,-0.17116,51.51585,-0.14826);out body 6000;"
+      "data": "[out:json][timeout:25];(node[\"amenity\"~\"^(bench|drinking_water|toilets|shelter)$\"](51.49915,-0.17116,51.51585,-0.14826);node[\"tourism\"~\"^(viewpoint)$\"](51.49915,-0.17116,51.51585,-0.14826););out body 6000;"
     },
     "content": null,
     "headers": {
@@ -18,14 +18,14 @@
   "response": {
     "status": 200,
     "headers": {
-      "date": "Tue, 11 Aug 2026 08:50:06 GMT",
+      "date": "Wed, 26 Aug 2026 17:08:23 GMT",
       "content-type": "application/json"
     },
     "json": {
       "version": 0.6,
       "generator": "Overpass API 0.7.62.11 87bfad18",
       "osm3s": {
-        "timestamp_osm_base": "2026-08-11T08:49:06Z",
+        "timestamp_osm_base": "2026-08-26T17:06:21Z",
         "copyright": "The data included in this document is from www.openstreetmap.org. The data is made available under ODbL."
       },
       "elements": [
@@ -2349,6 +2349,17 @@
           "lon": -0.1687227,
           "tags": {
             "amenity": "bench"
+          }
+        },
+        {
+          "type": "node",
+          "id": 14090737997,
+          "lat": 51.5103642,
+          "lon": -0.1631708,
+          "tags": {
+            "amenity": "bench",
+            "backrest": "yes",
+            "material": "wood"
           }
         }
       ]
