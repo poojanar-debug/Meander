@@ -7,7 +7,7 @@
   "scope": "/",
   "display": "standalone",
   "orientation": "any",
-  "background_color": "#1c4633",
+  "background_color": "#eceae4",
   "theme_color": "#1c4633",
   "categories": ["navigation", "health", "travel"],
   "lang": "en",

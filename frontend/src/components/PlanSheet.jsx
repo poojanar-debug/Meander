@@ -2,6 +2,7 @@ import DepartureStrip from './DepartureStrip.jsx'
 import ModeControl from './ModeControl.jsx'
 import ObjectiveChips from './ObjectiveChips.jsx'
 import TimeDial from './TimeDial.jsx'
+import Wordmark from './Wordmark.jsx'
 import { CloseIcon, LocationArrowIcon, MagnifierIcon } from './Icons.jsx'
 
 /**
@@ -22,6 +23,13 @@ import { CloseIcon, LocationArrowIcon, MagnifierIcon } from './Icons.jsx'
  * would be a control that moves and changes nothing: not the length, not the
  * mode, not the cache row. `BestWindow` sets the precedent — it does not
  * render at all rather than show a figure it cannot stand behind.
+ *
+ * The lockup leads all of it, because this sheet is the app's first screen and
+ * its only header. `App.jsx` opens at the `full` snap with `showPlan` true, so
+ * the wordmark is the first thing on a cold start, and it is gone once there
+ * are routes to read — the results sheet is data, not identity. `.plan` is
+ * already a centred column with a 15px gap, so the lockup needs no position of
+ * its own.
  */
 export default function PlanSheet({
   origin,
@@ -46,6 +54,8 @@ export default function PlanSheet({
 }) {
   return (
     <div className="plan">
+      <Wordmark />
+
       <div className="plan__search">
         <button type="button" className="plan__search-field" onClick={onOpenSearch}>
           <MagnifierIcon size={16} />
