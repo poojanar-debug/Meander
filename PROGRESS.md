@@ -4593,3 +4593,86 @@ from the very field this feature adds.
 
 **Live API calls:** none. The suite runs in replay and the frontend was verified
 against `VITE_MOCK_API=1`.
+
+# The mark — deployed · 2026-08-26
+
+`frontend/PROGRESS.md` records the geometry and the three renderers; this
+section records the deploy, and the two things it found that are not about the
+logo at all.
+
+**What moved:** `main` took `1a4c7fb..b32ff18`, the merge of the branch that
+adds the approved Meander mark — the lockup at the head of the plan sheet, the
+SVG favicon and its 32px raster, the three launcher tiles, and the manifest's
+launch-screen colour. §14's destination feature was already on `main` and rides
+the same bundle; the two collided in three files and were merged rather than
+rebased, so `gate.mjs` now carries both `.wordmark` and `.plan__search--dest`
+in one manifest and grades the destination screen with the lockup present.
+
+**Cloudflare Pages carried it, and that was verified byte for byte rather than
+assumed from a green check.** All six generated assets serve at the sizes the
+generator wrote locally — `favicon.svg` 244 B, `favicon-32.png` 269 B,
+`apple-touch-icon.png` 1247 B, `icon-192.png` 1880 B, `icon-512.png` 5201 B,
+`icon-maskable-512.png` 3900 B — so the deployed set is the set
+`make-icons.mjs` draws, not a near miss. The live `manifest.webmanifest` reads
+`background_color: #eceae4` with `theme_color` still `#1c4633`, which is the
+split this change is careful about: the launch screen is where the mark is
+shown, the browser bar is chrome and was left alone.
+
+The curve itself is *not* a string in the bundle, and that is the design
+working. `MARK_PATH_D` is emitted from control points at runtime, so what ships
+is `[[8,32],[14,14],[20,14],[24,24]]` and `[24,24],[28,34],[34,34],[40,16]` —
+both present in `index-CBzc_NXa.js`, alongside `wordmark__name` rendering
+`"Meander"`. One definition, three renderers, and nothing to hand-match.
+
+**`live-gate.mjs` against production: `29 passed, 1 failed, 12 not checkable
+here`.** The precache is **18 entries**, one more than the 17 the 2026 UI
+deploy recorded, and the new one is `/favicon.svg` — so the vector mark is in
+the offline shell rather than only on the network. Also passing against the real
+origin pair: the 392-char CSP with no violation across a full session, three
+routes streamed into the cards, the CORS negative control refused, permalinks
+direct and offline, the geolocated search clearing the address bar, and tiles
+allowed through to a live map canvas.
+
+**The one failure is the gate, not the deployment, and it is the same bug its
+own comment warns about — one level down.** `the chunks are spread over time`
+measured `first→last 0.19s, first chunk 0.01s after headers`. The file already
+has a branch for an answer that arrives too fast to grade, and its comment says
+the reasoning should be "keyed on the condition rather than on one of its
+causes" — then keys it on `chunks.length === 1 && ttfb < 0.25`. Chunk count is
+a cause. Chrome coalesced this response into *two* `Network.dataReceived`
+events instead of one, so a 0.01s first byte fell through to the graded branch
+and failed a `spread > 0.25` threshold it was never meant to face. A buffered
+response cannot deliver its first byte in 0.01s; the deployment is fine and the
+condition wants to be the first-byte time alone.
+
+## The AWS deploy workflow has never been configured
+
+Worth recording where the next person will look, because nothing else says so.
+
+`gh workflow run deploy.yml --ref main` was dispatched and **failed**, at
+`Assume the deploy role`:
+
+    role-to-assume: arn:aws:iam:::role/meander-github-deploy
+    Could not assume role with OIDC: Request ARN is invalid
+
+The account-id slot is empty. `gh secret list` returns nothing at all — the
+repository has **zero** secrets, so `AWS_ACCOUNT_ID`, `CLOUDFRONT_DISTRIBUTION_ID`
+and `SITE_URL` are all unset, and `gh run list --workflow=deploy.yml` shows this
+was the workflow's only run ever. The ECS-plus-S3-plus-CloudFront path in
+`.github/workflows/deploy.yml` describes a topology that was never finished.
+
+Nothing about it is caused by this change: in that same run the backend tests,
+`ruff`, and the frontend build all passed, and the job died at the credentials
+step. The live site is Cloudflare Pages, which is what `_headers`, `DEPLOY.md`
+and the deployed origin all point at.
+
+One thing to check when the AWS path is wired, rather than discovering it then:
+the workflow's `Prove it is actually serving` step curls `$SITE/api/healthz`,
+and on the API host today that path is a **404**. Health is served unprefixed —
+`GET /healthz` returns `{"status":"ok","version":"0.1.0"}` — while `/api/routes`
+answers 405 to a GET, so the route exists and only the health path differs.
+Whether CloudFront would rewrite the prefix is exactly the assumption that step
+is making.
+
+**Live API calls:** the live gate's, and the health probes above. The API half
+was untouched: this change is frontend-only and moved no wire field.
