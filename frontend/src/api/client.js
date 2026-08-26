@@ -377,3 +377,57 @@ export async function reportBarrier(report, { signal } = {}) {
   if (!res.ok) throw await toApiError(res)
   return res.json()
 }
+
+/**
+ * Photos along a route.
+ *
+ * ## Why this goes through our own backend
+ *
+ * The images come from Wikimedia Commons and Mapillary, and neither is asked
+ * for them by the browser. The backend queries both and streams the bytes back
+ * from `/api/photo/{ref}`, so the route's coordinates and the user's IP never
+ * reach either host. That was the deciding constraint rather than a nicety:
+ * this app's whole position is that where you are is your business, and a
+ * thumbnail request carrying a lat/lon to a third party would give that away
+ * on the screen that shows you your walk.
+ *
+ * It has a second, purely practical payoff. Mapillary serves thumbnails from
+ * rotating `scontent-*.xx.fbcdn.net` hostnames, which a strict CSP cannot name
+ * without allowing the whole of Facebook's CDN. Streaming through the API means
+ * `public/_headers` allows one stable origin instead.
+ *
+ * ## It must never break a route
+ *
+ * A photo is decoration on top of an answer that is already complete without
+ * it. Every failure here — offline, 429, a backend that has not been redeployed
+ * and answers 404 — resolves to `null`, and the caller renders nothing. It does
+ * not surface an error, because there is no action the user could take and no
+ * information they are missing.
+ */
+export async function fetchPhotos(body, { signal } = {}) {
+  if (isMock) {
+    const { mockFetchPhotos } = await import('./mock.js')
+    return mockFetchPhotos(body, { signal })
+  }
+  try {
+    const res = await fetch(url('/api/photos'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+      signal,
+    })
+    if (!res.ok) return null
+    return await res.json()
+  } catch {
+    // Includes the abort, which is the common case: opening one route detail
+    // and closing it before the request lands. An aborted fetch is not a
+    // failure to report, and the component that started it has unmounted.
+    return null
+  }
+}
+
+/** The full URL for a photo the API described. The backend returns a path on
+ *  its own origin, so a split deployment has to put the API base back on. */
+export function photoUrl(path) {
+  return typeof path === 'string' && path.startsWith('/') ? url(path) : path
+}

@@ -69,6 +69,17 @@ OVERPASS_TIMEOUT_S = 25
 # routes is about 8 x 7 km and holds **4,762** amenity nodes — counted with
 # `out count`, not guessed. A 35-minute walk is an order of magnitude smaller.
 #
+# **Adding viewpoints does not spend meaningfully more of that headroom.**
+# Re-measured with `out count` the same way, over the same Vondelpark bbox:
+# `tourism=viewpoint` alone is **22** nodes, taking the combined total to 4,784
+# of 6,000 — 79.7% of the cap against 79.4% before, a difference of four
+# viewpoints in a thousand. Viewpoints are a landmark you plan a route around,
+# not a lamppost fitting, and there are two orders of magnitude fewer of them
+# than benches for exactly that reason. The three smaller bboxes in the
+# committed corpus tell the same story at a scale a person can read at a
+# glance: Hyde Park has no viewpoints at all, alongside 219 amenities, and the
+# two Colombo scenarios add 4 viewpoints to 15 amenities and 0 to 7.
+#
 # The cap still exists because an unbounded `out body` over a large bbox is how
 # a client earns a ban, and because a runaway query should fail rather than
 # stream. Where it is reached anyway, OverpassNodes.truncated refuses to let the
@@ -79,6 +90,16 @@ OVERPASS_TIMEOUT_S = 25
 OVERPASS_MAX_RESULTS = 6000
 
 REST_STOP_AMENITIES = ("bench", "drinking_water", "toilets", "shelter")
+
+# The one entry in this whole set that is not `amenity=*`. OSM tags a viewpoint
+# `tourism=viewpoint`: it is a reason to go somewhere — a place worth the
+# detour — not a facility for someone who is already stopped, which is what
+# every other value in REST_STOP_AMENITIES is. It rides along in the same
+# Overpass query and the same RestStop list because the corridor match, the
+# spacing score and (separately) the photo feature all want it addressed the
+# same way a bench is, but it needs its own key, both in overpass_query() and
+# in rest_stops_on_route()'s tag lookup — see both.
+REST_STOP_TOURISM = ("viewpoint",)
 
 # Best-departure search: 15-minute steps across six hours, per the spec.
 DEPARTURE_STEP_MIN = 15
@@ -395,11 +416,44 @@ def _bbox(points: Sequence[LatLon], pad_deg: float = 0.001) -> tuple[float, floa
 
 
 def overpass_query(points: Sequence[LatLon]) -> str:
+    """Rest-stop nodes over the route's bbox — the amenities, plus viewpoints.
+
+    Two ``node[...]`` statements, not one, because a viewpoint is
+    ``tourism=viewpoint`` and everything else here is ``amenity=*`` — one regex
+    over one key cannot ask for both. They are wrapped in an explicit
+    ``(...)`` union rather than left as two bare statements, and that
+    parenthesis is load-bearing, not decoration.
+
+    **Two bare statements do not accumulate.** The first draft was exactly that
+    — ``node[...]; node[...]; out body N;`` with no union block, on the
+    assumption that a statement with no explicit ``->.set`` appends to the
+    implicit result set the way path_details spans accumulate elsewhere in this
+    codebase. Queried live against a bbox with 15 amenities and 4 viewpoints,
+    it came back with **4** — the tourism statement had overwritten the
+    amenity statement's result rather than adding to it, silently, with a
+    ``200`` and no error of any kind. Wrapped in ``(...)`` the same two
+    statements union correctly. A bug here would not throw; it would ship a
+    rest-stop list that quietly stopped listing benches the day this feature
+    landed, on every route everywhere, and nothing downstream would notice
+    because an empty result and a "no benches near here" result look
+    identical.
+
+    The union still makes one Overpass query rather than two separate HTTP
+    requests — a single trailing ``out body N`` reports on the whole union.
+    That is the distinction ``overpass_barrier_query()``'s docstring spends a
+    paragraph on: the query that must not multiply is one per *route*, not one
+    per tag key.
+    """
     south, west, north, east = _bbox(points)
+    bbox = f"{south:.5f},{west:.5f},{north:.5f},{east:.5f}"
     amenities = "|".join(REST_STOP_AMENITIES)
+    tourism = "|".join(REST_STOP_TOURISM)
     return (
         f"[out:json][timeout:{OVERPASS_TIMEOUT_S}];"
-        f'node["amenity"~"^({amenities})$"]({south:.5f},{west:.5f},{north:.5f},{east:.5f});'
+        f"("
+        f'node["amenity"~"^({amenities})$"]({bbox});'
+        f'node["tourism"~"^({tourism})$"]({bbox});'
+        f");"
         f"out body {OVERPASS_MAX_RESULTS};"
     )
 
@@ -721,10 +775,18 @@ def rest_stops_on_route(points: Sequence[LatLon], elements: list[dict[str, Any]]
             node = LatLon(float(element["lat"]), float(element["lon"]))
         except (KeyError, TypeError, ValueError):
             continue
-        amenity = (element.get("tags") or {}).get("amenity")
-        if not amenity:
+        tags = element.get("tags") or {}
+        # `amenity` first, `tourism` as the fallback — not the other way round.
+        # Every node this query can return carries exactly one of the two
+        # (overpass_query() only asks for `tourism=viewpoint`, never any other
+        # tourism value), so the fallback only ever fires for a viewpoint. It
+        # used to read `amenity` alone and silently drop anything without it:
+        # a viewpoint has no `amenity` tag at all, so it was fetched and then
+        # thrown away here, in the one place that would have made it visible.
+        kind = tags.get("amenity") or tags.get("tourism")
+        if not kind:
             continue
-        candidates.append((node, str(amenity).replace("_", " ")))
+        candidates.append((node, str(kind).replace("_", " ")))
 
     if not candidates or len(points) == 0:
         return []

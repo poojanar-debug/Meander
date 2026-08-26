@@ -5058,3 +5058,292 @@ against the public host, two Open-Meteo cloud-cover reads to check the shade
 arithmetic, and the routing calls behind them, all to the self-hosted graph on
 the same VM. No GraphHopper credits were spent: the hosted API is not in this
 deployment's path.
+
+
+## §18 — Layers, a heading, and a sentence that stopped being true · 2026-08-26
+
+Five things landed together: three basemaps, direction in follow mode,
+viewpoints, photographs along a route, and the walk's position on the elevation
+profile. Four of them are features. The fifth is that one of this app's own
+privacy claims became false for one setting, and most of this entry is about
+that.
+
+### The claim that had to change
+
+Follow mode printed, at the foot of the screen somebody is walking with:
+
+> position never leaves this phone — no network in follow mode
+
+That was true, and it was **measured** rather than asserted. OpenFreeMap's
+vector source declares `maxzoom: 14`, so the z17 camera follow mode uses is
+served by overzooming tiles the client already holds; a full simulated walk made
+three requests, all of them glyph ranges, and not one tile request. The note
+above `FOLLOW_METRES_PER_PIXEL` in `MapView.jsx` records the measurement.
+
+**Satellite breaks it, and it cannot be made not to.** Esri's imagery is raster
+and goes to z19, so every stretch walked pulls new tiles from
+`server.arcgisonline.com`, and the sequence of those requests *is* the walk.
+`sw.js` will not cache them — a tile cache is a record of where you have been —
+so they are never written to disk, but they are made and the host sees them.
+
+The position itself still never leaves the device, and no recalculation happens,
+so leaving the sentence alone would have been technically defensible. That is
+precisely the kind of defence this project does not make. Somebody reading "no
+network in follow mode" on the screen they are walking with will conclude
+nothing is being disclosed, and under satellite something is. **A privacy claim
+that is true for the default and false for one setting is worse than no claim,
+because the setting is the case where it matters.**
+
+So it is said in three places rather than none, and none of them hedges:
+
+- `streamsTiles` puts a warning in the layer picker at the moment of choosing;
+- `MapView` swaps the attribution line;
+- `FollowMode` swaps the provenance sentence, the off-route footer and the
+  walk-summary line, and names the host rather than saying "a third party".
+
+The answer lives in exactly one place. `basemap.js` exports
+`streamsWhileFollowing(id)` — a function rather than a field read at call sites,
+so the question has one name and the decision is not reachable by anything else.
+Every row in `BASEMAPS` is *required* to declare `streamsTiles`, so nothing can
+add a basemap here and forget to say what it costs.
+
+The basemap choice is deliberately **not** persisted. RELEASE-SPECS R4 states it
+in as many words — localStorage is theme and units ONLY — and `offlineStore.js`
+records what happened the last time a third key was ported in. The cost is that
+someone who prefers satellite re-picks it each visit; the alternative is a third
+key and a promise this app makes in its own UI going quietly false.
+
+⚠ **R4 itself now needs a qualifier and did not get one.** It reads "No location
+history, no cookies, no analytics; localStorage is theme and units ONLY", and
+the storage half is still exactly true — nothing was added. The reason to touch
+it is that the rule is read as the whole privacy position, and the whole privacy
+position now has a condition in it. `docs/RELEASE-SPECS.md` reproduces an
+approved specification verbatim and is not edited to match the code, which is
+the same convention `docs/DESIGN-2026.md:130` is under. Left for whoever owns
+that document.
+
+### The satellite layer is licensed on three of four conditions
+
+The endpoint is keyless. **Keyless is not the same as licensed.** Esri's
+published guidance permits unrestricted keyless use for OpenStreetMap *tracing
+and editing*; embedding the imagery in a third-party application is a different
+case, and asks for four things together: a free ArcGIS Developer account, no
+revenue generation, under a million tiles a month, and attribution. Three are
+met — no revenue, nowhere near a million (the raster source is added lazily on
+first selection, so a visitor who never opens the menu makes no request to that
+origin at all), and the credit renders. The account is a registration a person
+has to do and nobody has. BLOCKED.md §13 is the open item, DEPLOY.md carries the
+⚠ section, and README's "What is still unverified" names it. It is not a
+footnote.
+
+Two things about it worth keeping:
+
+**The tile scheme is `{z}/{y}/{x}` — row before column — and this was verified
+rather than assumed.** At z10 the tile covering London is x=511, y=340, and
+**both** `/10/340/511` and `/10/511/340` return HTTP 200 with `image/jpeg`. The
+first is London with the Thames through it; the second is dense tropical forest.
+Both indices are valid at z10, so the server cannot know one of them is a
+mistake and no error is ever raised. The symptom of transposing them is a map of
+the wrong hemisphere that looks entirely healthy.
+
+**The credit string most tutorials carry is now wrong rather than merely old.**
+Maxar rebranded to Vantor in 2025 and the service updated its `copyrightText`
+accordingly. The one in `basemap.js` was read from
+`.../World_Imagery/MapServer?f=json` and reproduced verbatim, and the comment
+beside it says to re-read that field rather than edit the string.
+
+**The CSP needed `connect-src`, not just `img-src`.** MapLibre v5 loads raster
+tiles through `fetch`, not through an `<img>`. A policy with only `img-src`
+produces a permanently blank basemap after a twenty-second timeout with no error
+anywhere — the failure `MapView.jsx` already documented for OpenFreeMap, met
+again. The service answers `Access-Control-Allow-Origin: *`, confirmed against a
+live response rather than assumed, which is the other half of what a fetch-based
+tile loader needs.
+
+### Two bare Overpass statements do not accumulate, and say nothing about it
+
+`tourism=viewpoint` cannot ride in the same regex as the four `amenity=*` values,
+so `overpass_query()` needed a second `node[...]` statement. The first version
+was exactly that — `node[...]; node[...]; out body N;` — on the assumption that a
+statement with no explicit `->.set` appends to the implicit result set, the way
+`path_details` spans accumulate elsewhere in this codebase.
+
+Queried live against a bbox with 15 amenities and 4 viewpoints, it returned
+**4**. The tourism statement had *overwritten* the amenity statement's result
+rather than adding to it, silently, with a `200` and no error of any kind.
+Wrapped in an explicit `(...)` union the same two statements union correctly.
+
+This is the worst shape of bug this codebase has a name for. It would not have
+thrown. It would have shipped a rest-stop list that quietly stopped listing
+benches the day the feature landed, on every route everywhere, and nothing
+downstream would have noticed, because an empty result and a "no benches near
+here" result look identical on the wire and on the screen.
+
+A second, smaller one behind it: `rest_stops_on_route()` read `element["tags"]["amenity"]`
+and skipped anything without it. A viewpoint has no `amenity` tag at all, so
+even once the query was right, every viewpoint was fetched and then thrown away
+in the one place that would have made it visible. It now reads `amenity` first
+and `tourism` as the fallback — that order, because the query only ever asks for
+`tourism=viewpoint`, so the fallback can only ever fire for a viewpoint.
+
+**Adding viewpoints costs the Overpass cap almost nothing**, measured with
+`out count` rather than guessed: over the same Vondelpark bbox as the existing
+note, 22 viewpoints against 4,762 amenities — 4,784 of the 6,000 cap, 79.7%
+against 79.4% before. Hyde Park has none at all beside 219 amenities; the two
+Colombo scenarios add 4 to 15 and 0 to 7. There are two orders of magnitude
+fewer viewpoints than benches, for exactly the reason they are worth showing.
+
+Three Overpass fixtures were re-recorded live against the corrected query and
+the old ones deleted, because a fixture keyed on a request body is invalidated
+by a change to the query.
+
+### Photographs, and the four objectives with nothing to anchor to
+
+`backend/photos.py` adds `POST /api/photos` and `GET /api/photo/{ref}`. Two
+decisions shape it and neither is a preference.
+
+**The image host must never see the user.** A route is somebody's Tuesday
+afternoon, and a browser-side thumbnail request hands Wikimedia and Mapillary an
+IP address next to coordinates describing where that person is about to walk. So
+the browser talks only to Meander. The alternative — returning upstream URLs and
+naming the hosts in the CSP — fails twice: it reintroduces the disclosure the
+proxy exists to prevent, and Mapillary's thumbnails come from rotating
+`scontent-*.xx.fbcdn.net` hostnames that no strict policy can enumerate. That
+was not theoretical: the live smoke test's thumbnails came back from
+`scontent-bom5-1.xx.fbcdn.net`.
+
+A proxy that fetches any URL it is given is somebody else's open relay with our
+egress IP on it, so three things stop that and all three are in the module rather
+than in a deployment note: a two-host allowlist that refuses whatever the
+reference says, an HMAC so a reference cannot be edited into a *different* URL on
+those hosts, and `PHOTO_MAX_IMAGE_BYTES` with `follow_redirects=False` — a
+redirect being the standard way an allowlisted host becomes a request to
+somewhere else.
+
+**Nothing here may assert what nothing measured.** The hero is chosen by what
+the route was optimised for, and for **four of six objectives the data to do
+that honestly does not exist**. `Route` carries one aggregate number per score;
+the per-way tag spans behind those numbers are consumed inside `_scored_route`
+and never reach the wire. So there is no greenest point, no shadiest point and
+no quietest point on a `Route`, and the module does not invent one — it sets
+`objective_measured=False`, returns an explanatory `note`, and the frontend
+renders the difference rather than swallowing it. Two are honest: `accessible`
+aims at the first barrier, which `Route.blockers` really does carry, and
+`fastest` aims at the midpoint, which is arithmetic.
+
+Smaller things worth keeping:
+
+- **`PHOTO_MAX_ANCHORS` must be odd.** Anchors sit at `(i + 0.5) / n` along the
+  route, so an odd `n` puts one exactly halfway and an even one does not. The
+  `fastest` hero is the midpoint, and "about halfway" reading as 37.5% of the way
+  along is the quiet inaccuracy this project does not ship.
+- **`MEANDER_PHOTO_SIGNING_KEY` is a multi-worker setting, not a credential.**
+  Unset it is per process, which is right for one uvicorn worker. On more than
+  one, each worker mints references the others reject and roughly `(n-1)/n` of
+  image loads 404 at random — a flaky CDN, to look at.
+- **Three budget lines, not one.** The Commons geosearch, the Commons image host
+  and the Mapillary CDN meter different things: one geosearch yields several
+  thumbnails, so equal caps would exhaust the image budget while the search
+  budget still had room, which shows up as broken thumbnails under a working
+  hero. `upload.wikimedia.org` gets its own `SERVICE_HOSTS` entry; Mapillary's
+  edges cannot have one and pass `service="mapillary_images"` at the call site,
+  so `service_for_url` does not invent a new directory and a zero cap for every
+  CDN edge that answers.
+- **`ConditionalGZip` gained a second exemption.** JPEG, PNG and WebP are already
+  compressed; gzipping six of them per route view is tens of milliseconds of
+  blocking work on a single-worker event loop for a fraction of a percent of
+  bytes. Decided from the request path, as the SSE exemption is decided from the
+  request's Accept header, because by the time a content type is known the
+  response wrapper is already installed.
+- **The Caddy allowlist gained a literal and one wildcard.** `/api/photos` is a
+  literal; `/api/photo/*` is a path segment whose last component is an argument,
+  not a namespace. It is not the `/api/*` mistake the Caddyfile spends a
+  paragraph arguing against — a route added later still does not ship public
+  without a line.
+
+Both upstreams were smoke-tested live. Wikimedia Commons geosearch returns real
+licensed photographs near Vondelpark, CC BY 3.0 and CC BY-SA 3.0. **Mapillary
+answers only for a small bbox:** a 0.016 × 0.008 degree box is rejected with
+"Please reduce the amount of data you're asking for", while the 0.004-degree box
+`photos.py` actually builds (`MAPILLARY_BBOX_HALF_DEG = 0.002`) returns images
+fine. Anyone widening `MEANDER_PHOTO_SEARCH_RADIUS_M` should check that before
+concluding the token is wrong; DEPLOY.md has the row.
+
+### Direction, and two things that were computed and never rendered
+
+Follow mode gained a heading cone under the puck, chevrons along the line ahead
+via `symbol-placement: line`, a turn badge drawn on the route at the next
+manoeuvre, and course-up rotation.
+
+The cone is filtered on a `hasHeading` boolean rather than on a null check,
+because most walking fixes carry no heading at all and a cone pointing at 0° is
+a claim about which way somebody is facing. Course-up is default on, with a
+compass to turn it off, an 8° threshold so the map does not rock, and north
+forced under `prefers-reduced-motion` — a map that rotates continuously is not
+an animation that can be shortened to a fade, so the only respectful version of
+course-up is no course-up. Turning it off puts north back once, so a rotated map
+is never handed back to the plan screen where no control exists to fix it.
+
+Two pieces of data had been sitting on the wire unused since they were written:
+
+- **`tracking.rest`.** `followTracking` has computed the next rest stop ahead
+  and returned it since it was written, and nothing rendered it. The app knew
+  there was drinking water in 200 m and kept it to itself. It is a quiet line
+  above the dock rather than an alert or a card, because a bench is information
+  and a barrier is a warning and they must not look alike.
+- **`route.elevation` in follow mode.** On every response since it shipped, read
+  only by the detail sheet — so the one screen where "how much of that hill is
+  left" is a live question was the one screen that could not answer it.
+  `ElevationProfile` gained `atM` and `compact`: the line and a position marker,
+  no axis and no stat row, because both of those said their piece before setting
+  off.
+
+### Numbers
+
+**845 backend tests pass and 2 skip** — both skips torch-related and both
+pre-existing — at **87.46% statement coverage** against the 85% floor. The
+README had said 787 tests at 87.04% for several sessions after that stopped
+being true; it says the measured numbers now. The two modules this round
+changed most: `backend/photos.py` at 89%, `backend/enrich.py` at 86%.
+
+**651 frontend tests across 25 files**, all passing, up from 599 across 23. New:
+`basemap-contract.test.js` (30) and `amenities.test.js` (20). New on the backend:
+`test_photos.py` (48) and four more in `test_enrich.py`.
+
+**The layout and accessibility gate is 102 checks, and 101 of them pass.** It was
+85. The 17 new ones are the layer picker — opened, graded with axe while open,
+satellite pressed, and the attribution line read before and after — plus a
+compass assertion in the follow pass. Two of those are obligations rather than
+features: the satellite tile-streaming warning is the honest half of a privacy
+claim made elsewhere in writing, and the attribution change is a licence
+condition. Neither is something axe or a target sweep would notice going missing.
+
+**The one failure is pre-existing and this branch did not cause it.**
+`[destination] Find routes still streams cards for a trip with one` fails here
+and fails identically on an unmodified baseline built from `HEAD`, where it was
+1 of 85. It is recorded rather than rounded off: "all green except one" is the
+sentence that hides the regression the week after it is written.
+
+Also clean: `ruff check backend/ scripts/`, `scripts/check_duplicate_defs.py`
+across 32 files, `scripts/check_palette.sh` (gate self-tested), and
+`scripts/check_new_fixtures.py` at exit 0.
+
+### What was not verified
+
+**`make test-sandboxed` could not run here.** `unshare -n` returns "Operation not
+permitted" in this environment — unprivileged user namespaces are unavailable to
+it. The in-suite socket guard in `conftest.py` was active and passed, so the
+assertion held; the second line of defence that exists to prove the assertion is
+not the only thing being measured went unexercised. CI still runs it on every
+push. BLOCKED.md §14 records it, because the README claims that run happens and a
+reader is entitled to know the last person to touch these files did not watch it.
+
+Nothing was deployed. The satellite layer, the photo endpoints and the Caddy
+allowlist lines are committed and unshipped, and `/api/photos` will 404 on the
+live API until the VM is redeployed — which `client.js` already degrades to a
+null response rather than an error box, so the route still draws.
+
+**Live API calls:** three Overpass re-recordings against the corrected union
+query, a Wikimedia Commons geosearch near Vondelpark, and Mapillary bbox queries
+at two sizes to find the one that answers. No GraphHopper credits: no routing
+call was made.

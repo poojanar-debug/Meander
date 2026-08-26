@@ -379,6 +379,19 @@ ShareButton adds no colour-carrying state. Copy/failure are distinguished by **s
 Untouched. The permalink adds nothing to the map and removes nothing from the rail. `MapView` is not re-mounted or re-gated: `App.jsx:466` still gates on `hasRoutes`, and the first-run gate at `App.jsx:352` still keys on `origin`. A link seeds `origin`, so first-run is skipped and the panel renders — the single-MapLibre-instance rule (`App.jsx:348-352`, `MapView.jsx:148-189`) is unaffected because the map is still created once, on the first render where routes exist, and never unmounted.
 
 **R4 — No location history, no cookies, no analytics; localStorage is theme and units ONLY.**
+
+> **Correction, 2026-08-26.** The storage half of this rule is untouched and still
+> exact: localStorage is theme and units, the basemap choice deliberately does not
+> persist rather than become a third key, and nothing below has changed. What has
+> changed is that this rule is written as though it were the whole privacy
+> position, and it no longer is. Choosing the satellite basemap makes the browser
+> fetch raster tiles from `server.arcgisonline.com` as the user moves, including
+> in follow mode, which discloses roughly where they are to that host without
+> storing anything anywhere. The app now says so at the moment of choosing and
+> again on the follow screen (`lib/basemap.js`, `FollowMode.jsx`), and `sw.js`
+> still refuses to cache a tile. Read this rule as "nothing is stored", which is
+> true, rather than as "nothing is disclosed", which needs the basemap qualifier.
+
 This is the rule this capability comes closest to, so it is satisfied by four separate mechanisms:
 - **No storage of any kind.** `permalink.js` touches no `localStorage`, `sessionStorage`, `indexedDB` or cookie. The two existing storage touch points (`lib/theme.js:20`, `:29`, key `meander:theme`) and the pre-paint duplicate at `index.html:28` stay the only ones. `About.jsx`'s "the only thing kept in this browser" sentence remains true.
 - **No history entries.** `replaceState`, never `pushState` (`permalink.js` `writeUrl`), and an early return when the URL is already correct. Dragging the time dial produces zero back-button entries.
@@ -4217,6 +4230,17 @@ Write this into `Makefile:102-111`'s comment (keeping its `pwa-gate` half) rathe
 **R2 — Check C's mobile threshold is specified from the CSS, not measured.** I derived the first-row-above-the-fold estimate (y≈676 of 844) by adding up `styles.css:284` (topbar 56), `:1424-1427` (stage 304), `:1429`/`:1466-1468` (panel padding 12), the tripbar grid, `:1490-1499` (departure), and `:264-270` (results head). I did not run a browser. If it fails, it is a finding about the mobile layout against the promise written at `styles.css:1414-1416`, to be reported — not a number to tune down.
 
 **R3 — Adding `gate` to `Makefile:112`'s `check` makes `make check` depend on Chrome.** Mitigated by the `test-sandboxed` skip pattern (`Makefile:79-85`) and by adding `gate` to the epilogue at `:113-119` that currently names `test-sandboxed` as the only skippable target. Leaving the epilogue unedited would recreate exactly the drift commit `1749aa0` just closed, and would make the file dishonest a second time.
+
+> **Correction, 2026-08-26.** `--no-tiles` was specified here and never built.
+> `grep -c no-tiles frontend/scripts/gate.mjs` returns 0, so the hermetic run this
+> paragraph offers as a mitigation has never existed, and any later document that
+> cites it is citing a flag rather than a feature. The exposure has since grown
+> rather than shrunk: the layer-picker pass added in the same change as this note
+> selects Satellite, so the gate now reaches `server.arcgisonline.com` as well.
+> Neither dependency has caused a failure, because the mitigations that *were*
+> built are the load-bearing ones: the gate never waits on the map and never
+> fails on a map that did not load. Build the flag or drop the claim; do not
+> leave a third document repeating it.
 
 **R4 — The gate depends on `tiles.openfreemap.org` by default.** Not a new production request (`MapView.jsx:6` already makes it) but a new CI dependency, and CI flakiness in a gate is how gates get disabled. Mitigations both specified: the gate never *waits* on the map beyond 8 s and never fails on `map=pending`; `--no-tiles` gives a hermetic run. The trap if `--no-tiles` were made the default: `MapView.jsx:255-261` only calls `setFailed` on `status === 404` or a message containing `style`, and DNS `~NOTFOUND` matches neither, so it falls through to the 20 s `MAP_LOAD_TIMEOUT_MS` (`MapView.jsx:17`) — 80 s across four passes.
 

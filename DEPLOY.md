@@ -50,16 +50,185 @@ never deployed either.
 | Anthropic API key | https://console.anthropic.com/ | **no — costs real money per call** |
 | GraphHopper API key | https://www.graphhopper.com/ | yes, and **not needed** — you are running your own router |
 
-**None of the three keys is required to serve a route.** `MAPILLARY_TOKEN` is
-read only by the offline batch scorer, `ANTHROPIC_API_KEY` only by narration,
-and `GRAPHHOPPER_KEY` only if you point at the hosted API instead of your own
-router. `/api/health` reports which are missing. Without Anthropic, `narration`
-stays `null` and the card reads "Description still being written…" — which is
-why that copy exists.
+**None of the three keys is required to serve a route.** `ANTHROPIC_API_KEY` is
+read only by narration, and `GRAPHHOPPER_KEY` only if you point at the hosted
+API instead of your own router. `/api/health` reports which are missing. Without
+Anthropic, `narration` stays `null` and the card reads "Description still being
+written…" — which is why that copy exists.
+
+**`MAPILLARY_TOKEN` now has two readers, and this paragraph used to name only
+one.** `backend/scoring.py` reads it for the offline CLIP batch job, which is
+the only way new scenery scores reach `data/cache.db` — the served API only ever
+reads that table, so a deployment without the token still answers. Since route
+photos landed, `backend/photos.py` reads it too, for the street-level half of
+the photo strip. Absent, photographs come from Wikimedia Commons only, which
+needs no key and no account at all, and the response says so in
+`mapillary_enabled` rather than looking like a failure. It is still not required
+to serve anything.
 
 Nothing in this repository deploys itself. Secrets go into Secrets Manager by
 hand; none is ever a CloudFormation parameter, because a parameter value is
 visible in `describe-stacks` for the life of the stack.
+
+---
+
+## ⚠ The satellite basemap needs a free account that nobody has registered
+
+**Read this before you deploy anything that serves the layer picker.** It is not
+a footnote, it is the one open licensing question in this repository, and it is
+the only item on this page that cannot be closed by a command.
+
+The imagery comes from Esri's World Imagery tile service:
+
+```
+https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}
+```
+
+That endpoint is **keyless**, and keyless is not the same as licensed. Esri's
+published guidance permits unrestricted keyless use for OpenStreetMap *tracing
+and editing*. Embedding the imagery in a third-party application is a different
+case, and for that Esri asks for four things together:
+
+| | | |
+|---|---|---|
+| a free ArcGIS Developer account | **done, 2026-08-26** | registered. See `VITE_ARCGIS_API_KEY` below for the key that follows from it |
+| no revenue generation | true | the project takes none |
+| under 1,000,000 tiles a month | true | the raster source is added **lazily**, on first selection, so a visitor who never opens the layer menu makes no request to this origin at all |
+| attribution | true | `frontend/src/lib/basemap.js` carries the credit and the footer renders it; the OpenStreetMap credit survives the switch, because the labels over the imagery are still OSM's |
+
+⚠ **Do not "fix" the Esri credit string from memory or from a tutorial.** It is
+the service's own `copyrightText`, read from
+`.../World_Imagery/MapServer?f=json` and reproduced verbatim. Maxar rebranded to
+Vantor in 2025 and the service updated its credit accordingly, so the familiar
+"Esri, Maxar, Earthstar Geographics" is now the *wrong* attribution rather than
+merely an old one. Re-read the field before editing it. `frontend/scripts/gate.mjs`
+asserts the attribution line changes and still names OpenStreetMap, which
+catches a deletion but cannot catch a wrong string.
+
+**What to do:** the account exists. What remains is to mint a key and set
+`VITE_ARCGIS_API_KEY` in the Pages build environment.
+
+### `VITE_ARCGIS_API_KEY` — the keyed imagery host
+
+Unset, the build uses the anonymous host and behaves exactly as it did before
+this variable existed. Set, it uses the authenticated one:
+
+```
+unset  →  https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}
+set    →  https://ibasemaps-api.arcgis.com/arcgis/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}?token=…
+```
+
+Both are raster XYZ templates, which is why this is a one-row change in
+`frontend/src/lib/basemap.js` rather than a rewrite. The other authenticated
+route Esri documents — `basemapstyles-api.arcgis.com/.../styles/arcgis/imagery`
+— returns a **MapLibre style document** rather than tiles, and consuming that
+means either `setStyle()` (which destroys every source and layer this app has)
+or lifting sources out of it by hand. Both were rejected.
+
+**Minting the key.** ArcGIS Location Platform dashboard → **Content → New item
+→ Developer credentials → API key credentials**. Set **Application type =
+Public application**, grant the **Basemaps** privilege (`premium:user:basemaps`),
+and fill in the **Referrers** allowlist with the deploy origins:
+
+```
+meander-eoc.pages.dev
+*.meander-eoc.pages.dev      ← Pages preview deployments get their own subdomain
+localhost                     ← only if you want `npm run preview` to use the keyed host
+```
+
+**Leaving the referrer list empty is not a neutral default.** An unrestricted
+public key is usable by anyone who reads it out of the bundle, and it is in the
+bundle by design — see below.
+
+⚠ **The key is public, and that is Esri's model rather than an oversight.** A
+"Public application" credential is meant to be embedded in client code and is
+secured by the referrer allowlist rather than by secrecy. It is not
+secret-grade: Esri's own security guidance notes a referrer header can be
+spoofed. For a free, non-commercial, low-traffic app that is the documented
+trade. It is *not* a credential of the kind `MAPILLARY_TOKEN` is — that one is
+server-side only and must never reach the bundle.
+
+⚠⚠ **The referrer allowlist needs a referrer, and this site sends none.** Both
+`frontend/public/_headers` and the Caddyfile set `Referrer-Policy: no-referrer`.
+Under that policy the browser sends no `Referer` at all, so a restricted key is
+rejected on every single tile — a blank satellite layer, and nothing in the
+console names the cause. The header is right and stays; the exception is made
+per request in `MapView`'s `transformRequest`, which returns
+`referrerPolicy: 'origin'` for the keyed host and nothing for anything else. So
+Esri receives `https://meander-eoc.pages.dev/` and never a path, a route or a
+coordinate. `basemap-contract.test.js` pins that the exception stays narrow.
+
+**Free tier:** 2,000,000 basemap tiles a month. Exceeding it converts to
+pay-as-you-go, which is off by default on a new account — so with no payment
+method on file the practical failure mode is requests failing rather than a
+surprise bill. Verify that against your own account settings rather than
+trusting this paragraph.
+
+**Both origins are named in the CSP**, not only the active one. Which host is
+live is decided by this variable at *build* time, and a policy covering only
+the active one would blank the satellite layer the first time the variable
+changed. A contract test fails if either goes missing.
+
+[BLOCKED.md](BLOCKED.md) §13 tracks what remains.
+
+**If it ever becomes untenable** — the project takes revenue, or Esri changes
+the terms — the swap is one line in `frontend/src/lib/basemap.js`, plus the
+matching origin in `frontend/public/_headers`. EOX's Sentinel-2 cloudless is
+verified keyless, CC BY-NC-SA 4.0 and CORS-open:
+
+```
+https://tiles.maps.eox.at/wmts/1.0.0/s2cloudless-2020_3857/default/g/{z}/{y}/{x}.jpg
+EOxCloudless 2020 by EOX IT Services GmbH, contains modified Copernicus Sentinel data 2020
+```
+
+It is not the default because it is 10 m/pixel and EOX's own documentation says
+z13 best resembles the source resolution. Follow mode runs at about z17, where
+Sentinel-2 is an upsampled blur — which for a walking app is the difference
+between seeing the path and seeing a green smear.
+
+**The privacy consequence ships with it, and it is not optional either.**
+Satellite is the only basemap that fetches tiles while somebody is walking, so
+`FollowMode` prints a different provenance sentence under it, the layer picker
+warns at the moment of choosing, and the CSP names
+`https://server.arcgisonline.com` in **both** `img-src` and `connect-src` —
+both, because MapLibre v5 loads raster tiles through `fetch` rather than through
+an `<img>`, and a policy that forgets `connect-src` produces a permanently blank
+basemap after a twenty-second timeout with no error anywhere.
+
+---
+
+## Route photos, and the one setting that matters in production
+
+`POST /api/photos` returns image URLs that point back at this service, and
+`GET /api/photo/{ref}` streams the bytes. The browser never contacts Wikimedia
+or Mapillary, so neither of them sees a user's IP address next to a set of
+coordinates describing where that person is about to walk. Both paths need a
+line in the `@public` allowlist in `Caddyfile`, and both have one.
+
+**`MEANDER_PHOTO_SIGNING_KEY` is empty on a single worker and must be set on
+more than one.** Unset, `backend/config.py` generates a key per process:
+references stay valid for the life of that process, and a restart invalidates
+them, which shows up as one image that fails to load and is refetched by the
+next `/api/photos` call. Run two workers or two instances without setting it and
+each mints references the others reject — roughly `(n-1)/n` of image loads 404
+at random, which reads as a flaky CDN rather than as a configuration error.
+
+```bash
+openssl rand -hex 32
+```
+
+It is not a credential and grants access to nothing. `backend/photos.py` refuses
+any host that is not `upload.wikimedia.org` or a Mapillary CDN edge whatever the
+signature says; the HMAC is the second lock, there so a reference cannot be
+edited into a *different* URL on those allowed hosts.
+
+The remaining knobs — `MEANDER_PHOTO_MAX_ANCHORS` (keep it **odd**, or the
+`fastest` hero stops being the midpoint), `MEANDER_PHOTO_SEARCH_RADIUS_M`,
+`MEANDER_PHOTO_MAX_IMAGE_BYTES`, `MEANDER_PHOTO_CACHE_MAX_AGE_S` and the
+`MEANDER_PHOTO_RATE_*` bucket — are documented beside their defaults in
+`.env.example` and in `backend/config.py`. The image endpoint has its own token
+bucket on purpose: one route view asks for up to six images against a route
+bucket whose whole capacity is twelve.
 
 ---
 
@@ -288,6 +457,14 @@ extended, because most of it was never about Render.
 | *Everyone* getting 429 at once | `MEANDER_TRUSTED_PROXY_HOPS` is wrong. Behind CloudFront **and** an ALB it is `2`: the header is `viewer, cloudfront` and the limiter counts from the right. At `1` every request in the world shares one bucket, and the limiter still *works*, which is what makes it hard to spot. |
 | A Cloudflare **preview** deployment loads, but every API call fails CORS | Expected, and accepted rather than fixed — see "Preview deployments" above. |
 | Routes appear but the map is blank | CSP `connect-src`/`img-src` is missing `https://tiles.openfreemap.org`. |
+| The map is fine until you pick **Satellite**, then blank for twenty seconds and then blank for ever, with nothing in the console | CSP is missing `https://server.arcgisonline.com` from **`connect-src`**. `img-src` alone is not enough and looks like it should be: MapLibre v5 loads raster tiles through `fetch`, not through an `<img>`, so the request is a connect and the policy refuses it. `MapView.jsx` then falls through to its 20 s `MAP_LOAD_TIMEOUT_MS` and reports nothing, because no error is raised anywhere. Both entries are in `frontend/public/_headers`; if you serve the app from somewhere else, both have to be there too. |
+| The satellite layer works and you have not registered anything with Esri | Read the ⚠ section above. Three of Esri's four conditions are met and the fourth is a free account nobody has created. It will not break; it is unresolved. |
+| The follow screen says satellite tiles are being fetched as you move | Correct, and deliberate. Under satellite the imagery host can infer the walk from the sequence of tile requests. The position itself still never leaves the device, and no tile is cached. Switch to Map or Green cover and the sentence goes back to "no network in follow mode", which is measured rather than asserted. |
+| Photos load, and after an API restart every one of them 404s | Expected on a single worker: `MEANDER_PHOTO_SIGNING_KEY` is unset, so the key is per process and a restart invalidates outstanding references. The next `/api/photos` call mints new ones. If it happens **continuously and at random** instead, you are running more than one worker without the key set — see "Route photos" above. |
+| Every photo comes from Wikimedia Commons and none from street level | No `MAPILLARY_TOKEN`. That is the ordinary keyless configuration, not a failure: `mapillary_enabled: false` and a note say so, and the strip is Commons-only. |
+| The `scenic` hero is not obviously the scenic bit | Correct, and the response admits it. Only `accessible` (the first barrier) and `fastest` (the midpoint) are anchored by anything measured. The other four have no per-segment data on the wire at all, so the hero is the most-photographed nearby place and `objective_measured` is `false`. |
+| Mapillary answers `Please reduce the amount of data you're asking for` | The bbox is too large. Measured: a 0.016 × 0.008 degree box is rejected outright, while the 0.004-degree box `backend/photos.py` builds (`MAPILLARY_BBOX_HALF_DEG = 0.002`) returns images fine. If you widen `MEANDER_PHOTO_SEARCH_RADIUS_M`, check this before assuming the token is wrong. |
+| A photo request is served from `scontent-*.xx.fbcdn.net` in the backend's egress | Correct. That is Mapillary's thumbnail CDN and its hostname rotates per edge and per session — `scontent-bom5-1.xx.fbcdn.net` was one observed live. It is exactly why photos are proxied: no CSP can enumerate those hosts without allowing the whole of Facebook's CDN, and letting the browser fetch them would hand the user's IP to the host anyway. |
 | The map is blank **and** the app says it is showing a saved copy | Correct. Map tiles are deliberately never cached — a tile cache is a record of where you have been — so an offline route has no map. Everything the routes say is in the list. |
 | Nothing is served offline at all | No longer true on the web. The service worker registers on the live site, precaches eleven entries and opens the app with the network off — verified in a real browser by `frontend/scripts/live-gate.mjs`. Still true for iOS, where a service worker never registers under `capacitor://localhost` at all: BLOCKED.md §5. |
 | "Save routes for offline" is granted, and nothing is saved | **Fixed.** It was real: `sw.js` returns early for any cross-origin request — the line that keeps map tiles from ever being cached, and it is right — but this deployment serves the site from `meander-eoc.pages.dev` and the API from `meander-app.duckdns.org`, so *every* API call was cross-origin and the worker's `/api/routes` branch never ran. Measured live at the time: consent granted, search completed, zero results caches, nothing stored. The store now lives on the page (`frontend/src/lib/resultsStore.js`), written by `client.js` after a completed stream, so it sees the request whatever origin the API is on. BLOCKED.md §8 has the reasoning. If you see this symptom again, check in this order: is a shell cache installed (`caches.keys()` — the store versions itself against it and stores nothing without one); is the origin secure (`crypto.subtle` is needed for the request digest); and did the search actually return 200 rather than 429. |

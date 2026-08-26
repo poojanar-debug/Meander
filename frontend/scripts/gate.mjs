@@ -54,7 +54,16 @@ const PLAN_MANIFEST = [
   ['.dial__slider', 'TimeDial.jsx — the native range input'],
   ['.mode__seg', 'ModeControl.jsx'],
   ['.chip', 'ObjectiveChips.jsx'],
+  ['.layers__toggle', 'LayerPicker.jsx — the basemap control'],
   ['[role="status"][aria-live="polite"]', 'App.jsx — the one live region'],
+]
+
+// The layer menu, which matches zero elements until the toggle is pressed —
+// so it is separate for exactly the reason FOLLOW_MANIFEST is.
+const LAYERS_MANIFEST = [
+  ['.layers__menu', 'LayerPicker.jsx — the open menu'],
+  ['.layers__option', 'LayerPicker.jsx — a basemap choice'],
+  ['.layers__hint--warn', 'LayerPicker.jsx — the satellite tile-streaming warning'],
 ]
 
 const DEST_MANIFEST = [
@@ -647,6 +656,80 @@ check(
 // wash families are drawn at all, and their text sits on them.
 await a11yPass('objectives')
 
+// 3a-ii. THE LAYER PICKER — operated, and its warning proved to exist.
+//
+// `.layers__toggle` in the plan manifest proves a button is painted and
+// nothing more. What actually matters here is not the button: it is that
+// choosing satellite carries a visible warning that tiles will be fetched
+// while walking, and that the attribution line changes to name the imagery
+// source. Both are obligations rather than features — the first is the honest
+// half of a privacy claim the app makes elsewhere in writing, the second is a
+// licence condition — and neither is the kind of thing axe or a target sweep
+// would ever notice going missing.
+await load(390, 844, true)
+
+const attributionText = () =>
+  cdp.evaluate(`(document.querySelector('.map-attribution')?.textContent ?? '').trim()`)
+
+const beforeAttribution = await attributionText()
+const opened = await cdp.evaluate(
+  `(()=>{const b=document.querySelector('.layers__toggle');if(!b)return false;b.click();return true})()`,
+)
+await new Promise((r) => setTimeout(r, 200))
+check('[layers] the toggle opens the menu', opened)
+
+const layerCounts = await countSelectors(LAYERS_MANIFEST)
+const layersOk = checkManifest('layers', LAYERS_MANIFEST, layerCounts)
+
+if (layersOk) {
+  const options = await cdp.evaluate(`([...document.querySelectorAll('.layers__option')]).map(o => ({
+    label: o.querySelector('.layers__option-label')?.textContent ?? '?',
+    checked: o.getAttribute('aria-checked') === 'true',
+    described: !!document.getElementById(o.getAttribute('aria-describedby') || ''),
+  }))`)
+  check(
+    '[layers] exactly one option is checked at rest',
+    options.filter((o) => o.checked).length === 1,
+    JSON.stringify(options),
+  )
+  check(
+    '[layers] every option names the hint that describes it',
+    options.every((o) => o.described),
+    options.filter((o) => !o.described).map((o) => o.label).join(', '),
+  )
+
+  // Graded with the menu open: it is a popover of real controls over a map,
+  // and it has never been on screen for any other pass.
+  await a11yPass('layers')
+
+  const picked = await cdp.evaluate(`(()=>{
+    const o=[...document.querySelectorAll('.layers__option')].find(x=>/satellite/i.test(x.textContent||''))
+    if(!o)return false; o.click(); return true})()`)
+  await new Promise((r) => setTimeout(r, 300))
+  check('[layers] satellite is there to choose', picked)
+
+  const afterAttribution = await attributionText()
+  check(
+    '[layers] choosing satellite changes the attribution line',
+    afterAttribution !== beforeAttribution && /esri/i.test(afterAttribution),
+    `was ${JSON.stringify(beforeAttribution)}, now ${JSON.stringify(afterAttribution)}`,
+  )
+  check(
+    '[layers] the OpenStreetMap credit survives the switch',
+    /openstreetmap/i.test(afterAttribution),
+    afterAttribution,
+  )
+
+  const layerOverflow = await cdp.evaluate(overflowCheck)
+  check(
+    '[layers] no horizontal scroll with the menu open',
+    layerOverflow.scrollW <= layerOverflow.clientW + 1,
+    `${layerOverflow.scrollW} vs ${layerOverflow.clientW}${
+      layerOverflow.wide.length ? ` — ${layerOverflow.wide.join(', ')}` : ''
+    }`,
+  )
+}
+
 // 3b. THE PLAN WITH A DESTINATION — a distinct screen, so it is graded as one.
 //
 // It was reachable before this only through a shared link, which the gate has
@@ -820,6 +903,7 @@ const FOLLOW_MANIFEST = [
   ['.follow', 'FollowMode.jsx — the overlay'],
   ['.follow__dock', 'FollowMode.jsx — the dock'],
   ['.follow__provenance', 'FollowMode.jsx — the privacy line'],
+  ['.map__compass', 'MapView.jsx — the course-up toggle'],
 ]
 
 await load(390, 844, true)

@@ -1,6 +1,7 @@
 # Meander API
 
-Base path `/api`. JSON in, JSON out. No authentication, no cookies, no session.
+Base path `/api`. JSON in, JSON out — with one deliberate exception, `GET /api/photo/{ref}`, which
+streams image bytes. No authentication, no cookies, no session.
 
 Every error uses one envelope:
 
@@ -232,6 +233,119 @@ and never to production OSM.**
 
 ---
 
+## `POST /api/photos`
+
+Photographs along one route, chosen for what that route was optimised for. A second call rather
+than part of `/api/routes`: the photographs come from two hosts neither the router nor the
+enrichment path touches, and folding them in would put an unrelated upstream between the user and
+the thing they actually asked for. It also means the frontend asks about the one route the user
+picked instead of all three.
+
+```json
+{
+  "geometry": [[4.8686, 52.3579], [4.8701, 52.3588]],
+  "objective": "scenic",
+  "blockers": []
+}
+```
+
+`geometry` is `[[lon, lat], …]` — GeoJSON order, exactly as `Route.geometry` carries it, so a route
+can be passed straight through. Two points minimum, 800 maximum; thin the line before sending it.
+`blockers` is passed through from `Route.blockers` and is only used by the `accessible` hero.
+
+```json
+{
+  "hero": {
+    "id": "…",
+    "url": "/api/photo/<ref>",
+    "source": "wikimedia_commons",
+    "lat": 52.3579, "lon": 4.8686, "at_m": 812.0,
+    "width": 640, "height": 480,
+    "title": "Vondelpark", "licence": "CC BY-SA 3.0",
+    "licence_url": "https://creativecommons.org/licenses/by-sa/3.0",
+    "author": "…", "attribution": "…",
+    "source_page": "https://commons.wikimedia.org/wiki/File:…",
+    "captured_at": "2019-06-04T10:12:00Z"
+  },
+  "strip": [],
+  "hero_basis": "most_photographed",
+  "hero_reason": "The most photographed place along this route, according to Wikimedia Commons.",
+  "objective_measured": false,
+  "sources_used": ["wikimedia_commons"],
+  "mapillary_enabled": false,
+  "note": "This is the most photographed place near the route, not the prettiest part of it. …"
+}
+```
+
+**`url` is a path on this service, never an upstream URL.** That is the point of the endpoint — see
+Privacy below. A split deployment has to put the API base back on it.
+
+### `objective_measured` is the field that decides whether the hero means anything
+
+`hero_basis` is one of `first_barrier`, `midpoint`, `most_photographed`, `sampled` or `none`, and
+`objective_measured` is true for exactly the first two.
+
+| objective | anchor | measured? |
+|---|---|---|
+| `accessible` | the first barrier on the route, off `Route.blockers` | **yes** |
+| `fastest` | the midpoint, which is arithmetic | **yes** |
+| `scenic` `shade` `quiet` `air` | the most-photographed nearby place, or an evenly spaced one | **no** |
+
+The four unmeasured ones are not an oversight and cannot be fixed here. Those scores reach the wire
+as one aggregate number for the whole route; the per-way tag spans they are computed from are
+consumed inside the backend and never leave it. There is no greenest point, no shadiest point and
+no quietest point on a `Route` to choose from, so the response says so in `note` and sets
+`objective_measured: false` rather than inventing one. **Do not render a hero as "the greenest
+point" when this is false.**
+
+`hero_reason` is a full sentence, rendered verbatim as the caption. `note` is null when there is
+nothing worth saying; when a deployment has no `MAPILLARY_TOKEN` and nothing more important is
+being said, it explains that the photographs are Commons-only.
+
+Rate-limited on the **routing** bucket rather than one of its own, and not counted against the
+daily route ceiling: one photo request follows one route selection, so it has the same natural rate
+as a route request. `/api/photo/{ref}` below does not, and has its own.
+
+### It never returns an error envelope
+
+Every upstream call degrades. Offline, slow, rate-limited upstream, no results: the answer is a
+null `hero`, an empty `strip`, and `sources_used: []` if nobody answered at all — which is a
+different statement from both sources answering with nothing. A page that has already drawn a route
+must not acquire an error box because a photo host was slow.
+
+Licences are required, not best-effort: `Photo.licence` has no default, and a photograph whose
+licence could not be determined is dropped rather than shown uncredited. `attribution` is assembled
+server-side and is meant to be rendered verbatim, not reassembled.
+
+---
+
+## `GET /api/photo/{ref}`
+
+Streams one upstream image, so the image host never sees the user. `ref` is the opaque signed
+reference carried in `Photo.url`; it is not a URL and cannot be constructed by hand.
+
+Returns the image bytes with `Cache-Control: public, max-age=86400, immutable` — honest rather than
+optimistic, because the reference pins one exact upstream URL — plus `X-Content-Type-Options: nosniff`
+and `Content-Disposition: inline`. Only `image/jpeg`, `image/png`, `image/webp`, `image/gif` and
+`image/avif` are passed through; anything else is refused, because a proxy that serves an arbitrary
+content type from this API's own origin is an XSS vector.
+
+Anything that is not a valid reference to one of exactly two allowed hosts gets the same answer
+whatever the reason. `backend/photos.py` documents why all three of the signature, the host
+allowlist and the size cap are needed rather than any one of them, and why the shared client runs
+with `follow_redirects=False` here in particular: a redirect is the standard way an allowlisted host
+is turned into a request to somewhere else.
+
+**Its own token bucket** (default 60 burst, refilling 60/min), separate from the routing one and
+never counted against the daily route ceiling. One route view asks for up to six images and the
+route bucket holds twelve requests in total, so sharing it would leave nothing for the second route
+a user looks at. An image is not a route.
+
+On a deployment running more than one worker, `MEANDER_PHOTO_SIGNING_KEY` must be set, or each
+worker mints references the others reject and roughly `(n-1)/n` of image loads 404 at random.
+
+---
+
 ## Privacy
 
 Nothing here is stored against a person. No cookies are set, no browser storage is used, and the
@@ -239,3 +353,18 @@ server keeps no location history. Coordinates, IP addresses and user agents are 
 log — `backend/logging_setup.py` redacts them as a backstop. Usage is counted as aggregates plus a
 daily unique-session count derived from an in-memory digest keyed by a salt that is generated at
 process start and never persisted.
+
+**Photographs are proxied for exactly this reason.** A route is a person's Tuesday afternoon, and
+asking a browser to fetch a thumbnail hands Wikimedia and Mapillary an IP address alongside
+coordinates describing where that person is about to walk. `/api/photos` therefore returns URLs on
+this service and `/api/photo/{ref}` streams the bytes, so the image hosts see this server and never
+a user. The alternative — returning upstream URLs and naming the hosts in the frontend's
+Content-Security-Policy — was rejected twice over: it reintroduces the disclosure the proxy exists
+to prevent, and Mapillary's thumbnails come from rotating `scontent-*.xx.fbcdn.net` hostnames that a
+strict policy cannot enumerate at all.
+
+One thing this API does **not** control: the map. The default and green-cover basemaps fetch no
+tiles while a user is walking, and the satellite basemap fetches one for every stretch covered,
+direct from `server.arcgisonline.com`. That is a frontend choice, it is stated in the UI at the
+moment of choosing and again on the follow screen, and no tile is ever cached — but it is not
+proxied and this server is not in that path.

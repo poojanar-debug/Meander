@@ -56,18 +56,29 @@ lists the seven pieces of it that have to come back, and why each one is wanted.
 
 ### What is proven
 
-**787 backend tests and 597 frontend tests pass offline**, at 87.04% statement coverage against an
-85% floor. (Those first two numbers said 706 and 442 for several sessions after they stopped being
-true; they are what the suites report today.) The suite never opens a socket, and a job in CI runs it under `unshare -n` to prove
+**845 backend tests and 651 frontend tests pass offline**, at 87.46% statement coverage against an
+85% floor. Two backend tests skip; both are torch-related and both pre-date this tree. (Those first
+two numbers said 706 and 442, then 787 and 597, for several sessions after each pair stopped being
+true; these are what the suites report today, and the coverage figure was re-run rather than
+carried forward.) The suite never opens a socket, and a job in CI runs it under `unshare -n` to prove
 that rather than trust it. The deploy image imports with torch absent, checked against the real
 requirements file, and `backend.main` is imported in that environment to prove absence is not the
-only thing being measured.
+only thing being measured. (`make test-sandboxed` could not be run in the environment this round's
+work was done in — `unshare -n` returns "Operation not permitted" there. The in-suite socket guard
+was active and passed; the second line of defence went unexercised locally, and CI still runs it.
+[BLOCKED.md](BLOCKED.md) §14.)
 
 **WCAG 2.1 AA, checked rather than asserted.** `frontend/scripts/gate.mjs` runs axe-core against a
 real headless Chrome in both themes and reports no wcag2a/wcag2aa violations, alongside a 44 x 44
 target sweep, a no-horizontal-scroll check at 320 px and 390 px, and an assertion that every route
-row carries its own text. 85 checks in total, and the gate refuses to run any of them if its
+row carries its own text. 102 checks in total, and the gate refuses to run any of them if its
 selector manifest does not match — the difference between grading the app and grading nothing.
+
+**One of the 102 fails, and it is not new.** `[destination] Find routes still streams cards for a
+trip with one` fails here and fails identically on the unmodified baseline, where it was 1 of 85.
+It is written down rather than rounded off: "all green except one" is the sentence that hides the
+regression the week after it is written. The honest number is **101 of 102, with one pre-existing
+failure**, and it is unrelated to anything on this page.
 
 Fifteen of those are the objective picker, which had no interaction coverage at all until the last
 three objectives were released: the gate now presses a chip, trades one objective out for another
@@ -78,6 +89,14 @@ Ten more are a second pass that enters follow mode and re-runs the sweep, axe an
 check there. Follow mode was the one user-facing screen with no automated coverage of any kind: the
 gate reached it through neither of its entry points, and no test in the suite renders a component.
 It had been overflowing its own container on every phone in portrait since it was written.
+
+Seventeen more are the map layers and the compass. Two of the things the layer picker must do are
+obligations rather than features — choosing satellite has to carry a visible warning that tiles
+will be fetched while walking, and it has to add Esri's credit to the attribution line *without*
+dropping OpenStreetMap's — and neither is the kind of thing axe or a target sweep would ever notice
+going missing. So the gate opens the menu, grades it with axe while it is open, presses satellite,
+and reads the attribution line before and after. The follow pass also now asserts the course-up
+compass is painted.
 
 Four more guard the panel's scroll arrangement, and the gate now clears any service worker left in
 its profile before grading. It had none, and `sw.js` serves the shell cache-first without
@@ -115,8 +134,24 @@ so the script asks the running graph what it covers instead of assuming.
 
 **The frontend answers "when should I go?" and "which way, exactly?"** — a best-departure window,
 sunrise and sunset computed in the browser, turn-by-turn directions with a barrier rendered inside
-the step you would meet it on, and a live follow mode in which the position never leaves the page,
-measured at zero outbound requests.
+the step you would meet it on, and a live follow mode in which the position never leaves the page.
+
+**That sentence used to end "measured at zero outbound requests", and it is now true of two of the
+three basemaps rather than of the screen.** The measurement still holds for the default map and for
+green cover: OpenFreeMap's vector source declares `maxzoom: 14`, so the z17 follow camera is served
+by overzooming tiles the client already holds, and a full simulated walk made three requests, all
+of them glyph ranges and not one of them a tile. Under **satellite** it is false. Esri's imagery is
+raster to z19, so every stretch walked pulls new tiles, and the sequence of those requests is the
+walk.
+
+The position itself still never leaves the phone under any layer, no recalculation happens, and no
+tile is ever written to a cache. It would therefore have been technically defensible to leave the
+sentence alone, and that is exactly the defence this project does not make: somebody reading "no
+network in follow mode" on the screen they are walking with will conclude nothing is being
+disclosed. So the provenance line changes with the basemap and names the imagery host, the layer
+picker warns at the moment of choosing, and the walk-summary card says the same thing in the past
+tense. A privacy claim that is true for the default and false for one setting is worse than no
+claim, because the setting is the case where it matters.
 
 **It installs and opens offline again.** The service worker precaches the app shell, and the
 layout and accessibility gate is back — rewritten rather than restored, because the version that
@@ -160,6 +195,22 @@ aesthetic appeal rather than greenery. The full table and both caveats are in
 `backend/scoring.py` beside the constant, and in
 [BLOCKED.md](BLOCKED.md) §2.
 
+**The satellite basemap is running against terms nobody has accepted.** Esri's World Imagery
+endpoint is keyless, and keyless is not the same as licensed. Esri's published guidance permits
+unrestricted keyless use for OpenStreetMap *tracing and editing*; embedding the imagery in a
+third-party application is a different case, and for that Esri asks for four things together: a
+free ArcGIS Developer account, no revenue generation, under a million tiles a month, and
+attribution. **Three of the four are already true.** This project takes no revenue, is nowhere near
+a million tiles, and renders Esri's own `copyrightText` verbatim in the map footer — read from the
+service's `?f=json` rather than copied from a tutorial, because Maxar rebranded to Vantor in 2025
+and the string most tutorials carry is now the *wrong* credit rather than merely an old one.
+
+The fourth is a registration, not a payment, and it has to be done by a person. Nobody has done it.
+[BLOCKED.md](BLOCKED.md) §13 is the open item and says what happens if it is refused;
+`frontend/src/lib/basemap.js` carries the full argument and names a verified fallback — EOX's
+Sentinel-2 cloudless, keyless and CC BY-NC-SA 4.0 — along with the reason it is not the default
+(10 m/pixel, which at follow zoom is a green smear rather than a path).
+
 **Not tested on a real phone.** The layout and the targets are measured in headless Chrome at
 390×844. That is not the same claim as a phone in a hand, and it is about to matter a great deal
 more — this tree is the base for a native iOS build, where a browser at 390×844 reports zero
@@ -179,6 +230,12 @@ returns real routes for `quiet`, `shade` and `air` from the public host, the
 default three are unchanged, and `frontend/scripts/live-gate.mjs` reports **28
 passed, 0 failed** against production in a real browser — CORS, CSP, the
 service worker, the offline open and a permalink among them.
+
+**Nothing from the map-layers round is deployed.** The basemaps, the follow-mode heading,
+viewpoints, and both photo endpoints are committed and unshipped, and the `Caddyfile` lines that
+make `/api/photos` and `/api/photo/*` public are committed too. Until the VM is redeployed the photo
+call 404s against the live API — which `client.js` degrades to a null response rather than an error
+box, so the route still draws with no photographs under it.
 
 **The AWS path in [`infra/`](infra/) is still unapplied.** Four CloudFormation
 stacks that would deploy it — ECS Fargate for the API and the router, CloudFront
@@ -205,6 +262,29 @@ self-audit and what a reviewer should still be sceptical about.
   ignored, plus sunrise and sunset computed in the browser.
 - **Turn-by-turn directions**, with a barrier rendered inside the step you would meet it on.
 - **Live follow mode**, in which the position never leaves the browser.
+
+### What the layers, the heading and the photos added
+
+- **Three basemaps** — `map`, `green` (the same OpenFreeMap vector tiles repainted so parks and
+  woodland come forward), and `satellite` (Esri raster, added lazily *under* the label symbols so
+  street names survive over the imagery). Each row in `frontend/src/lib/basemap.js` has to declare
+  what it costs to follow with, so nothing can add a basemap and forget to say.
+- **Direction in follow mode** — a heading cone under the puck, filtered on `hasHeading` because
+  most walking fixes carry none; chevrons along the line ahead; a turn badge drawn on the route at
+  the next manoeuvre; and course-up rotation, default on, with a compass to turn it off, an 8°
+  threshold so the map does not rock, and north forced under `prefers-reduced-motion`.
+- **The provenance sentence became conditional**, which is the most important thing in this list
+  and is argued out above.
+- **Viewpoints** (`tourism=viewpoint`) alongside benches, water, toilets and shelter, drawn amber
+  rather than mint, with per-type glyphs on the detail pills and amenity dots now shown for every
+  route rather than only the selected one.
+- **The next amenity ahead, in follow mode.** `followTracking` had computed it and returned it as
+  `rest` since it was written, and nothing rendered it — so the app knew there was drinking water
+  in 200 m and kept it to itself.
+- **The elevation profile in follow mode**, compact, with a marker at where you are. The data had
+  been on every response since it shipped and only the detail sheet ever read it.
+- **Route photographs**, fetched and streamed by the backend so no image host ever sees a user.
+  Read the limitation below before trusting the hero.
 
 ---
 
@@ -388,7 +468,8 @@ The suite runs entirely offline. It never opens a socket.
 
 ## API
 
-`POST /api/routes` · `GET /api/geocode?q=` · `GET /api/health` · `POST /api/report-barrier`
+`POST /api/routes` · `GET /api/geocode?q=` · `GET /api/health` · `POST /api/report-barrier` ·
+`POST /api/photos` · `GET /api/photo/{ref}`
 
 Full contract, including the streaming shape and the blocked-route cases: [docs/API.md](docs/API.md).
 
@@ -423,6 +504,27 @@ written and then read *back*, so a control cannot claim a permission that storag
 Map tiles will **never** be cached. A tile cache is a record of where you have been, and they come
 from a third party. The cost is that an offline route has no map behind it — which the app says,
 and which it can afford, because the list carries every duration, score, blocker and rest stop.
+That holds for the satellite layer too: `sw.js` will not cache its tiles either.
+
+**Not cached is not the same as not fetched.** The default map and green cover fetch nothing while
+you walk — measured, see **Status** — and the satellite layer fetches a tile for every stretch you
+cover, from `server.arcgisonline.com`. Those requests are not stored anywhere, by us or by the
+browser, but they are made, and the host that answers them can infer the walk from their sequence.
+The app says so in three places rather than none: in the layer picker at the moment of choosing, in
+the attribution line, and in the provenance sentence at the foot of the follow screen. The basemap
+choice is deliberately **not** persisted — it would be a third localStorage key, and the two words
+above are the whole of what this app is willing to keep.
+
+**Photographs are fetched by the server, never by your browser.** A route is somebody's Tuesday
+afternoon, and asking the browser for a thumbnail hands Wikimedia and Mapillary an IP address next
+to a set of coordinates describing where that person is about to walk. So `POST /api/photos`
+returns URLs that point back at this service and `GET /api/photo/{ref}` streams the bytes. The
+alternative — returning upstream URLs and naming the hosts in the CSP — was rejected twice over: it
+reintroduces exactly the disclosure the proxy exists to prevent, and Mapillary's rotating
+`scontent-*.xx.fbcdn.net` hostnames cannot be enumerated by a strict policy anyway. `backend/photos.py`
+documents the three things that stop a proxy becoming somebody else's open relay: a two-host
+allowlist, an HMAC over the reference so a URL cannot be swapped for another on those hosts, and a
+size cap with redirects refused.
 
 A route served from that cache is always labelled as saved, with its age, on the row, on the card
 and on a pill under the top bar that no panel position can hide. Past fifteen minutes it also
@@ -520,8 +622,9 @@ PROGRESS.md, not a sensor reading from the pavement you will be walking on.
 
 ### Rest stops are whatever OSM knows about
 
-Benches, drinking water, toilets and shelters within 35 m of the line. Under-recorded almost
-everywhere, and the app cannot tell a usable bench from a broken one. When Overpass is unreachable
+Benches, drinking water, toilets, shelters and — new in this round — viewpoints, within 35 m of
+the line. Under-recorded almost everywhere, and the app cannot tell a usable bench from a broken
+one. When Overpass is unreachable
 the field is `null` — "we could not look" — which is deliberately distinct from `[]`, "we looked
 and found none".
 
@@ -531,10 +634,49 @@ emitted, and an unreachable Overpass was indistinguishable on the wire from a ro
 on it. The model now carries the distinction the sentence claims. The frontend had been branching
 on `rest_stops == null` all along.
 
+**A viewpoint is not a rest stop and the app does not pretend otherwise.** It arrives from
+`tourism=viewpoint` rather than `amenity=*`, and it rides in the same list only because the
+corridor match, the spacing score and the map layer all want it treated the same way
+*geometrically*. Everywhere a person sees one it is worded and drawn differently: amber rather than
+mint, a different glyph, and "a view" rather than "a viewpoint" — because "there is a bench in
+200 m" and "there is a view in 200 m" are not the same sentence, and flattening them would waste
+the one of the two that would make somebody look up from the phone.
+
+Adding them costs the Overpass query almost nothing, measured with `out count` rather than assumed:
+over the Vondelpark bbox, 22 viewpoints against 4,762 amenities, taking the query from 79.4% of its
+6,000-element ceiling to 79.7%. Hyde Park has none at all beside 219 amenities. There are two
+orders of magnitude fewer viewpoints than benches, for the same reason they are worth showing.
+
 The same `null` is returned when Overpass answers but truncates. It caps at a fixed element count
 and truncates by element id, which is uncorrelated with position along a route — so a full page is a
 perforated sample of the area rather than a shortened one, and presenting it as a survey would drop
 benches from the middle of a route with no indication.
+
+### Route photos are anchored by the objective for only two of the six objectives
+
+The idea is that choosing the scenic route should show you something scenic on it. Two objectives
+can deliver that honestly and four cannot, and the response says which it is giving you.
+
+`accessible` anchors the hero at the **first barrier**, which is a real coordinate the route already
+carries — so the picture is of the thing that blocks you, which is the most useful image this
+feature can produce. `fastest` anchors at the **midpoint**, which is arithmetic and cannot be wrong.
+
+For `scenic`, `shade`, `quiet` and `air` there is no per-segment data anywhere on the wire to anchor
+to. Those scores arrive as **one aggregate number for the whole route**; the per-way tag spans they
+are computed from are consumed inside the backend and never leave it. So there is no greenest point,
+no shadiest point and no quietest point to be found on a `Route`, and the backend does not invent
+one: the hero falls back to the most-photographed place near the route — which is a measurement of
+Wikimedia Commons, not of the route — and the response carries `objective_measured: false` plus a
+sentence saying so, which the UI renders rather than swallows. No caption in this app reads "the
+greenest point on this route", because nothing measured greenery point by point.
+
+Every image is somebody else's work under a licence that requires credit. A photo whose licence
+could not be determined is dropped rather than shown uncredited, and `Photo.licence` is a required
+field with no default so that a later refactor cannot quietly reintroduce the alternative.
+
+Without `MAPILLARY_TOKEN` the photos come from Wikimedia Commons only. That is the ordinary keyless
+configuration rather than a failure, and the response says so in `mapillary_enabled` and in a note,
+instead of leaving the frontend to guess from an empty `sources_used`.
 
 ### The keyless demo runs on hand-built routing data
 
@@ -569,6 +711,11 @@ MIT — see [LICENSE](LICENSE).
 
 - Map data © [OpenStreetMap](https://www.openstreetmap.org/copyright) contributors, ODbL.
 - Basemap tiles by [OpenFreeMap](https://openfreemap.org/).
+- Satellite imagery: Source: Esri, Vantor, Earthstar Geographics, and the GIS User Community —
+  reproduced verbatim from the service's own `copyrightText`. **Read the licensing caveat under
+  "What is still unverified"; this one is not settled.**
+- Photographs from [Wikimedia Commons](https://commons.wikimedia.org/), under the per-file licence
+  the app credits beneath each image.
 - Street-level imagery from [Mapillary](https://www.mapillary.com/), CC BY-SA 4.0.
 - Weather and air quality from [Open-Meteo](https://open-meteo.com/), CC BY 4.0.
 - Routing by [GraphHopper](https://www.graphhopper.com/).

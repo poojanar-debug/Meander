@@ -17,8 +17,25 @@ import { UNKNOWN, formatElevation } from '../lib/units.js'
  * line. The SVG is aria-hidden and paired with a text summary, because a
  * polyline is not an accessible description of anything.
  */
-export default function ElevationProfile({ profile, units }) {
+export default function ElevationProfile({
+  profile,
+  units,
+  // Metres walked so far, for the marker that rides the line in follow mode.
+  // Null everywhere else, which is every use of this component that existed
+  // before follow mode learned to draw it.
+  atM = null,
+  // Follow mode's version: the line, the marker, and nothing else. The stat
+  // line and the axis are two more things to read on a screen somebody is
+  // walking with, and both of them say what the detail sheet already said
+  // before they set off.
+  compact = false,
+}) {
   if (!profile?.elevations_m?.length) {
+    // Nothing at all in compact mode. On the detail sheet the sentence is the
+    // honest answer to a question the reader asked by opening it; in follow
+    // mode it is an unprompted paragraph about missing data, taking up the
+    // space of the thing it is apologising for.
+    if (compact) return null
     return (
       <p className="profile__absent">
         Climb was not measured for this route. That is not the same as it being level.
@@ -72,8 +89,28 @@ export default function ElevationProfile({ profile, units }) {
         ? '.'
         : `, within the ${limit}% limit.`)
 
+  // Where the walker is on the line, in the SVG's own coordinates.
+  //
+  // Interpolated between the two bracketing samples rather than snapped to the
+  // nearest one. The profile is thinned before it reaches the wire, so
+  // consecutive samples can be a couple of hundred metres apart, and snapping
+  // would park the marker at a sample while the elevation under it belonged to
+  // somewhere else entirely.
+  const walked =
+    typeof atM === 'number' && Number.isFinite(atM) && maxX > 0
+      ? Math.min(maxX, Math.max(0, atM))
+      : null
+  let marker = null
+  if (walked != null) {
+    let i = 1
+    while (i < xs.length - 1 && xs[i] < walked) i += 1
+    const span = xs[i] - xs[i - 1]
+    const t = span > 0 ? (walked - xs[i - 1]) / span : 0
+    marker = { x: px(i - 1) + (px(i) - px(i - 1)) * t, y: py(i - 1) + (py(i) - py(i - 1)) * t }
+  }
+
   return (
-    <div className="profile">
+    <div className={compact ? 'profile profile--compact' : 'profile'}>
       <svg
         className="profile__svg"
         viewBox={`0 0 ${W} ${H}`}
@@ -98,8 +135,38 @@ export default function ElevationProfile({ profile, units }) {
             />
           )
         })}
+        {marker && (
+          <>
+            {/* The stretch already walked, greyed under the live line, so the
+                marker reads as a position on a journey rather than as a dot on
+                a chart. Same relationship the map's follow-behind line has to
+                follow-ahead, and drawn in the same token. */}
+            <polyline
+              className="profile__walked"
+              points={ys
+                .map((_, i) => (xs[i] <= walked ? point(i) : null))
+                .filter(Boolean)
+                .concat(`${marker.x.toFixed(2)},${marker.y.toFixed(2)}`)
+                .join(' ')}
+              vectorEffect="non-scaling-stroke"
+            />
+            {/* preserveAspectRatio is "none" on this SVG, so the viewBox is
+                stretched horizontally by whatever width the container has.
+                A <circle> would be drawn as an ellipse wider than it is tall,
+                and noticeably so. A vertical rule has no aspect to distort. */}
+            <line
+              className="profile__here"
+              x1={marker.x}
+              y1="0"
+              x2={marker.x}
+              y2={H}
+              vectorEffect="non-scaling-stroke"
+            />
+          </>
+        )}
       </svg>
 
+      {compact ? null : (
       <div className="profile__axis mono" aria-hidden="true">
         {/* The origin tick wears the far end's unit — "0 km" beside "2.6 km",
             per the mockups — derived from the formatter's own output rather
@@ -107,10 +174,15 @@ export default function ElevationProfile({ profile, units }) {
         <span>{fmtDist(maxX, units).replace(/^[\d.]+/, '0')}</span>
         <span>{fmtDist(maxX, units)}</span>
       </div>
+      )}
 
-      <p className="profile__stat mono">{statLine}</p>
+      {compact ? null : <p className="profile__stat mono">{statLine}</p>}
 
-      <p className="visually-hidden">{summary}</p>
+      {/* Not repeated in compact mode. Follow mode already announces its own
+          state through the app's single live region, and a second description
+          of the same route read out mid-walk is the duplication that makes
+          people switch a screen reader off. */}
+      {compact ? null : <p className="visually-hidden">{summary}</p>}
     </div>
   )
 }

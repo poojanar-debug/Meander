@@ -1,6 +1,6 @@
 {
   "_meander_provenance": "recorded",
-  "_meander_recorded_at": "2026-08-11T08:52:47.306795+00:00",
+  "_meander_recorded_at": "2026-08-26T17:09:48.495158+00:00",
   "_meander_note": "Written by backend/fixtures.py. Secrets are redacted and excluded from the request signature.",
   "request": {
     "method": "POST",
@@ -8,7 +8,7 @@
     "params": {},
     "json": null,
     "data": {
-      "data": "[out:json][timeout:25];node[\"amenity\"~\"^(bench|drinking_water|toilets|shelter)$\"](6.92852,79.84673,6.94104,79.85802);out body 6000;"
+      "data": "[out:json][timeout:25];(node[\"amenity\"~\"^(bench|drinking_water|toilets|shelter)$\"](6.92852,79.84673,6.94104,79.85802);node[\"tourism\"~\"^(viewpoint)$\"](6.92852,79.84673,6.94104,79.85802););out body 6000;"
     },
     "content": null,
     "headers": {
@@ -18,14 +18,14 @@
   "response": {
     "status": 200,
     "headers": {
-      "date": "Tue, 11 Aug 2026 08:52:47 GMT",
+      "date": "Wed, 26 Aug 2026 17:09:47 GMT",
       "content-type": "application/json"
     },
     "json": {
       "version": 0.6,
       "generator": "Overpass API 0.7.62.11 87bfad18",
       "osm3s": {
-        "timestamp_osm_base": "2026-08-11T08:51:06Z",
+        "timestamp_osm_base": "2026-08-26T17:08:24Z",
         "copyright": "The data included in this document is from www.openstreetmap.org. The data is made available under ODbL."
       },
       "elements": [

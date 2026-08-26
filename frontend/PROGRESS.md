@@ -1,3 +1,179 @@
+---
+
+## Layers, a heading, and a sentence that had to change · 2026-08-26
+
+Three basemaps, direction in follow mode, per-type amenities, route photographs,
+and the walk's position on the elevation profile. The important one is none of
+those: it is that `FollowMode` used to print a privacy claim that is no longer
+true of every basemap, and the sentence had to change rather than be defended.
+
+### The provenance sentence is now conditional
+
+> position never leaves this phone — no network in follow mode
+
+True, and measured rather than asserted: OpenFreeMap's vector source declares
+`maxzoom: 14`, so the z17 follow camera overzooms tiles the client already
+holds, and a full simulated walk made three requests, all glyph ranges, and no
+tile request at all. False under **satellite** — Esri's imagery is raster to z19,
+so walking pulls tiles and the sequence of those requests is the walk.
+
+The position still never leaves the device and no tile is ever cached, so
+leaving the sentence alone would have been technically defensible. Somebody
+reading it on the screen they are walking with will conclude nothing is being
+disclosed, and under satellite something is, so the sentence changes and names
+the host. Three surfaces say it: the layer picker at the moment of choosing, the
+attribution line, and `FollowMode` — the provenance line, the off-route footer
+and the walk-summary line, all three, because the summary saying "nothing was
+uploaded" after a satellite walk is the same claim in the past tense.
+
+`App` owns `layer` and threads `basemapStreams={streamsWhileFollowing(layer)}`
+down. `FollowMode` owns only the sentence; `lib/basemap.js` owns the answer.
+
+**The layer is deliberately not persisted.** RELEASE-SPECS R4 says localStorage
+is theme and units ONLY, and `offlineStore.js` records what happened the last
+time a third key was ported in. The cost is re-picking satellite each visit.
+
+### `lib/basemap.js` is a table because four questions kept drifting apart
+
+Each row answers what raster source (if any) sits under the routes, how the
+vector layers underneath are recoloured, what attribution the footer owes, and
+**whether choosing it fetches tiles while somebody walks**. That last one is not
+a styling detail, and keeping it in the same row as the label is the point:
+nothing can add a basemap and forget to say what it costs. `credits` is a
+required field rather than one defaulting to empty, because it is the only field
+in the file whose omission can be unlawful.
+
+Palette values are **token names, never literals** — MapLibre paints to a canvas
+and needs a colour string, so `MapView` resolves them through `getComputedStyle`
+at paint time. A hex here would put a colour outside the two `:root` blocks,
+which is the one rule `check_palette.sh` exists to enforce.
+
+`green` is the same OpenFreeMap tiles with different paint, so it is exactly as
+cheap and exactly as private as the default — and it is the layer that actually
+shows what the scenic and shade presets are steering on. Under `satellite` only
+the labels are visible, read against photographs of unknown darkness, so that
+palette is light text with a dark halo: the one pair that survives both a snow
+field and a night-dark forest.
+
+The raster is added **lazily** on first selection and inserted **under the first
+symbol layer**, so street names survive over the imagery and a visitor who never
+opens the menu makes no request to `server.arcgisonline.com` at all. Both
+credits are owed under satellite — the labels are still OpenStreetMap's — and
+dropping the OSM one because the picture is Esri's is the easy mistake.
+
+### Direction, and the fixes that carry no heading
+
+A heading cone under the puck, chevrons along the line ahead via
+`symbol-placement: line`, a turn badge on the route at the next manoeuvre, and
+course-up rotation.
+
+The cone is filtered on a **`hasHeading` boolean** rather than a null check on
+`heading`, because most walking fixes carry no heading and a cone pointing at 0°
+is a claim about which way somebody is facing. The turn badge is a map layer
+rather than a DOM marker: DOM markers do not rotate with the map, which under
+course-up is wrong immediately.
+
+Course-up is default on, with a compass to turn it off, an 8° threshold so the
+map does not rock, and **north forced under `prefers-reduced-motion`** — a map
+that rotates continuously is not an animation that can be shortened to a fade,
+so the only respectful version of course-up is no course-up. Turning it off puts
+north back once, because a rotated map handed back to the plan screen is a map
+nobody asked to rotate and no longer has a control to fix.
+
+### `lib/amenities.js`, because three surfaces each had their own opinion
+
+`rest_stops` has been on the wire since it shipped and three places consumed it:
+`RouteDetail` drew a mint pill, `MapView` drew an undifferentiated mint circle,
+and `followTracking` computed the next one ahead which **nothing rendered**. None
+agreed about normalisation — `restPillLabel` already handled both
+`drinking water` and `drinking_water` because both spellings reach the frontend,
+and nothing else did. One table now, read by all of them.
+
+**A viewpoint is not a rest stop.** The other four are facilities for someone
+already tired or already caught in the rain; a viewpoint is a reason to take the
+route in the first place, and it arrives from `tourism=viewpoint`. It travels in
+the same list because the corridor match, the spacing score and the map layer
+want it treated the same way geometrically, and it is drawn and worded
+differently everywhere a person sees it: amber rather than mint, its own glyph,
+and `spokenLabel` giving **"a view"** rather than "a viewpoint" — the noun
+somebody walking cares about is what they will see, not the OSM tag that
+recorded it. Treating "there is a bench in 200 m" and "there is a view in 200 m"
+as the same sentence would waste the one of the two that makes somebody look up
+from the phone.
+
+Amenity dots are now drawn for **every** route rather than only the selected
+one. They are what the comparison is partly about, and hiding them until
+selection made the rail's differences invisible on the map.
+
+### Two things the app knew and would not say
+
+- **`tracking.rest`.** Computed and returned since `followTracking` was written,
+  rendered nowhere. The app knew there was drinking water in 200 m and kept it
+  to itself. Now a quiet line above the dock — not an alert and not a card,
+  because a bench is information and a barrier is a warning and they must not
+  look alike. Suppressed while off route, where the only useful sentence is the
+  one about getting back.
+- **`route.elevation` in follow mode.** On every response since it shipped, read
+  only by the detail sheet, so the one screen where "how much of that hill is
+  left" is a live question was the one screen that could not answer it.
+  `ElevationProfile` gained `atM` and `compact`: line and marker, no axis and no
+  stat row, because both said their piece before setting off.
+
+### `RoutePhotos`, and what it refuses to claim
+
+A hero plus a strip in the route detail. `accessible` anchors at the first
+barrier — a real coordinate off `Route.blockers`, so the photo is of the thing
+that blocks you — and `fastest` at the midpoint, which is arithmetic. For
+`scenic`, `shade`, `quiet` and `air` the backend has no per-segment data to
+anchor on at all; those scores reach the wire as one aggregate number per route.
+So the hero falls back to the most-photographed nearby point, the response
+carries `objective_measured: false`, and **the component renders that difference
+rather than swallowing it**: a measured hero gets a caption naming what it is
+anchored to, an unmeasured one gets a caption saying only where along the route
+it is. Nothing ever reads "the greenest point on this route" — the same rule
+that makes a missing OSM tag `UNKNOWN` rather than "accessible".
+
+`attribution` is rendered **verbatim**. The backend assembles it and drops any
+photo whose licence it could not determine, so a photo that arrives is a photo
+that may be shown; it is not a caption to be shortened for layout.
+
+`fetchPhotos` resolves to `null` on every failure — offline, 429, an abort from
+closing the sheet, a backend not yet redeployed answering 404 — and the
+component renders nothing. No error state and no retry: there is no action the
+user could take and nothing they are missing, because the route, its steps, its
+barriers and its scores are all complete without a single image. `photoUrl` puts
+the API base back on the path, since the backend returns an origin-relative one
+and this deployment splits the origins.
+
+### The gate
+
+85 checks to **102**, and 101 pass. Seventeen new: the layer picker is opened,
+its manifest checked, graded with axe **while open** (a popover of real controls
+over a map, never on screen for any other pass), then satellite is pressed and
+the attribution line read before and after.
+
+Two of those assertions are obligations rather than features. That choosing
+satellite carries a visible tile-streaming warning is the honest half of a
+privacy claim the app makes elsewhere in writing; that the attribution line
+changes to name Esri **and still names OpenStreetMap** is a licence condition.
+Neither is the kind of thing axe or a 44×44 sweep would ever notice going
+missing. `LAYERS_MANIFEST` is separate from `PLAN_MANIFEST` for the same reason
+`FOLLOW_MANIFEST` is: it matches zero elements until the toggle is pressed.
+
+**The one failing check is pre-existing.** `[destination] Find routes still
+streams cards for a trip with one` fails identically on an unmodified baseline
+built from `HEAD`, where it was 1 of 85. Not caused here and not fixed here.
+
+**651 tests across 25 files**, up from 599 across 23 — `basemap-contract.test.js`
+(30) and `amenities.test.js` (20). The basemap suite is a *contract* test rather
+than a rendering one: it asserts every row declares `streamsTiles`, every row
+carries at least one credit, `streamsWhileFollowing` is true for exactly the
+satellite row, and an unknown id resolves to the default rather than to a blank
+map.
+
+**Live API calls:** none from the frontend. Verified against `VITE_MOCK_API=1`
+throughout; the gate ran against the mock as always.
+
 
 ---
 

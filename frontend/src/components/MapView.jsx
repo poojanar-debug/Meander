@@ -1,11 +1,16 @@
 import maplibregl from 'maplibre-gl'
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { createRoot } from 'react-dom/client'
 
+import LayerPicker from './LayerPicker.jsx'
+import ManoeuvreIcon, { MANOEUVRE_NAME } from './ManoeuvreIcon.jsx'
+import { CompassIcon } from './Icons.jsx'
+import { isViewpoint, shortLabel } from '../lib/amenities.js'
+import { STYLE_URL, basemapFor, referrerPolicyFor } from '../lib/basemap.js'
 import { routeColor, styleFor } from '../lib/dash.js'
 import { pointAtDistance } from '../lib/follow.js'
 import { MOBILE_LAYOUT, useMatchMedia } from '../lib/media.js'
 
-const STYLE_URL = 'https://tiles.openfreemap.org/styles/positron'
 const INITIAL_CENTER = [79.8521, 6.921]
 const INITIAL_ZOOM = 12.6
 
@@ -69,6 +74,140 @@ const HALO_BREATH_MS = 2600
 const HALO_OPACITY_HIGH = 0.22
 const HALO_OPACITY_LOW = 0.07
 
+/**
+ * The heading cone, the chevrons, and why they are drawn to a canvas.
+ *
+ * MapLibre's `addImage` wants pixels. Everything else this app draws is inline
+ * SVG for the reasons `ManoeuvreIcon.jsx` sets out — a file in `public/` falls
+ * under `icons.test.js`'s launcher-icon contract, and an external asset needs a
+ * CSP entry whose hash `csp-hash.test.js` pins byte for byte. A canvas keeps
+ * both of those properties: nothing is fetched, nothing is a file, and the
+ * colours are still read from the tokens rather than written here.
+ *
+ * `pixelRatio` is capped at 2. It is a real cap, not a rounding: a 3x phone
+ * would otherwise allocate 9x the pixels for a mark that is 26 CSS px across,
+ * and MapLibre holds every icon in one texture atlas that the whole style
+ * shares.
+ */
+function rasterise(size, paint) {
+  const ratio = Math.min(2, Math.ceil(window.devicePixelRatio || 1))
+  const canvas = document.createElement('canvas')
+  canvas.width = Math.round(size * ratio)
+  canvas.height = Math.round(size * ratio)
+  const ctx = canvas.getContext('2d')
+  if (!ctx) return null
+  ctx.scale(ratio, ratio)
+  paint(ctx, size)
+  return { image: ctx.getImageData(0, 0, canvas.width, canvas.height), pixelRatio: ratio }
+}
+
+/**
+ * The direction-of-travel cone, apex at the centre of the image.
+ *
+ * Apex at the centre and not at the bottom edge, and that is the whole trick:
+ * MapLibre rotates an icon about its anchor, so a cone drawn from the bottom
+ * of its own box would swing around a point 30 px behind the walker rather
+ * than pivoting under the puck.
+ *
+ * It is a cone rather than a chevron because a cone is the honest shape. A
+ * sharp arrow claims a heading the phone does not have — `heading` from the
+ * Geolocation API is derived from successive fixes and is noisy at walking
+ * pace. A widening wedge says "roughly this way", which is what is known.
+ */
+const CONE_SIZE = 108
+const CONE_LENGTH = 46
+const CONE_HALF_ANGLE = 26 * (Math.PI / 180)
+
+function paintCone(fill) {
+  return (ctx, size) => {
+    const cx = size / 2
+    const cy = size / 2
+    ctx.beginPath()
+    ctx.moveTo(cx, cy)
+    ctx.arc(cx, cy, CONE_LENGTH, -Math.PI / 2 - CONE_HALF_ANGLE, -Math.PI / 2 + CONE_HALF_ANGLE)
+    ctx.closePath()
+    // A gradient out to nothing, so the cone has no edge to be read as a
+    // boundary. A flat wedge with a hard end looks like a measurement.
+    const gradient = ctx.createRadialGradient(cx, cy, 4, cx, cy, CONE_LENGTH)
+    gradient.addColorStop(0, withAlpha(fill, 0.42))
+    gradient.addColorStop(1, withAlpha(fill, 0))
+    ctx.fillStyle = gradient
+    ctx.fill()
+  }
+}
+
+/** A single direction chevron, pointing up, for repeating along the line. */
+const CHEVRON_SIZE = 18
+
+function paintChevron(stroke) {
+  return (ctx, size) => {
+    const mid = size / 2
+    ctx.strokeStyle = stroke
+    ctx.lineWidth = 2.6
+    ctx.lineCap = 'round'
+    ctx.lineJoin = 'round'
+    ctx.beginPath()
+    ctx.moveTo(mid - 4.6, mid + 3)
+    ctx.lineTo(mid, mid - 3)
+    ctx.lineTo(mid + 4.6, mid + 3)
+    ctx.stroke()
+  }
+}
+
+/**
+ * A token colour at a given alpha.
+ *
+ * The tokens are hex, and canvas gradients need a colour with an alpha
+ * channel. Parsing 3- and 6-digit hex covers everything `styles.css` declares;
+ * anything else is handed back unchanged, which produces a fully opaque stop
+ * rather than a thrown error on a map somebody is walking with.
+ */
+function withAlpha(hex, alpha) {
+  const value = String(hex).trim()
+  const short = /^#([0-9a-f])([0-9a-f])([0-9a-f])$/i.exec(value)
+  const long = /^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(value)
+  if (!short && !long) return value
+  const parts = short
+    ? [short[1] + short[1], short[2] + short[2], short[3] + short[3]]
+    : [long[1], long[2], long[3]]
+  const [r, g, b] = parts.map((p) => parseInt(p, 16))
+  return `rgba(${r}, ${g}, ${b}, ${alpha})`
+}
+
+/**
+ * How far the heading has to move before the map is turned to follow it.
+ *
+ * See the note at the call site: a smaller number makes the map rock on a
+ * straight street, a larger one makes it lag through a real turn. Eight
+ * degrees is comfortably outside the noise of a derived walking heading and
+ * comfortably inside the smallest turn anybody navigates by.
+ */
+const BEARING_STEP_DEG = 8
+
+/** Signed difference between two bearings, in (-180, 180]. Plain subtraction
+ *  reports 358 degrees where the answer is -2, which around north would keep
+ *  the map permanently mid-rotation. */
+function bearingDelta(from, to) {
+  return ((to - from + 540) % 360) - 180
+}
+
+/**
+ * The bearing the camera should hold, or null for "leave it alone".
+ *
+ * Null rather than 0 when there is no heading: 0 is due north and is a real
+ * bearing, so returning it would snap the map north every time somebody paused
+ * long enough for the heading to go away, which is most junctions.
+ *
+ * Reduced motion turns the whole thing off. A map that rotates continuously
+ * under someone is the textbook vestibular trigger, and it is not a decoration
+ * that can be shortened to a fade — the only respectful version of course-up
+ * is no course-up.
+ */
+function courseBearing(courseUp, headingDeg) {
+  if (!courseUp || prefersReducedMotion()) return null
+  return typeof headingDeg === 'number' && Number.isFinite(headingDeg) ? headingDeg : null
+}
+
 const prefersReducedMotion = () =>
   typeof window !== 'undefined' &&
   window.matchMedia?.('(prefers-reduced-motion: reduce)').matches === true
@@ -113,10 +252,44 @@ function token(name) {
   return getComputedStyle(document.documentElement).getPropertyValue(name).trim()
 }
 
+/** Layers this app added, as opposed to the basemap's own. Matched on the
+ *  source rather than on a list of layer ids, because every one of ours draws
+ *  from a source we created and the basemap's draw from the style's. */
+const isOurLayer = (layer) =>
+  typeof layer?.source === 'string' &&
+  (layer.source.startsWith('route-') ||
+    ['highlight', 'rest-stops', 'follow-behind', 'follow-ahead', 'follow-connector', 'follow-here', 'basemap-raster'].includes(
+      layer.source,
+    ))
+
+/** The id of the first symbol layer *belonging to the basemap*, or undefined.
+ *
+ *  Everything the app draws goes on top of everything, but the satellite
+ *  raster is the one exception: it belongs *under* the place labels, so that
+ *  choosing imagery does not also mean losing every street name. `addLayer`
+ *  with this as its `beforeId` is what puts it there.
+ *
+ *  ⚠ Our own layers are excluded, and that is not defensive tidying. Follow
+ *  mode adds `follow-chevrons`, which is a symbol layer, at the very top of
+ *  the stack. If the upstream basemap ever ships without symbols of its own —
+ *  or renames them past the match — a naive "first symbol layer" would find
+ *  the chevrons and insert the imagery *below the route lines but above
+ *  nothing else*, burying the walk under a photograph at the exact moment
+ *  somebody is following it.
+ *
+ *  Undefined is still a valid answer and means "append", which is the correct
+ *  degradation: the imagery covers the labels, which is ugly, rather than
+ *  covering the route, which is dangerous. */
+function firstSymbolLayerId(map) {
+  try {
+    return map.getStyle()?.layers?.find((l) => l.type === 'symbol' && !isOurLayer(l))?.id
+  } catch {
+    return undefined
+  }
+}
+
 /**
- * Recolour the basemap to the redesign's palette: base #ECF0E6, parks
- * #DEEBD3, water #D9E7EE, roads #FBFAF6 — read from the tokens, never
- * restated here.
+ * Recolour the basemap to one of the palettes in `lib/basemap.js`.
  *
  * OpenFreeMap's positron is not ours, so rather than a second tile source the
  * existing style's layers are repainted in place. Layers are matched by id and
@@ -124,14 +297,27 @@ function token(name) {
  * layer names change without notice; a missing match must degrade to "that
  * layer keeps its own colour", never to a thrown error that takes the map
  * down.
+ *
+ * The palette arrives as **token names**, resolved here. That is the whole
+ * reason `basemap.js` can hold three palettes without holding a single hex:
+ * `check_palette.sh` requires every colour to be declared in the two `:root`
+ * blocks, and a literal in a JS table is exactly the drift it exists to stop.
+ *
+ * A palette may omit keys. The satellite one carries only `label` and
+ * `labelHalo`, because the imagery covers every fill and line beneath it and
+ * repainting them would be work with no visible result. `set` is skipped for
+ * an absent token rather than being handed `''`, which MapLibre rejects with a
+ * console error per layer per repaint.
  */
-function applyMapPalette(map) {
-  const land = token('--map-land')
-  const park = token('--map-park')
-  const water = token('--map-water')
-  const road = token('--map-road')
-  const ink = token('--ink')
-  const halo = token('--map-land')
+function applyMapPalette(map, palette) {
+  const colour = (key) => (palette[key] ? token(palette[key]) : null)
+  const land = colour('land')
+  const park = colour('park')
+  const water = colour('water')
+  const road = colour('road')
+  const building = colour('building')
+  const label = colour('label')
+  const halo = colour('labelHalo')
 
   let layers
   try {
@@ -144,6 +330,7 @@ function applyMapPalette(map) {
     const id = layer.id.toLowerCase()
     const source = (layer['source-layer'] ?? '').toLowerCase()
     const set = (prop, value) => {
+      if (!value) return
       try {
         map.setPaintProperty(layer.id, prop, value)
       } catch {
@@ -166,7 +353,7 @@ function applyMapPalette(map) {
     ) {
       if (layer.type === 'fill') set('fill-color', park)
     } else if (id.includes('building')) {
-      set('fill-color', land)
+      set('fill-color', building)
     } else if (
       id.includes('road') ||
       id.includes('street') ||
@@ -181,7 +368,7 @@ function applyMapPalette(map) {
     }
 
     if (layer.type === 'symbol') {
-      set('text-color', ink)
+      set('text-color', label)
       set('text-halo-color', halo)
     }
   }
@@ -215,6 +402,11 @@ export default function MapView({
   // for the same barrier twice two requests, so the camera comes back.
   focusPoint = null,
   follow = null,
+  // Which basemap. Owned by App rather than by this component, because
+  // FollowMode has to read it too: the provenance sentence it prints while
+  // somebody walks is only true for the basemaps that fetch nothing.
+  layer = 'map',
+  onLayer,
 }) {
   const containerRef = useRef(null)
   const mapRef = useRef(null)
@@ -229,6 +421,14 @@ export default function MapView({
   // `easeTo` too, and treating that as a pan would make the re-centre button
   // appear the instant following began and never go away.
   const [cameraTaken, setCameraTaken] = useState(false)
+  const [pickerOpen, setPickerOpen] = useState(false)
+  // Whether the map turns so that the direction of travel is up.
+  //
+  // On by default in follow mode, because that is the whole reason the
+  // rotation exists: reading "turn left" off a north-up map means doing the
+  // mental rotation yourself, at a junction, while walking. Off is one press
+  // away and the press is remembered for the session.
+  const [courseUp, setCourseUp] = useState(true)
 
   const followTracking = follow?.tracking ?? null
   const followPosition = followTracking?.position ?? null
@@ -279,6 +479,25 @@ export default function MapView({
           // The design's own centered line replaces the injected control; the
           // sentence it renders is the attribution OpenStreetMap asks for.
           attributionControl: false,
+          // The one place this app sends a referrer, and it is a targeted
+          // exception rather than a relaxation.
+          //
+          // `public/_headers` and the Caddyfile both set
+          // `Referrer-Policy: no-referrer`, which is right and stays. But an
+          // ArcGIS "public application" key is secured by a referrer allowlist,
+          // and an allowlist cannot match a header the browser never sends —
+          // so a keyed satellite layer would fail on every tile, with no error
+          // in the console naming the cause. `referrerPolicyFor` returns
+          // `origin` for the keyed imagery host and null for everything else,
+          // so this sends `https://host/` to Esri and nothing to anyone,
+          // including no path, no route and no coordinate.
+          //
+          // Returning undefined leaves the request exactly as MapLibre built
+          // it, which is what every other request here wants.
+          transformRequest: (url) => {
+            const referrerPolicy = referrerPolicyFor(url)
+            return referrerPolicy ? { url, referrerPolicy } : undefined
+          },
         })
       } catch (err) {
         // WebGL unavailable, or the style host is blocked. The result cards
@@ -333,7 +552,11 @@ export default function MapView({
         settled = true
         clearTimeout(deadline)
         clearInterval(readyPoll)
-        applyMapPalette(map)
+        // The palette is no longer applied here. It depends on which basemap
+        // is chosen, and that can change after load, so it belongs to the
+        // effect keyed on [layer, ready] rather than to a one-shot at load —
+        // which is exactly the bug it would be: pick satellite, and the label
+        // colours would stay set for a basemap nobody is looking at.
         setReady(true)
         setFailed(false)
       }
@@ -389,6 +612,99 @@ export default function MapView({
     }
   }, [])
 
+  // --- the basemap ---------------------------------------------------------
+  //
+  // A raster source added once and thereafter only shown or hidden, and a
+  // palette reapplied on every change.
+  //
+  // **Not `map.setStyle()`.** Swapping the style is the obvious way to change
+  // basemap and it is the wrong one here: it destroys every source and layer
+  // on the map, so all six route lines, the highlight, the rest stops and the
+  // whole follow stack would have to be rebuilt on `styledata` — including,
+  // for somebody mid-walk, the puck. Adding one raster layer under the labels
+  // costs a single source and leaves everything else untouched.
+  //
+  // The raster is added lazily rather than at load: nobody who never opens the
+  // picker should pay a tile request for imagery they did not ask for, and
+  // MapLibre begins fetching the moment a visible raster layer exists.
+
+  useEffect(() => {
+    const map = mapRef.current
+    if (!map || !ready) return
+
+    const basemap = basemapFor(layer)
+
+    if (basemap.raster) {
+      try {
+        if (!map.getSource('basemap-raster')) {
+          map.addSource('basemap-raster', {
+            type: 'raster',
+            tiles: basemap.raster.tiles,
+            tileSize: basemap.raster.tileSize,
+            maxzoom: basemap.raster.maxzoom,
+            // The credit MapLibre would inject into its own attribution
+            // control. That control is off, and the design's own centred line
+            // renders `credits` instead, but the field costs nothing and means
+            // a future `attributionControl: true` is not a licence breach.
+            attribution: basemap.credits.map((c) => c.text).join(', '),
+          })
+        }
+        if (!map.getLayer('basemap-raster')) {
+          map.addLayer(
+            { id: 'basemap-raster', type: 'raster', source: 'basemap-raster' },
+            firstSymbolLayerId(map),
+          )
+        }
+        map.setLayoutProperty('basemap-raster', 'visibility', 'visible')
+      } catch (err) {
+        // A raster that will not attach leaves the vector basemap underneath,
+        // which is a working map. Never a thrown error that takes the whole
+        // canvas down over a choice of backdrop.
+        console.warn('Meander: satellite layer could not be added.', err)
+      }
+    } else if (map.getLayer('basemap-raster')) {
+      // Hidden, not removed. Removing it would drop the tile cache MapLibre is
+      // holding, so toggling back to satellite would refetch everything that
+      // is already on screen.
+      map.setLayoutProperty('basemap-raster', 'visibility', 'none')
+    }
+
+    applyMapPalette(map, basemap.palette)
+  }, [layer, ready])
+
+  // --- the icons the follow symbol layers draw ------------------------------
+  //
+  // Declared BEFORE the route-layers effect on purpose. React runs effects in
+  // declaration order, and a symbol layer whose `icon-image` names an image the
+  // style does not hold yet draws nothing and logs one warning per frame.
+  // Registering here means the image always exists by the time the layer that
+  // wants it is added.
+  //
+  // Keyed on [ready] alone: the colours come from tokens, and this design
+  // commits to one look, so there is no theme change that would need them
+  // redrawn. If that ever stops being true, this is the effect that has to grow
+  // a dependency.
+
+  useEffect(() => {
+    const map = mapRef.current
+    if (!map || !ready) return
+
+    const add = (id, size, paint) => {
+      if (map.hasImage(id)) return
+      const drawn = rasterise(size, paint)
+      if (!drawn) return
+      try {
+        map.addImage(id, drawn.image, { pixelRatio: drawn.pixelRatio })
+      } catch {
+        // Already registered by a racing effect, or the style was swapped out
+        // underneath. A missing icon is a missing chevron, never a broken map.
+      }
+    }
+
+    add('follow-cone', CONE_SIZE, paintCone(token('--sky-deep')))
+    add('follow-chevron', CHEVRON_SIZE, paintChevron(token('--surface')))
+  }, [ready])
+
   // --- route layers --------------------------------------------------------
 
   useEffect(() => {
@@ -414,7 +730,9 @@ export default function MapView({
       'rest-stops',
       'follow-behind',
       'follow-ahead',
+      'follow-chevrons',
       'follow-connector',
+      'follow-cone',
       'follow-halo',
       'follow-here',
     ]) {
@@ -495,15 +813,44 @@ export default function MapView({
       type: 'geojson',
       data: { type: 'FeatureCollection', features: [] },
     })
+    // Data-driven rather than one paint value, on three properties.
+    //
+    // `viewpoint` splits the amber from the mint: a viewpoint arrives from
+    // `tourism=viewpoint` and is a reason to take the route, where the other
+    // four are facilities for somebody already stopped. `lib/amenities.js`
+    // argues that at length and owns the test; this layer only draws it.
+    //
+    // `selected` is what makes it safe to show every route's amenities at
+    // once. The unselected ones are smaller and half-transparent, so the
+    // chosen route's are legible against them rather than lost in them —
+    // which is the failure mode that kept this layer restricted to one route.
+    //
+    // Colour is not the only channel here either: the visually-hidden summary
+    // below counts the viewpoints separately, and the detail list carries a
+    // glyph and a word per stop.
     map.addLayer({
       id: 'rest-stops',
       type: 'circle',
       source: 'rest-stops',
       paint: {
-        'circle-radius': 4.5,
+        'circle-radius': [
+          'case',
+          ['!', ['get', 'selected']],
+          3,
+          ['get', 'viewpoint'],
+          6,
+          4.5,
+        ],
         'circle-color': token('--surface'),
-        'circle-stroke-width': 3,
-        'circle-stroke-color': token('--mint-deep'),
+        'circle-stroke-width': ['case', ['!', ['get', 'selected']], 2, 3],
+        'circle-stroke-color': [
+          'case',
+          ['get', 'viewpoint'],
+          token('--amber-deep'),
+          token('--mint-deep'),
+        ],
+        'circle-opacity': ['case', ['!', ['get', 'selected']], 0.5, 1],
+        'circle-stroke-opacity': ['case', ['!', ['get', 'selected']], 0.5, 1],
       },
     })
 
@@ -538,6 +885,32 @@ export default function MapView({
       paint: { 'line-color': token('--mint-deep'), 'line-width': 11 },
     })
 
+    // Which way along the line is forward.
+    //
+    // `symbol-placement: 'line'` is doing the work here: MapLibre lays the
+    // chevrons along the geometry and orients each one to the local direction
+    // of the segment it sits on, so nothing has to compute a bearing. It reads
+    // the vertex order to decide which way is forward, and `follow-ahead` is
+    // built walker-first in the data effect below, so forward is the direction
+    // of travel rather than the direction the router happened to draw.
+    //
+    // `icon-allow-overlap` is deliberately left false. On a hairpin the
+    // chevrons would otherwise stack into an unreadable clot at the bend,
+    // which is precisely where somebody needs to know which way the path goes.
+    map.addLayer({
+      id: 'follow-chevrons',
+      type: 'symbol',
+      source: 'follow-ahead',
+      layout: {
+        'icon-image': 'follow-chevron',
+        'symbol-placement': 'line',
+        'symbol-spacing': 58,
+        'icon-rotation-alignment': 'map',
+        'icon-padding': 2,
+      },
+      paint: { 'icon-opacity': 0.92 },
+    })
+
     // Off route: a dashed connector from the walker back to the marked path.
     // 2.5px, dash 4 6 — MapLibre's dasharray is in multiples of line width.
     map.addSource('follow-connector', {
@@ -561,6 +934,26 @@ export default function MapView({
     map.addSource('follow-here', {
       type: 'geojson',
       data: { type: 'FeatureCollection', features: [] },
+    })
+    // The direction-of-travel cone, under both the halo and the puck.
+    //
+    // Filtered on `hasHeading` rather than shown always. Most fixes at walking
+    // pace carry no heading at all — the Geolocation API derives it from
+    // successive positions and reports null when standing still — and a cone
+    // frozen at the last known bearing while somebody turns on the spot is a
+    // confident claim about the one thing they are trying to work out.
+    map.addLayer({
+      id: 'follow-cone',
+      type: 'symbol',
+      source: 'follow-here',
+      filter: ['==', ['get', 'hasHeading'], true],
+      layout: {
+        'icon-image': 'follow-cone',
+        'icon-rotate': ['get', 'heading'],
+        'icon-rotation-alignment': 'map',
+        'icon-allow-overlap': true,
+        'icon-ignore-placement': true,
+      },
     })
     map.addLayer({
       id: 'follow-halo',
@@ -606,19 +999,32 @@ export default function MapView({
       }
     }
 
-    const chosen = routes.find((r) => r.id === selected)
     const source = map.getSource('rest-stops')
     if (source) {
+      // Every route's amenities, not only the chosen one's, with the
+      // difference carried in a property the paint expressions read. Comparing
+      // "which of these three has somewhere to sit" was impossible while only
+      // the selected route contributed dots, and switching between cards to
+      // find out is not comparing.
+      //
+      // Follow mode still clears them: the map is then a thing to walk by, and
+      // the amenity ahead is announced in the dock as a sentence with a
+      // distance instead.
+      const drawnRoutes = followActive
+        ? []
+        : routes.filter((route) => (route.rest_stops ?? []).length > 0)
       source.setData({
         type: 'FeatureCollection',
-        features:
-          followActive || !chosen
-            ? []
-            : (chosen.rest_stops ?? []).map((stop) => ({
-                type: 'Feature',
-                properties: {},
-                geometry: { type: 'Point', coordinates: [stop.lon, stop.lat] },
-              })),
+        features: drawnRoutes.flatMap((route) =>
+          (route.rest_stops ?? []).map((stop) => ({
+            type: 'Feature',
+            properties: {
+              selected: route.id === selected,
+              viewpoint: isViewpoint(stop.type),
+            },
+            geometry: { type: 'Point', coordinates: [stop.lon, stop.lat] },
+          })),
+        ),
       })
     }
   }, [selected, routes, focus, followActive, ready])
@@ -675,10 +1081,23 @@ export default function MapView({
       geometry: { type: 'LineString', coordinates: connectorLine.length > 1 ? connectorLine : [] },
     })
 
+    // `hasHeading` is a separate boolean rather than a null check on `heading`,
+    // because a MapLibre filter cannot distinguish an absent property from one
+    // set to 0 — and 0 is due north, a perfectly ordinary heading to be walking
+    // in. Filtering on `['!=', ['get','heading'], null]` would have hidden the
+    // cone for everybody walking north.
+    const heading = followTracking?.headingDeg
+    const hasHeading = typeof heading === 'number' && Number.isFinite(heading)
     here.setData({
       type: 'FeatureCollection',
       features: followActive
-        ? [{ type: 'Feature', properties: {}, geometry: { type: 'Point', coordinates: followPosition } }]
+        ? [
+            {
+              type: 'Feature',
+              properties: { hasHeading, heading: hasHeading ? heading : 0 },
+              geometry: { type: 'Point', coordinates: followPosition },
+            },
+          ]
         : [],
     })
   }, [followActive, followPosition, followTracking, follow?.route?.geometry, ready])
@@ -708,6 +1127,74 @@ export default function MapView({
     }, 80)
     return () => clearInterval(timer)
   }, [followActive, ready])
+
+  // --- follow: the turn badge on the line ----------------------------------
+  //
+  // The glyph the banner shows, drawn again at the point on the route where
+  // the turn actually happens. Two things had to be true for it to be worth
+  // adding rather than trusting the banner alone: the banner says *what* the
+  // turn is and *how far*, and neither of those tells you *which of the three
+  // junctions in front of you* it means. The badge on the line does.
+  //
+  // **`steps[stepIndex + 1].interval[0]`, and each part of that matters.**
+  // GraphHopper names a manoeuvre at the START of the interval it belongs to,
+  // so the step containing the walker is the turn already taken and `+ 1` is
+  // the one ahead; `interval[0]` is then the first vertex of that step, which
+  // is the corner itself rather than anywhere along the street after it. The
+  // banner derives its own step the same way, in `followTracking.js`, and the
+  // two must not be allowed to disagree about which turn is next.
+  //
+  // ## Why a DOM marker and a React root
+  //
+  // A symbol layer would need every one of the twelve manoeuvre glyphs
+  // rasterised to canvas, which means a second copy of geometry that
+  // `ManoeuvreIcon` already owns and a second place for it to drift. A marker
+  // renders the component itself, so there is exactly one arrow vocabulary in
+  // this app. It also gets an `aria-label` for free, and MapLibre keeps it
+  // positioned without this component re-rendering on every camera frame.
+  //
+  // DOM markers do not rotate with the map, which under course-up is the
+  // behaviour wanted: the badge stays upright and legible while the world
+  // turns under it.
+
+  useEffect(() => {
+    const map = mapRef.current
+    if (!map || !ready) return undefined
+
+    const steps = follow?.route?.steps
+    const geometry = follow?.route?.geometry
+    const stepIndex = followTracking?.stepIndex
+    const next =
+      followActive && Array.isArray(steps) && typeof stepIndex === 'number' && stepIndex >= 0
+        ? (steps[stepIndex + 1] ?? null)
+        : null
+    const vertex = next?.interval?.[0]
+    const point =
+      typeof vertex === 'number' && Array.isArray(geometry) ? (geometry[vertex] ?? null) : null
+
+    if (!next || !point) return undefined
+
+    const element = document.createElement('div')
+    element.className = 'marker marker--turn'
+    element.setAttribute('role', 'img')
+    element.setAttribute(
+      'aria-label',
+      `Next turn on the map: ${MANOEUVRE_NAME[String(next.sign ?? 0)] ?? 'continue'}. ${next.text}`,
+    )
+    const root = createRoot(element)
+    root.render(<ManoeuvreIcon sign={next.sign ?? 0} className="marker__turn-glyph" />)
+    const marker = new maplibregl.Marker({ element }).setLngLat(point).addTo(map)
+
+    return () => {
+      marker.remove()
+      // Deferred by a microtask, and not for tidiness. Unmounting a root
+      // synchronously from an effect cleanup can land while React is already
+      // rendering the parent, which it warns about and which is a real
+      // re-entrancy hazard. The element is already off the map by then, so
+      // nothing is visible in the gap.
+      queueMicrotask(() => root.unmount())
+    }
+  }, [followActive, followTracking?.stepIndex, follow?.route?.steps, follow?.route?.geometry, ready])
 
   // --- follow: the camera ---------------------------------------------------
 
@@ -740,12 +1227,18 @@ export default function MapView({
     if (!map || !followPosition) return
     setCameraTaken(false)
     const instant = prefersReducedMotion() || document.hidden
+    // Bearing included, because a gesture can rotate the map as well as pan
+    // it. Re-centre that restored the position and left the map spun 40
+    // degrees off would be a control that half works, and the half it left
+    // undone is the one this screen was rotated for.
+    const bearing = courseBearing(courseUp, followTracking?.headingDeg)
     map.easeTo({
       center: followPosition,
       zoom: zoomForScale(FOLLOW_METRES_PER_PIXEL, followPosition[1]),
+      bearing: bearing ?? 0,
       duration: instant ? 0 : 400,
     })
-  }, [followPosition])
+  }, [followPosition, courseUp, followTracking?.headingDeg])
 
   useEffect(() => {
     const map = mapRef.current
@@ -755,12 +1248,41 @@ export default function MapView({
     // an animated move started while backgrounded never progresses, and coming
     // back shows the camera still where it was when the phone went in a pocket.
     const instant = prefersReducedMotion() || document.hidden
-    map.easeTo({
+    const camera = {
       center: followPosition,
       zoom: zoomForScale(FOLLOW_METRES_PER_PIXEL, followPosition[1]),
       duration: instant ? 0 : 600,
-    })
-  }, [followActive, followPosition, cameraTaken, ready])
+    }
+
+    const target = courseBearing(courseUp, followTracking?.headingDeg)
+    // Omitted rather than repeated when the change is small, and this is the
+    // difference between course-up being usable and being unbearable.
+    //
+    // `heading` from the Geolocation API is derived from consecutive fixes, so
+    // at walking pace it wanders by several degrees while somebody walks in a
+    // dead straight line. Feeding every one of those into `easeTo` gives a map
+    // that rocks continuously under a person already trying to read it. Below
+    // the threshold no bearing is passed at all, and MapLibre keeps the one it
+    // has — which is how the map holds still on a straight street and turns
+    // only when the walker does.
+    if (target != null && Math.abs(bearingDelta(map.getBearing(), target)) >= BEARING_STEP_DEG) {
+      camera.bearing = target
+    }
+
+    map.easeTo(camera)
+  }, [followActive, followPosition, followTracking?.headingDeg, courseUp, cameraTaken, ready])
+
+  // Turning course-up off puts north back at the top, once, rather than
+  // waiting for the next fix to notice. Leaving follow mode does the same:
+  // a rotated map handed back to the plan screen is a map nobody asked to
+  // rotate and no longer has a control to fix.
+  useEffect(() => {
+    const map = mapRef.current
+    if (!map || !ready) return
+    if (courseUp && followActive) return
+    if (Math.abs(map.getBearing()) < 0.5) return
+    map.easeTo({ bearing: 0, duration: prefersReducedMotion() || document.hidden ? 0 : 400 })
+  }, [courseUp, followActive, ready])
 
   // --- step highlight ------------------------------------------------------
 
@@ -914,6 +1436,7 @@ export default function MapView({
     }
   }, [routes, selected, origin, dest, focus, followActive, followRouteId, ready])
 
+  const basemap = basemapFor(layer)
   const drawn = routes.filter((r) => r.geometry?.length > 1)
   const chosen = routes.find((r) => r.id === selected)
   const summary = drawn.length
@@ -921,6 +1444,25 @@ export default function MapView({
         .map((r) => `${r.label} as a ${styleFor(r.id).pattern} line`)
         .join(', ')}.${chosen ? ` ${chosen.label} is selected.` : ''} Every route is described in full in the cards over this map.`
     : 'Map of the area. No routes are drawn yet.'
+  // The basemap belongs in the summary as well as in the picker's own label.
+  // Someone arriving at this region has not necessarily passed the control,
+  // and "drawn on satellite imagery" is the sentence that explains why the
+  // labels look different from the last time they were here.
+  const layerSummary = `Drawn on the ${basemap.label.toLowerCase()} layer.`
+
+  // The amenity dots, in words.
+  //
+  // They are drawn as two colours of circle, and colour is never the only
+  // channel in this app. The detail list carries a glyph and a name for each
+  // one; this is the map's own account of them, so that a screen-reader user
+  // who is told there are dots is also told what the dots are. Types rather
+  // than a bare count, because "3 amenities" and "a bench, a viewpoint and
+  // drinking water" answer different questions.
+  const stops = chosen?.rest_stops ?? []
+  const stopKinds = [...new Set(stops.map((stop) => shortLabel(stop.type).toLowerCase()))]
+  const amenitySummary = stops.length
+    ? ` ${stops.length} amenit${stops.length === 1 ? 'y' : 'ies'} marked on it: ${stopKinds.join(', ')}.`
+    : ''
 
   return (
     <section className="map" aria-label="Map of the suggested routes">
@@ -935,25 +1477,62 @@ export default function MapView({
         </div>
       )}
 
-      {/* Only after a gesture has taken the camera, and gone again the moment
-          it is handed back. A permanent re-centre button on a screen someone is
-          walking with is one more thing to read; a button that appears exactly
-          when it has something to do is a status as much as a control. */}
-      {followActive && cameraTaken && (
-        <button type="button" className="map__recentre" onClick={recentre}>
-          Re-centre
-        </button>
-      )}
+      {/* One right-edge stack for every map control, in both states.
+          Deliberately not top-right: in follow mode the turn banner is a
+          full-width card at the top of the layer, and a top-right control
+          would sit on the distance figure — the single largest thing on a
+          screen somebody is walking by. */}
+      <div className="map__controls">
+        <LayerPicker layer={layer} onLayer={onLayer} open={pickerOpen} onOpen={setPickerOpen} />
+
+        {/* Follow mode only. On the plan screen the map is always north-up and
+            a compass with nothing to undo is a control that teaches people the
+            wrong thing about what this app does. */}
+        {followActive && (
+          <button
+            type="button"
+            className={courseUp ? 'map__compass map__compass--on' : 'map__compass'}
+            aria-pressed={courseUp}
+            // The name says what the control does, not what state it is in.
+            // "North up" as a label on a pressed toggle reads as a claim that
+            // north IS up, which is the opposite of true while it is pressed.
+            aria-label="Turn the map to face the way you are walking"
+            onClick={() => setCourseUp((on) => !on)}
+          >
+            <CompassIcon size={20} />
+          </button>
+        )}
+
+        {/* Only after a gesture has taken the camera, and gone again the moment
+            it is handed back. A permanent re-centre button on a screen someone
+            is walking with is one more thing to read; a button that appears
+            exactly when it has something to do is a status as much as a
+            control. */}
+        {followActive && cameraTaken && (
+          <button type="button" className="map__recentre" onClick={recentre}>
+            Re-centre
+          </button>
+        )}
+      </div>
 
       <p className="map-attribution">
-        map data ©{' '}
-        <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noreferrer">
-          OpenStreetMap
-        </a>{' '}
-        contributors
+        {basemap.credits.map((credit, i) => (
+          <span key={credit.text}>
+            {i > 0 ? ', ' : null}
+            {credit.before ? `${credit.before} ` : null}
+            {credit.href ? (
+              <a href={credit.href} target="_blank" rel="noreferrer">
+                {credit.text}
+              </a>
+            ) : (
+              credit.text
+            )}
+            {credit.after ? ` ${credit.after}` : null}
+          </span>
+        ))}
       </p>
 
-      <p className="visually-hidden">{summary}</p>
+      <p className="visually-hidden">{`${summary}${amenitySummary} ${layerSummary}`}</p>
     </section>
   )
 }

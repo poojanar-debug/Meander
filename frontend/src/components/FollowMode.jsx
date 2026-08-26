@@ -1,11 +1,13 @@
 import { useEffect, useRef, useState } from 'react'
 
+import ElevationProfile from './ElevationProfile.jsx'
 import ManoeuvreIcon from './ManoeuvreIcon.jsx'
 import ReportBarrier from './ReportBarrier.jsx'
 import { fmtDist, fmtDur, fmtDurSpoken } from '../lib/format.js'
 import { fmtClockIn, formatAccuracy, formatElevation, lowerClock } from '../lib/units.js'
 import { pointAtDistance } from '../lib/follow.js'
-import { CheckIcon, BlockerIcon } from './Icons.jsx'
+import { AmenityGlyph, CheckIcon, BlockerIcon } from './Icons.jsx'
+import { spokenLabel } from '../lib/amenities.js'
 
 /**
  * Walking a route: the next-turn banner, the dock, and the three cards that
@@ -20,6 +22,13 @@ import { CheckIcon, BlockerIcon } from './Icons.jsx'
  * nothing it is given came from a request made after follow mode started. The
  * provenance line at the foot of the screen says so at the moment tracking
  * runs, not only on a privacy page nobody opens while walking.
+ *
+ * That is still exactly true of this component and of the tracking under it.
+ * It is no longer the whole story of the screen, because the map behind it can
+ * be set to satellite, which fetches raster tiles as the walker moves. The
+ * `basemapStreams` prop is how that fact reaches the sentence; see the note
+ * above `PROVENANCE` for why the sentence has to change rather than be
+ * defended.
  *
  * ## The banner
  *
@@ -59,7 +68,50 @@ function sideOfRoute(position, target, headingDeg) {
   return relative < 0 ? 'left' : 'right'
 }
 
-export default function FollowMode({ route, units, isLoop, tracking, onExit, onAnnounce }) {
+/**
+ * The two provenance sentences, and why there are two of each.
+ *
+ * The default basemap fetches nothing while following. That was measured, not
+ * assumed: OpenFreeMap's vector source declares `maxzoom: 14`, so the z17
+ * camera is served by overzooming tiles already held, and a full simulated
+ * walk made three requests, all glyph ranges. "No network in follow mode" is
+ * literally true there.
+ *
+ * **It is not true under satellite.** Esri's imagery is raster and goes to
+ * z19, so walking pulls tiles, and the sequence of those requests is the walk.
+ * The position itself still never leaves the phone, and no recalculation
+ * happens either, so it would be technically defensible to leave the sentence
+ * alone. That defence is exactly the kind this project does not make: someone
+ * reading "no network in follow mode" on the screen they are walking with will
+ * conclude nothing is being disclosed, and under satellite something is.
+ *
+ * So the sentence changes with the basemap, and it names the host rather than
+ * hedging. A privacy claim that is true for the default and false for one
+ * setting is worse than no claim at all, because the setting is the case where
+ * it matters.
+ */
+const PROVENANCE = {
+  quiet: 'position never leaves this phone — no network in follow mode',
+  streaming: 'satellite tiles are fetched as you move, so the imagery host can infer where you are',
+}
+
+const OFF_ROUTE_FOOT = {
+  quiet: 'no recalculation in follow mode — your position never leaves this phone',
+  streaming: 'no recalculation in follow mode, but satellite tiles are being fetched as you move',
+}
+
+export default function FollowMode({
+  route,
+  units,
+  isLoop,
+  tracking,
+  onExit,
+  onAnnounce,
+  // Whether the chosen basemap fetches tiles while walking. Threaded from App
+  // rather than read here, because `lib/basemap.js` owns the answer and this
+  // component owns only the sentence.
+  basemapStreams = false,
+}) {
   const {
     at,
     position,
@@ -81,6 +133,7 @@ export default function FollowMode({ route, units, isLoop, tracking, onExit, onA
     closest,
     alertKey,
     accuracyM,
+    rest,
   } = tracking
 
   const endRef = useRef(null)
@@ -162,8 +215,9 @@ export default function FollowMode({ route, units, isLoop, tracking, onExit, onA
             </p>
             <hr className="follow__rule" />
             <p className="follow__arrival-note">
-              {fmtDurSpoken(elapsedMin)} outside. Nothing was uploaded — this walk exists only
-              on your phone.
+              {fmtDurSpoken(elapsedMin)} outside. {basemapStreams
+                ? 'This walk was never uploaded. Satellite tiles were fetched along the way.'
+                : 'Nothing was uploaded, and this walk exists only on your phone.'}
             </p>
             <button type="button" className="button-sky follow__done" onClick={onExit}>
               Done
@@ -197,7 +251,7 @@ export default function FollowMode({ route, units, isLoop, tracking, onExit, onA
           </p>
           <hr className="follow__rule follow__rule--dark" />
           <p className="follow__off-foot mono">
-            no recalculation in follow mode — your position never leaves this phone
+            {basemapStreams ? OFF_ROUTE_FOOT.streaming : OFF_ROUTE_FOOT.quiet}
           </p>
         </div>
       ) : (
@@ -248,6 +302,39 @@ export default function FollowMode({ route, units, isLoop, tracking, onExit, onA
         </div>
       )}
 
+      {/* The climb ahead, and where on it you are.
+          `route.elevation` has been on every response since it shipped and only
+          the detail sheet ever read it, which meant the one screen where "how
+          much of that hill is left" is a live question was the one screen that
+          could not answer it. Compact: the line and the marker, no axis and no
+          stat row, because both of those said their piece before setting off. */}
+      {!error && !arrived && (
+        <ElevationProfile
+          profile={route?.elevation}
+          units={units}
+          atM={at?.alongM ?? null}
+          compact
+        />
+      )}
+
+      {/* The next amenity ahead.
+          `nextRestStop` has been computed in followTracking since it was
+          written and returned as `rest`, and nothing rendered it — so the app
+          knew there was drinking water in 200 m and kept it to itself. Not an
+          alert and not a card: a quiet line above the dock, because a bench is
+          information and a barrier is a warning, and they must not look alike.
+          Suppressed while off route, where the only useful sentence is the one
+          about getting back. */}
+      {rest && !offRoute && !error && (
+        <p className="follow__amenity">
+          <span className="follow__amenity-glyph" aria-hidden="true">
+            <AmenityGlyph type={rest.stop.type} size={15} />
+          </span>
+          {spokenLabel(rest.stop.type)}
+          {rest.inM >= TURN_IS_NOW_M ? ` in ${fmtDist(rest.inM, units)}` : ' here'}
+        </p>
+      )}
+
       <div className="follow__dock">
         <div className="follow__dock-main">
           <p className="follow__dock-headline">
@@ -260,8 +347,12 @@ export default function FollowMode({ route, units, isLoop, tracking, onExit, onA
         </button>
       </div>
 
-      <p className="follow__provenance mono">
-        position never leaves this phone — no network in follow mode
+      <p
+        className={
+          basemapStreams ? 'follow__provenance follow__provenance--warn mono' : 'follow__provenance mono'
+        }
+      >
+        {basemapStreams ? PROVENANCE.streaming : PROVENANCE.quiet}
       </p>
     </div>
   )

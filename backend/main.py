@@ -34,6 +34,9 @@ from .accessibility import VERY_LOW_CONFIDENCE_THRESHOLD, assess_route
 from .cache import get_cache
 from .config import (
     DRAIN_TIMEOUT_S,
+    PHOTO_BUCKET_CAPACITY,
+    PHOTO_CACHE_MAX_AGE_S,
+    PHOTO_REFILL_PER_MIN,
     REQUEST_DEADLINE_S,
     STRICT_STARTUP,
     TRUSTED_PROXY_HOPS,
@@ -63,6 +66,8 @@ from .models import (
     ElevationProfile,
     GeocodeResponse,
     GeocodeResult,
+    PhotosRequest,
+    PhotosResponse,
     RestStop,
     Route,
     RouteRequest,
@@ -108,6 +113,21 @@ limiter = RateLimiter(
 geocode_limiter = RateLimiter(
     capacity=settings.geocode_bucket_capacity,
     refill_per_min=settings.geocode_refill_per_min,
+    daily_ceiling=settings.global_daily_route_ceiling,
+)
+
+# The image proxy gets a third bucket, for the same reason place search got the
+# second one: its natural unit is several requests per interaction, not one.
+#
+# One route view asks /api/photo for up to six images at once against a route
+# bucket whose entire capacity is twelve, so sharing that bucket would leave two
+# tokens for the next route request and none at all for the second route the
+# user looks at. The daily ceiling is passed through unchanged and never
+# incremented, exactly as for place search: `served_today` counts routes, and an
+# image is not a route.
+photo_limiter = RateLimiter(
+    capacity=PHOTO_BUCKET_CAPACITY,
+    refill_per_min=PHOTO_REFILL_PER_MIN,
     daily_ceiling=settings.global_daily_route_ceiling,
 )
 
@@ -263,8 +283,13 @@ app.add_middleware(
 )
 
 
+# The image proxy's path prefix, needed by the middleware below before the
+# router exists to say what a path means.
+PHOTO_PATH_PREFIX = "/api/photo/"
+
+
 class ConditionalGZip:
-    """GZip everything except a stream.
+    """GZip everything except a stream and an already-compressed image.
 
     Starlette's GZipMiddleware does **not** leave streaming responses alone —
     measured here, it happily returned `content-encoding: gzip` on a
@@ -272,9 +297,16 @@ class ConditionalGZip:
     not a stream: the whole point of the SSE path is that a route reaches the
     browser at 30 ms instead of 12 s.
 
-    Decided on the *request's* Accept header rather than the response's content
-    type, because by the time a content type is known the response wrapper has
-    already been installed.
+    /api/photo/ is the second exemption and a different problem. JPEG, PNG and
+    WebP are already compressed, so gzipping one costs CPU on a single-worker
+    event loop and returns essentially nothing. One route view asks for up to
+    six of them, so this is not a rounding error, it is several tens of
+    milliseconds of blocking work per view in exchange for a fraction of a
+    percent of bytes.
+
+    Both are decided from the *request* — its Accept header and its path —
+    rather than from the response's content type, because by the time a content
+    type is known the response wrapper has already been installed.
     """
 
     def __init__(self, app: Any, **kwargs: Any) -> None:
@@ -284,7 +316,9 @@ class ConditionalGZip:
     async def __call__(self, scope: Any, receive: Any, send: Any) -> None:
         if scope["type"] == "http":
             accept = Headers(scope=scope).get("accept", "")
-            if "text/event-stream" in accept:
+            if "text/event-stream" in accept or scope.get("path", "").startswith(
+                PHOTO_PATH_PREFIX
+            ):
                 await self.app(scope, receive, send)
                 return
         await self.gzip(scope, receive, send)
@@ -1825,6 +1859,94 @@ async def report_barrier(report: BarrierReport, request: Request) -> Any:
             "not the live map."
         ),
     }
+
+
+# ---------------------------------------------------------------------------
+# route photos
+# ---------------------------------------------------------------------------
+
+
+@app.post("/api/photos", response_model=PhotosResponse)
+async def photos(req: PhotosRequest, request: Request) -> Any:
+    """Photographs along one route, chosen for what that route was optimised for.
+
+    A second call rather than part of /api/routes, on purpose. Photographs come
+    from two hosts that neither the router nor the enrichment path touches, and
+    folding them into the route response would put an unrelated upstream between
+    the user and the thing they actually asked for. It also means the frontend
+    only asks about the one route the user picked, instead of three.
+
+    On `limiter` rather than a bucket of its own, and not counted against the
+    daily route ceiling. One photo request follows one route selection, so it
+    has the same natural rate as a route request; `photo_limiter` below is for
+    the image endpoint, which does not.
+
+    This never returns an error envelope. `route_photos` degrades every failure
+    to a null hero and an empty strip, because a page that has already drawn a
+    route must not acquire an error box because a photo host was slow.
+    """
+    decision = limiter.check(_client_ip(request), counts_against_ceiling=False)
+    if not decision.allowed:
+        metrics.incr("rate_limited_total")
+        return JSONResponse(
+            status_code=429,
+            content={"error": {"kind": decision.reason, "message": decision.message}},
+            headers={"Retry-After": str(max(1, decision.retry_after_s))},
+        )
+
+    from .photos import route_photos
+
+    return await route_photos(req)
+
+
+@app.get(PHOTO_PATH_PREFIX + "{ref}")
+async def photo(ref: str, request: Request) -> Response:
+    """Stream one upstream image, so the image host never sees the user.
+
+    **This is a proxy, and the reference is the only thing that says what it may
+    fetch.** `photos.resolve_image_ref` verifies an HMAC over the reference and
+    then checks the decoded host against an allowlist of exactly two upstreams,
+    in that order, and refuses everything else with the same 404 whatever the
+    reason. See the module docstring in photos.py for why all three of the
+    signature, the allowlist and the size cap are needed rather than one of
+    them.
+
+    Rate-limited on `photo_limiter`, which exists because one route view asks
+    for up to six images and the route bucket holds twelve requests in total.
+    """
+    decision = photo_limiter.check(_client_ip(request), counts_against_ceiling=False)
+    if not decision.allowed:
+        metrics.incr("rate_limited_total")
+        return JSONResponse(
+            status_code=429,
+            content={"error": {"kind": decision.reason, "message": decision.message}},
+            headers={"Retry-After": str(max(1, decision.retry_after_s))},
+        )
+
+    from .photos import PhotoProxyError, proxied_image
+
+    try:
+        image = await proxied_image(ref)
+    except PhotoProxyError as exc:
+        return _error("photo", exc.human_message, exc.status_code)
+
+    return Response(
+        content=image.body,
+        media_type=image.content_type,
+        headers={
+            # The reference pins one exact upstream URL, so the bytes behind a
+            # given /api/photo/{ref} cannot change without the reference
+            # changing too. That is what makes `immutable` true rather than
+            # optimistic.
+            "Cache-Control": f"public, max-age={PHOTO_CACHE_MAX_AGE_S}, immutable",
+            # A proxy that serves whatever an upstream sent, from this API's own
+            # origin, is an XSS vector the moment the content type is wrong.
+            # photos.py already refuses anything that is not one of five image
+            # types; this stops a browser deciding it knows better.
+            "X-Content-Type-Options": "nosniff",
+            "Content-Disposition": "inline",
+        },
+    )
 
 
 # ---------------------------------------------------------------------------
