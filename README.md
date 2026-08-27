@@ -227,11 +227,11 @@ default three are unchanged, and `frontend/scripts/live-gate.mjs` reports **28
 passed, 0 failed** against production in a real browser — CORS, CSP, the
 service worker, the offline open and a permalink among them.
 
-**Nothing from the map-layers round is deployed.** The basemaps, the follow-mode heading,
-viewpoints, and both photo endpoints are committed and unshipped, and the `Caddyfile` lines that
-make `/api/photos` and `/api/photo/*` public are committed too. Until the VM is redeployed the photo
-call 404s against the live API — which `client.js` degrades to a null response rather than an error
-box, so the route still draws with no photographs under it.
+**The map-layers round is now deployed too.** The paragraph that stood here said the basemaps,
+the follow-mode heading and both photo endpoints were committed and unshipped, with the photo call
+404ing against the live API until the VM was redeployed. The VM has since been redeployed:
+`POST /api/photos` answers `200` from the public host, and the app on Pages ships from `main`, so
+the two halves are the same commit's worth of behaviour again.
 
 **The AWS path is gone.** The repository used to carry four never-applied
 CloudFormation stacks in `infra/`, a `deploy.yml` workflow that never got past
