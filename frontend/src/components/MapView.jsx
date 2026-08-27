@@ -136,7 +136,15 @@ function paintCone(fill) {
   }
 }
 
-/** A single direction chevron, pointing up, for repeating along the line. */
+/** A single direction chevron, for repeating along the line.
+ *
+ *  ⚠ Drawn pointing RIGHT — apex on +x — and that is the whole correctness of
+ *  it. With `symbol-placement: 'line'` MapLibre rotates each icon so its
+ *  **x-axis** lies along the line, exactly as text glyphs flow along a street
+ *  name; the icon's own "up" ends up pointing off to the side. The first
+ *  draft was drawn pointing up, so every chevron on the walk rendered a
+ *  quarter-turn anticlockwise of the way the route actually goes — an arrow
+ *  pointing into the buildings on a screen someone navigates by. */
 const CHEVRON_SIZE = 18
 
 function paintChevron(stroke) {
@@ -147,9 +155,9 @@ function paintChevron(stroke) {
     ctx.lineCap = 'round'
     ctx.lineJoin = 'round'
     ctx.beginPath()
-    ctx.moveTo(mid - 4.6, mid + 3)
-    ctx.lineTo(mid, mid - 3)
-    ctx.lineTo(mid + 4.6, mid + 3)
+    ctx.moveTo(mid - 3, mid - 4.6)
+    ctx.lineTo(mid + 3, mid)
+    ctx.lineTo(mid - 3, mid + 4.6)
     ctx.stroke()
   }
 }
@@ -433,7 +441,6 @@ export default function MapView({
   const followTracking = follow?.tracking ?? null
   const followPosition = followTracking?.position ?? null
   const followActive = Boolean(follow && followPosition)
-  const followRouteId = follow?.route?.id ?? null
   const isMobile = useMatchMedia(MOBILE_LAYOUT)
 
   useEffect(() => {
@@ -888,8 +895,9 @@ export default function MapView({
     // Which way along the line is forward.
     //
     // `symbol-placement: 'line'` is doing the work here: MapLibre lays the
-    // chevrons along the geometry and orients each one to the local direction
-    // of the segment it sits on, so nothing has to compute a bearing. It reads
+    // chevrons along the geometry and rotates each one so its x-axis follows
+    // the local direction of the segment it sits on — which is why the
+    // chevron image is drawn pointing right, see `paintChevron`. It reads
     // the vertex order to decide which way is forward, and `follow-ahead` is
     // built walker-first in the data effect below, so forward is the direction
     // of travel rather than the direction the router happened to draw.
@@ -1416,10 +1424,13 @@ export default function MapView({
     // surface ring, at the barrier's own coordinates. DOM markers rather than
     // a circle layer: they carry an aria-label, and they are the one thing on
     // this map a user must not miss. In detail focus and in follow mode only
-    // the route being looked at contributes its barriers.
+    // the route being looked at contributes its barriers — and in follow mode
+    // it is `follow.route` itself, not a lookup into the planned set, because
+    // a recalculated route carries its own barriers and the planned line's
+    // dots would mark hazards on a street nobody is being sent down.
     const withBarriers =
-      followActive && followRouteId
-        ? routes.filter((r) => r.id === followRouteId)
+      followActive && follow?.route
+        ? [follow.route]
         : focus
           ? routes.filter((r) => r.id === selected)
           : routes
@@ -1434,7 +1445,7 @@ export default function MapView({
         )
       }
     }
-  }, [routes, selected, origin, dest, focus, followActive, followRouteId, ready])
+  }, [routes, selected, origin, dest, focus, followActive, follow?.route, ready])
 
   const basemap = basemapFor(layer)
   const drawn = routes.filter((r) => r.geometry?.length > 1)

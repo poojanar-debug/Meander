@@ -406,8 +406,17 @@ export async function reportBarrier(report, { signal } = {}) {
  */
 export async function fetchPhotos(body, { signal } = {}) {
   if (isMock) {
-    const { mockFetchPhotos } = await import('./mock.js')
-    return mockFetchPhotos(body, { signal })
+    // Same never-throw contract as the real branch below. The mock's sleep
+    // rejects on abort, and RoutePhotos aborts on unmount with no catch — as
+    // it is entitled to, because this function promises to resolve null on
+    // every failure. Unwrapped, every quickly-closed detail in a demo build
+    // logged an unhandled AbortError.
+    try {
+      const { mockFetchPhotos } = await import('./mock.js')
+      return await mockFetchPhotos(body, { signal })
+    } catch {
+      return null
+    }
   }
   try {
     const res = await fetch(url('/api/photos'), {

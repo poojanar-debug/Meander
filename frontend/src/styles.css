@@ -345,10 +345,25 @@ button {
   cursor: pointer;
 }
 
+/* The 16px floor is the horizontal-clipping fix, and it is load-bearing.
+ *
+ * iOS Safari zooms the page when a focused text control renders under 16px,
+ * and the zoom STAYS after the keyboard goes — from then on the layout
+ * viewport is wider than the visible one, and everything anchored to the
+ * right edge (the layer stack, Re-centre, the End pill, the elevation strip's
+ * far end) hangs half off the screen for the rest of the session. The gate
+ * cannot see it: scrollWidth equals clientWidth because nothing overflows the
+ * document — the document itself is simply wider than the glass. Caught on a
+ * phone screenshot of follow mode, hours after the search field caused it.
+ *
+ * `max(1em, 16px)` rather than a bare 16px so a control inside larger text
+ * still inherits it. Every class below that sets its own size on one of these
+ * controls must respect the same floor; `mobile-fit.test.js` pins that. */
 input,
 select,
 textarea {
   font: inherit;
+  font-size: max(1em, 16px);
   color: inherit;
 }
 
@@ -2201,7 +2216,10 @@ a {
   border: 0;
   background: none;
   padding: 13px 12px;
-  font-size: 15px;
+  /* 16, not the 15 the type scale would give it: under 16px iOS zooms on
+   * focus and never zooms back, clipping the right edge of every screen that
+   * follows. See the rule on `input` above. */
+  font-size: 16px;
   font-weight: 500;
   caret-color: var(--sky-deep);
 }
@@ -2768,7 +2786,8 @@ a {
   border-radius: var(--r-chip);
   background: var(--surface);
   padding: 10px 12px;
-  font-size: 14px;
+  /* 16, for the same iOS focus-zoom reason as .place__input. */
+  font-size: 16px;
   min-height: var(--target);
 }
 
@@ -2878,7 +2897,8 @@ a {
   .skip-link,
   .sheet__grabber-hit,
   .exports__row,
-  .map-attribution {
+  .map-attribution,
+  .desknote {
     display: none !important;
   }
 
@@ -3099,4 +3119,54 @@ a {
   font-size: 11.5px;
   line-height: 1.4;
   color: var(--ink-2);
+}
+
+/* --------------------------------------------------- the computer notice */
+
+/* Shown once per visit when the screen is clearly a computer — the desktop
+ * layout AND a fine primary pointer, tested in App. This app is built to be
+ * walked with, and the person at a desk is told so before they judge it by
+ * the half of it a desk can show. Above every layer including follow (45),
+ * because it renders at mount, before any of them can matter. */
+.desknote {
+  position: fixed;
+  inset: 0;
+  z-index: 70;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: var(--scrim);
+}
+
+.desknote__card {
+  width: min(420px, 100%);
+  background: var(--surface);
+  border-radius: var(--r-sheet);
+  box-shadow: var(--shadow-modal);
+  padding: 26px 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.desknote__title {
+  margin: 0;
+  font-size: 19px;
+  font-weight: 800;
+  letter-spacing: -0.3px;
+}
+
+.desknote__body {
+  margin: 0;
+  font-size: 13.5px;
+  color: var(--ink-2);
+  line-height: 1.55;
+}
+
+.desknote__continue {
+  align-self: flex-start;
+  margin-top: 8px;
+  min-height: var(--target);
+  padding: 12px 18px;
+  border-radius: var(--r-input);
 }

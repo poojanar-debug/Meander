@@ -134,24 +134,26 @@ so the script asks the running graph what it covers instead of assuming.
 
 **The frontend answers "when should I go?" and "which way, exactly?"** — a best-departure window,
 sunrise and sunset computed in the browser, turn-by-turn directions with a barrier rendered inside
-the step you would meet it on, and a live follow mode in which the position never leaves the page.
+the step you would meet it on, and a live follow mode that walks the route with you and redraws it
+when you leave it.
 
-**That sentence used to end "measured at zero outbound requests", and it is now true of two of the
-three basemaps rather than of the screen.** The measurement still holds for the default map and for
-green cover: OpenFreeMap's vector source declares `maxzoom: 14`, so the z17 follow camera is served
-by overzooming tiles the client already holds, and a full simulated walk made three requests, all
-of them glyph ranges and not one of them a tile. Under **satellite** it is false. Esri's imagery is
-raster to z19, so every stretch walked pulls new tiles, and the sequence of those requests is the
-walk.
+**While the walker stays on the route, the default map fetches nothing as they move.** That was
+measured, not assumed, and it still holds for the default map and for green cover: OpenFreeMap's
+vector source declares `maxzoom: 14`, so the z17 follow camera is served by overzooming tiles the
+client already holds, and a full simulated walk made three requests, all of them glyph ranges and
+not one of them a tile. Under **satellite** it is false. Esri's imagery is raster to z19, so every
+stretch walked pulls new tiles, and the sequence of those requests is the walk.
 
-The position itself still never leaves the phone under any layer, no recalculation happens, and no
-tile is ever written to a cache. It would therefore have been technically defensible to leave the
-sentence alone, and that is exactly the defence this project does not make: somebody reading "no
-network in follow mode" on the screen they are walking with will conclude nothing is being
-disclosed. So the provenance line changes with the basemap and names the imagery host, the layer
-picker warns at the moment of choosing, and the walk-summary card says the same thing in the past
-tense. A privacy claim that is true for the default and false for one setting is worse than no
-claim, because the setting is the case where it matters.
+Two things send the walker's whereabouts off the phone, and the UI names both rather than defending
+either. A sustained wrong turn sends the live position to the app's own routing server — once per
+recalculation, never per fix — so the route can be redrawn from where the walker actually stands,
+the way any navigator is expected to behave; the provenance line under the dock names that before
+it ever happens, the recalculating card names it while it happens, and the arrival card counts what
+was sent once it has. And under satellite the tile sequence is the walk, so the provenance line
+changes with the basemap and names the imagery host, the layer picker warns at the moment of
+choosing, and the walk-summary card says the same thing in the past tense. A privacy claim that is
+true for the default and false for one path is worse than no claim, because the path is the case
+where it matters.
 
 **It installs and opens offline again.** The service worker precaches the app shell, and the
 layout and accessibility gate is back — rewritten rather than restored, because the version that
@@ -261,7 +263,8 @@ self-audit and what a reviewer should still be sceptical about.
 - **When to go** — the best departure window the API had always returned and the UI had always
   ignored, plus sunrise and sunset computed in the browser.
 - **Turn-by-turn directions**, with a barrier rendered inside the step you would meet it on.
-- **Live follow mode**, in which the position never leaves the browser.
+- **Live follow mode**, which matches every fix against the line in the browser and sends the
+  position out only to recalculate the route after a wrong turn.
 
 ### What the layers, the heading and the photos added
 
