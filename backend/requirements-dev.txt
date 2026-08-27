@@ -33,7 +33,3 @@ pytest-cov==6.0.0
 # interpolation that leaves the planet at the poles — neither of which any
 # example-based test was ever going to generate.
 hypothesis==6.125.1
-
-# CloudFormation templates in infra/. Catches more than
-# `aws cloudformation validate-template` and, unlike it, needs no credentials.
-cfn-lint==1.54.0

@@ -52,11 +52,10 @@ services:
     # arbitrary route requests, and 8990 is Dropwizard's admin connector, which
     # serves /threads and /metrics.
     #
-    # On the ECS shape in infra/ a private subnet enforced that. Here the
-    # compose network is the only boundary there is, so "no ports key" IS the
-    # boundary. The base file does not publish either port; nothing below adds
-    # them. Verified with `docker compose ps` and from outside the VM, not by
-    # re-reading this comment.
+    # The compose network is the only boundary there is, so "no ports key" IS
+    # the boundary. The base file does not publish either port; nothing below
+    # adds them. Verified with `docker compose ps` and from outside the VM,
+    # not by re-reading this comment.
     environment:
       # Pinned rather than inherited. The base file reads ${GH_HEAP:-3g}, which
       # means a stray GH_HEAP in the deploying shell silently re-sizes the JVM

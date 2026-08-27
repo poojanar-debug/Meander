@@ -10,9 +10,12 @@ name: ci
 # were reconciled rather than replaced, because most of what made the launch
 # workflow larger was checking a frontend this branch does not have. The
 # service-worker and headless-browser jobs are gone with the code they graded —
-# there is no sw.js, no gate.mjs and no pwa-gate.mjs here. `infrastructure` is
-# kept, because infra/ arrived in the same merge and cfn-lint is the only thing
-# standing between a malformed template and finding out at deploy time.
+# there is no sw.js, no gate.mjs and no pwa-gate.mjs here.
+#
+# There used to be an `infrastructure` job here, cfn-linting the CloudFormation
+# templates in infra/. Those templates were never applied — the deployment that
+# actually serves traffic is Cloudflare Pages plus one VM — and both they and
+# their lint left together.
 #
 # When the frontend gates are ported back — wired to this frontend rather than
 # copied — their jobs come with them. Adding the jobs first would give five
@@ -175,20 +178,3 @@ jobs:
       - name: No hex outside the token blocks
         run: bash scripts/check_palette.sh
 
-  infrastructure:
-    # Every template that describes the deployment must at least be
-    # well-formed. This is a syntax check and nothing more — infra/README.md is
-    # explicit that none of it has ever been applied, and a template that parses
-    # is not a template that works.
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with: { python-version: '3.13' }
-      - name: CloudFormation templates parse
-        # cfn-lint rather than `aws cloudformation validate-template`, which
-        # needs credentials. It also catches more: unresolved !Ref targets,
-        # unknown resource properties, and bad intrinsic function arguments.
-        run: |
-          python -m pip install cfn-lint
-          cfn-lint infra/*.yaml

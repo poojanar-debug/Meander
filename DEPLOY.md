@@ -1,43 +1,26 @@
 # Deploying Meander
 
-Four CloudFormation stacks on AWS: ECS Fargate for the API and the router,
-CloudFront and S3 for the app, all in one distribution so the browser makes no
-cross-origin request.
+Two halves, deliberately simple:
 
-> ## This has never been run.
->
-> Every template validates and `cfn-lint` passes on all four, and **nothing has
-> been deployed**. The commands below are written to be followed without
-> guessing, and none of them has been executed against a real AWS account. The
-> gate table in [`infra/README.md`](infra/README.md) lists all seventeen things
-> that would have to be checked afterwards and marks every one UNVERIFIED.
->
-> What *has* been verified end to end is the same stack under `docker compose`:
-> both images build, both containers reach healthy, and `POST /api/routes`
-> returns real routes with real CLIP scores.
+| | where | how it ships |
+|---|---|---|
+| the app | `meander-eoc.pages.dev` | Cloudflare Pages, built from `main` by the GitHub integration — **merging to `main` deploys it** |
+| the API and the router | `meander-app.duckdns.org` | one VM, `docker compose` behind Caddy: `api`, `graphhopper`, `caddy` |
 
-> ## Meanwhile, something else is actually serving traffic.
->
-> **This document is about the AWS path, which is unbuilt. It is not the
-> deployment people are using.** That one is:
->
-> | | where | how it ships |
-> |---|---|---|
-> | the app | `meander-eoc.pages.dev` | Cloudflare Pages, built from `main` by the GitHub integration — merging to `main` deploys it |
-> | the API and the router | `meander-app.duckdns.org` | one VM, `docker compose` behind Caddy: `api`, `graphhopper`, `caddy` |
->
-> Its procedure lives in [`docs/RUNBOOK.md`](docs/RUNBOOK.md) under "Deploying
-> the API on the VM", because it is an operational routine rather than a
-> first-time build. Read it before running anything against that box: two of its
-> commands report success while changing nothing, and a third would have shipped
-> a four-commit-old backend from a checkout whose `git log` read correctly.
->
-> The sections below on **CORS**, **preview deployments** and **rolling back**
-> apply to both topologies and are the ones worth reading either way.
+The VM's routine procedure lives in [`docs/RUNBOOK.md`](docs/RUNBOOK.md) under
+"Deploying the API on the VM", because it is an operational routine rather than
+a first-time build. Read it before running anything against that box: two of
+its commands report success while changing nothing, and a third would have
+shipped a four-commit-old backend from a checkout whose `git log` read
+correctly.
 
-The old two-host deployment — Render for the API, Vercel for the frontend — is
-in [`docs/legacy/`](docs/legacy/) with its own notes. It worked and it was
-never deployed either.
+Two earlier deployment designs are gone from the tree. The two-host version —
+Render for the API, Vercel for the frontend — is in
+[`docs/legacy/`](docs/legacy/) with its own notes; it worked and was never
+deployed. The AWS version — four CloudFormation stacks, ECS Fargate, CloudFront
+and S3, with a `deploy.yml` workflow to drive it — was never applied either,
+and was removed outright rather than archived: a repository that documents two
+productions, one of them imaginary, is how a fix gets shipped to the wrong one.
 
 ---
 
@@ -45,7 +28,6 @@ never deployed either.
 
 | | where | free? |
 |---|---|---|
-| An AWS account | https://aws.amazon.com | the resources below are **not** free — about $108/month, itemised in [`infra/README.md`](infra/README.md) |
 | Mapillary client token | https://www.mapillary.com/dashboard/developers | yes |
 | Anthropic API key | https://console.anthropic.com/ | **no — costs real money per call** |
 | GraphHopper API key | https://www.graphhopper.com/ | yes, and **not needed** — you are running your own router |
@@ -66,9 +48,9 @@ needs no key and no account at all, and the response says so in
 `mapillary_enabled` rather than looking like a failure. It is still not required
 to serve anything.
 
-Nothing in this repository deploys itself. Secrets go into Secrets Manager by
-hand; none is ever a CloudFormation parameter, because a parameter value is
-visible in `describe-stacks` for the life of the stack.
+Nothing in this repository deploys itself. Secrets live in the VM's `.env`
+file, which `compose.prod.yml` reads and git never sees — none is committed,
+and none reaches the frontend bundle.
 
 ---
 
@@ -236,8 +218,9 @@ bucket whose whole capacity is twelve.
 
 The router image never imports a graph. An import is 71 s for the demo region
 set and about 31 minutes for three whole countries — either would be an outage
-of that length on **every** task replacement, and ECS would kill the task long
-before the second finished. So the graph is a build artifact.
+of that length on **every** container replacement, and any supervisor with a
+startup deadline would kill the container long before the second finished. So
+the graph is a build artifact.
 
 ```bash
 scripts/graphhopper.sh setup --region-set demo   # ~4 min, once. Needs JDK 21.
@@ -250,9 +233,12 @@ Britain entire: 6.6 GB, a 31-minute import and a 20 GB serve heap, which is a
 different `RouterMemory` and a different cost conversation.
 
 CI cannot do this — a GitHub runner would have to import the graph first — so
-the router image is built from a workstation. See
-[`infra/README.md`](infra/README.md) for the alternative, where the container
-fetches a published archive at start and verifies its digest before unpacking.
+the router image is built from a workstation, or on the VM itself. The
+alternative is `scripts/publish_graph.sh --s3 <uri>` plus `GRAPH_S3_URI` and
+`GRAPH_SHA256` in the environment: the container then fetches the published
+archive at start (over the AWS CLI if present, plain `curl` otherwise) and
+verifies its digest before unpacking — `graphhopper/docker-entrypoint.sh` is
+the whole of that contract.
 
 ## Step 0b · Pre-warm the scenery cache
 
@@ -269,123 +255,102 @@ locations; anywhere you have not warmed comes back
 cache already holds 146 segments across the five demo locations, so you can
 skip this entirely and still get real scores there.
 
-## Step 1 · The stacks
+## Step 1 · The two halves
 
-In order, because each imports from the one before. Full commands with the
-parameter overrides are in [`infra/README.md`](infra/README.md); the shape is:
+**The app**: connect the repository to a Cloudflare Pages project, production
+branch `main`, build command `npm run build` in `frontend/`. The build refuses
+to ship misconfigured: `vite.config.js` fails any Pages build whose
+`VITE_API_BASE` is unset, is the Pages origin itself, is absent from the CSP's
+`connect-src`, or that has `VITE_MOCK_API=1` set — each of those is a live
+outage that would otherwise present as a JSON parse error or a demo site.
+`VITE_API_BASE` is `https://meander-app.duckdns.org`.
 
-```bash
-REGION=ap-south-1
-ACCOUNT=$(aws sts get-caller-identity --query Account --output text)
-
-aws cloudformation deploy --stack-name meander-platform --template-file infra/00-platform.yaml \
-  --capabilities CAPABILITY_NAMED_IAM --region $REGION
-aws cloudformation deploy --stack-name meander-network  --template-file infra/10-network.yaml \
-  --region $REGION --parameter-overrides CloudFrontPrefixListId=$PL
-# push both images, then
-aws cloudformation deploy --stack-name meander-services --template-file infra/20-services.yaml \
-  --capabilities CAPABILITY_NAMED_IAM --region $REGION --parameter-overrides ...
-aws cloudformation deploy --stack-name meander-web      --template-file infra/30-web.yaml \
-  --region $REGION
-```
-
-Then the secrets, separately:
-
-```bash
-aws secretsmanager put-secret-value --secret-id meander/api --region $REGION \
-  --secret-string '{"MAPILLARY_TOKEN":"…","ANTHROPIC_API_KEY":"…"}'
-```
+**The API and the router**: one VM running the compose stack.
+`scripts/provision-vm.sh` takes a fresh box to serving, and
+[`docs/RUNBOOK.md`](docs/RUNBOOK.md) has the redeploy routine — including the
+two ways `docker compose` reports success while shipping nothing. Secrets go
+in the VM's `.env`.
 
 ## Step 2 · CORS — one line, and it is not optional any more
 
-This section used to say there was no CORS step. That was true of the website
-and only of the website.
+The app and the API are on different hosts — `meander-eoc.pages.dev` and
+`meander-app.duckdns.org` — so **every** browser call to the API is
+cross-origin, preflight applies, and the allowlist on the VM has to name the
+app's origin exactly:
 
-The previous deployment's most error-prone moment was closing the CORS/CSP loop
-between two hosts, where the site stayed broken until *both* edits were made
-and the failure mode was a browser console message with an empty server log.
-One CloudFront distribution serves the app from S3 and `/api/*` from the load
-balancer, so **the browser** only ever talks to one origin, and the CSP names
-exactly `'self'` plus the tile host.
+```
+MEANDER_ALLOWED_ORIGINS=https://meander-eoc.pages.dev,capacitor://localhost
+```
 
-**The iOS app is not the browser.** It serves its own assets from
-`capacitor://localhost` and calls `https://<distribution>/api/*`, which is
-cross-origin by any definition — so preflight applies and the allowlist has to
-name a scheme that is neither `http` nor `https`. `CorsOrigins` defaults to
-`capacitor://localhost`; override it only if you also change
+This is historically the deployment's most error-prone moment: the CORS/CSP
+loop between two hosts stays broken until *both* edits are made, and the
+failure mode is a browser console message with an empty server log.
+
+**The iOS app is the second entry.** It serves its own assets from
+`capacitor://localhost` and calls `https://meander-app.duckdns.org/api/*`,
+which is cross-origin by any definition — so the allowlist has to name a
+scheme that is neither `http` nor `https`. Change it only if you also change
 `server.iosScheme`, and if you do, the two must change together.
 
 > ⚠ **`MEANDER_ALLOWED_ORIGINS=''` never meant "allow nothing".**
 > `backend/config.py:322` reads `_env_flag("MEANDER_ALLOW_LOCAL_ORIGINS", not
-> origins)` — the default is *on whenever no origins are configured*. The task
-> definition shipped an empty string, so the deployed allowlist was
-> `('http://localhost:5173', 'http://127.0.0.1:5173')`: production allowlisted
-> the Vite dev server. Setting `CorsOrigins` turns that default off as a side
-> effect of the list becoming non-empty, which is the behaviour we want —
+> origins)` — the default is *on whenever no origins are configured*. An empty
+> string therefore allowlists `('http://localhost:5173',
+> 'http://127.0.0.1:5173')`: production allowlisting the Vite dev server.
+> Setting the list turns that default off as a side effect of it becoming
+> non-empty, which is the behaviour we want —
 > `backend/tests/test_client_ip_and_cors.py` pins both halves so it stays true.
 
-Two things already verified and worth not re-deriving: the `/api/*` cache
-behaviour uses AWS-managed `AllViewerExceptHostHeader`
-(`b689b0a8-53d0-40ab-baf2-68738e2966ac`), which forwards `Origin` to the ALB,
-and `CachingDisabled` (`4135ea2d-6df8-44a3-9df3-4b5a84be39ad`), so a response is
-never cached across origins.
-
-Prove the preflight survives CloudFront before building any app — this is the
-single most likely thing to be quietly wrong:
+Prove the preflight before trusting anything else — this is the single most
+likely thing to be quietly wrong:
 
 ```bash
-curl -s -i -X OPTIONS $SITE/api/routes \
-  -H 'Origin: capacitor://localhost' \
+curl -s -i -X OPTIONS https://meander-app.duckdns.org/api/routes \
+  -H 'Origin: https://meander-eoc.pages.dev' \
   -H 'Access-Control-Request-Method: POST' \
   -H 'Access-Control-Request-Headers: content-type' | head -20
 ```
 
-You want a `200` with `access-control-allow-origin: capacitor://localhost` and
-`POST` in `access-control-allow-methods`. A `403` means CloudFront answered
-instead of the ALB.
+You want a `200` with `access-control-allow-origin:
+https://meander-eoc.pages.dev` and `POST` in `access-control-allow-methods`;
+repeat with `Origin: capacitor://localhost` before building the iOS app.
 
 ## Step 3 · Verify
 
-```bash
-SITE=$(aws cloudformation describe-stacks --stack-name meander-web \
-  --query 'Stacks[0].Outputs[?OutputKey==`SiteUrl`].OutputValue' --output text)
+Over the wire, never on an exit code:
 
-curl -s $SITE/api/healthz
-curl -s $SITE/api/health | jq '.routing | {self_hosted, self_hosted_source, path_details}'
-curl -s $SITE/api/health | jq .cache
+```bash
+SITE=https://meander-app.duckdns.org
+
+curl -s $SITE/healthz
 curl -s -X POST $SITE/api/routes -H 'content-type: application/json' \
+  -H 'Origin: https://meander-eoc.pages.dev' \
   -d '{"origin":{"lat":51.507489,"lon":-0.162207},"minutes":35,"mode":"auto",
        "objectives":["fastest","scenic","accessible"]}' \
   | jq '.routes[] | {id, status, scoring_method, confidence}'
+
+# On the VM — /api/health is deliberately not public; the Caddyfile says why.
+curl -s 127.0.0.1:8000/api/health | jq '.routing | {self_hosted, self_hosted_source, path_details}'
+curl -s 127.0.0.1:8000/api/health | jq .cache
 ```
 
-**The one that matters most is the second.** `self_hosted` must be `true`,
+**The one that matters most is the third.** `self_hosted` must be `true`,
 `self_hosted_source` must be `"env"`, and `path_details` must contain
 `"smoothness"`. If `self_hosted_source` says `"sniff"` the hostname heuristic
-has guessed — and it guesses wrong for a Cloud Map name — so `smoothness`
-silently leaves the request, and the accessible model stops excluding surfaces
-recorded as impassable. The app carries on looking perfectly healthy.
+has guessed, so `smoothness` silently leaves the request, and the accessible
+model stops excluding surfaces recorded as impassable. The app carries on
+looking perfectly healthy.
 
-The full list is the gate table in [`infra/README.md`](infra/README.md).
-
-## Watching the bill
-
-The two lines worth arguing about, both in [`infra/README.md`](infra/README.md):
-the NAT gateway costs $32/month, more than the API it serves, and the load
-balancer costs $18/month, about as much as everything it balances. At this size
-a single small instance running `docker compose up` would do the same job for
-about a third of the total, and the README says so.
-
-`meander-api-latency-p95` and the other three alarms go to an SNS topic; set
-`AlarmEmail` when deploying the services stack or they exist and notify nobody.
+For the app itself, `node frontend/scripts/live-gate.mjs` drives the deployed
+site in a real browser — CORS, the CSP, the service worker and the offline
+open, none of which curl can see. 28 passed / 0 failed is the baseline.
 
 ## Rolling back
 
-Images are tagged with the commit SHA and the ECR repositories are
-IMMUTABLE-tagged, so a rollback is a task definition rather than a rebuild. The
-API service has a deployment circuit breaker with rollback enabled and reverts
-a bad image on its own; the router runs a single task and does not. Commands
-are in [`docs/RUNBOOK.md`](docs/RUNBOOK.md).
+The frontend rolls back from the Cloudflare Pages dashboard — every deployment
+is kept and any previous one can be re-promoted — or by reverting the commit
+on `main`. The VM rolls back by checking out the good commit and rebuilding;
+the commands are in [`docs/RUNBOOK.md`](docs/RUNBOOK.md).
 
 ---
 
@@ -448,13 +413,13 @@ extended, because most of it was never about Render.
 |---|---|
 | `clip_available: false` | Correct. The deployed image has no torch, by design. Scores are read from the pre-warmed cache. |
 | `scoring_method: "geometry_only"` | No pre-warmed CLIP scores for that area. Run Step 0b for it. Everywhere outside the five demo locations, this is expected. |
-| `segments_scored: 0` when you warmed the cache | `MEANDER_CACHE_DB` is set in the task definition. It points the API away from the `data/cache.db` baked into the image and **nothing else looks wrong**. Leave it unset. |
+| `segments_scored: 0` when you warmed the cache | `MEANDER_CACHE_DB` is set in the environment. It points the API away from the `data/cache.db` baked into the image and **nothing else looks wrong**. Leave it unset. |
 | Every route identical | GraphHopper accepted `custom_model` and ignored it. `ch.disable` must accompany it — the classic failure, and it is silent. `scripts/verify_selfhosted.py` checks for exactly this. |
 | `scenic` and `accessible` blocked, "flexible routing mode" | You are pointed at the hosted GraphHopper free tier, which cannot execute a custom model. Point `MEANDER_GRAPHHOPPER_URL` at your own router. |
 | `path_details` has no `smoothness` | `MEANDER_GRAPHHOPPER_SELF_HOSTED` is not `1`. The accessible model has silently stopped excluding impassable surfaces. This is the most dangerous one on the list. |
 | 429 with "used up its routing allowance" | The daily ceiling. Working as intended. |
 | `/api/health` 404s from your laptop but `/healthz` is fine | Deliberate, since the Caddyfile stopped allowlisting it. `/api/health` is a strict superset of `/metrics` — the same counters, plus the router's internal URL, key-presence booleans, cache counts and the rate limiter's own configuration — and `/metrics` was already firewalled to hide exactly that, so publishing the larger one was the wrong way round. Read it on the VM: `curl -s 127.0.0.1:8000/api/health`. `/healthz` stays public because UptimeRobot polls it and it discloses a status string and a version. |
-| *Everyone* getting 429 at once | `MEANDER_TRUSTED_PROXY_HOPS` is wrong. Behind CloudFront **and** an ALB it is `2`: the header is `viewer, cloudfront` and the limiter counts from the right. At `1` every request in the world shares one bucket, and the limiter still *works*, which is what makes it hard to spot. |
+| *Everyone* getting 429 at once | `MEANDER_TRUSTED_PROXY_HOPS` is wrong. Behind Caddy alone it is `1`, which is what `compose.prod.yml` sets: the limiter counts `X-Forwarded-For` from the right, one hop per trusted proxy. At `0` every request resolves to Caddy's own address and shares one bucket, and the limiter still *works*, which is what makes it hard to spot. |
 | A Cloudflare **preview** deployment loads, but every API call fails CORS | Expected, and accepted rather than fixed — see "Preview deployments" above. |
 | Routes appear but the map is blank | CSP `connect-src`/`img-src` is missing `https://tiles.openfreemap.org`. |
 | The map is fine until you pick **Satellite**, then blank for twenty seconds and then blank for ever, with nothing in the console | CSP is missing `https://server.arcgisonline.com` from **`connect-src`**. `img-src` alone is not enough and looks like it should be: MapLibre v5 loads raster tiles through `fetch`, not through an `<img>`, so the request is a connect and the policy refuses it. `MapView.jsx` then falls through to its 20 s `MAP_LOAD_TIMEOUT_MS` and reports nothing, because no error is raised anywhere. Both entries are in `frontend/public/_headers`; if you serve the app from somewhere else, both have to be there too. |
@@ -470,8 +435,8 @@ extended, because most of it was never about Render.
 | "Save routes for offline" is granted, and nothing is saved | **Fixed.** It was real: `sw.js` returns early for any cross-origin request — the line that keeps map tiles from ever being cached, and it is right — but this deployment serves the site from `meander-eoc.pages.dev` and the API from `meander-app.duckdns.org`, so *every* API call was cross-origin and the worker's `/api/routes` branch never ran. Measured live at the time: consent granted, search completed, zero results caches, nothing stored. The store now lives on the page (`frontend/src/lib/resultsStore.js`), written by `client.js` after a completed stream, so it sees the request whatever origin the API is on. BLOCKED.md §8 has the reasoning. If you see this symptom again, check in this order: is a shell cache installed (`caches.keys()` — the store versions itself against it and stores nothing without one); is the origin secure (`crypto.subtle` is needed for the request digest); and did the search actually return 200 rather than 429. |
 | Rest stops are `null` rather than `[]` | Overpass timed out. `null` means "we could not look" and `[]` means "we looked and found none" — the difference is deliberate and the UI renders them differently. |
 | `narration` is `null` | No `ANTHROPIC_API_KEY`. The card says "Description still being written…". |
-| The router has no public IP and you cannot curl it | Correct. Its security group's only ingress rule names the API's security group. It is unauthenticated and compute-unbounded; that is the boundary. |
-| The frontend 404s on a deep link | On Cloudflare Pages this is automatic — Pages falls back to `/index.html` for any path with no asset, as long as the build has no top-level `404.html`. Adding one switches that off for every path at once. `frontend/public/_redirects` deliberately contains no rules and says why. On the retired CloudFront path it was the custom error responses instead. |
+| The router has no public port and you cannot curl it | Correct. `graphhopper:8989` is reachable only on the compose network, and the Caddyfile never proxies to it. It is unauthenticated and compute-unbounded; that is the boundary. |
+| The frontend 404s on a deep link | On Cloudflare Pages this is automatic — Pages falls back to `/index.html` for any path with no asset, as long as the build has no top-level `404.html`. Adding one switches that off for every path at once. `frontend/public/_redirects` deliberately contains no rules and says why. |
 | A `Caddyfile` change survives `git pull` **and** a reload, and the old config is still served | The `caddy` service bind-mounts a **single file** (`compose.prod.yml:194`, `./Caddyfile:/etc/caddy/Caddyfile:ro`), and a single-file bind mount is bound to the *inode*, not to the path. `git pull` does not rewrite a tracked file in place — it unlinks it and creates a new one — so the host path is now a different inode and the container's mount still points at the old, unlinked one. `caddy reload` then re-reads `/etc/caddy/Caddyfile` **from inside the container**, which is the stale inode: measured here, it logged `adapted config to JSON`, **exited 0**, and went on serving the previous config. Nothing anywhere says the word "stale". ⚠ **This is why the trap is intermittent and reads as haunted:** an edit that writes *in place* — `>`, `>>`, an editor configured to truncate-and-write — keeps the inode and does propagate into the container, so hand-editing the Caddyfile on the VM appears to work. Anything that replaces the file instead — `git pull`, `git checkout`, `sed -i`, and any editor that writes a temp file and renames it over the target — does not. Both were measured; the difference is invisible from the shell. The fix is to **recreate the container, not reload it** — `docker compose … up -d --force-recreate caddy`. (A plain `restart caddy` also works, because the mount is re-resolved at container start; `up -d` on its own does not — it prints `Container … Running` and does nothing.) This is why `scripts/provision-vm.sh` recreates Caddy and never reloads it. |
 | A backend change survives `git pull` **and** `--force-recreate`, and the old code is still running | `--force-recreate` recreates the **container**. It never rebuilds the **image**, and `Dockerfile:46` bakes the source in with `COPY backend/ /app/backend/` — so after a pull the new code is on the host and the image still holds the old. Compose recreates from that unchanged image, prints `Started`, and exits 0. The verb is `docker compose … build api`. ⚠ **This row and the one above it need different verbs, and neither covers the other:** `--force-recreate` alone fixes the Caddyfile and silently misses the API; `--build` alone rebuilds the API and silently misses the Caddyfile — it prints `Image Built` and then `Container Running` for a Caddy still on the stale mount, because the Caddy *image* did not change so nothing is recreated. Both failures exit 0 and look like deploys. Measured on this VM (Docker 29.7.2, Compose v5.4.0). Use `scripts/provision-vm.sh deploy`, which does both and then proves it. |
 | You want to know whether the running containers are actually the code you pulled | Do not infer it from a green `up -d`; neither trap above turns anything red. Compare digests across the boundary — `scripts/provision-vm.sh verify` does exactly this, and it is the only check here that can fail for the right reason: `sha256sum Caddyfile` against `docker exec meander-caddy-1 sha256sum /etc/caddy/Caddyfile`, and the same comparison over `backend/**/*.py` inside `meander-api-1`. |
@@ -486,7 +451,7 @@ ethic is built against. None of them produces an error anywhere.
 |---|---|
 | The app calls the API and the browser console says nothing, but every request fails | CORS. `MEANDER_ALLOWED_ORIGINS` does not name `capacitor://localhost` — see Step 2, and note that an *empty* value does not mean "deny", it means "allow the Vite dev server". |
 | All three routes arrive together at the end instead of one at a time | The `CapacitorHttp` plugin is enabled. It patches global `fetch`, so `res.body` is gone, and `realFetchRoutes()` in `client.js` falls through to its plain-JSON branch — the app still works, and the streaming choreography the UI is built around never fires. **Leave it disabled.** Fix CORS on the server, which is where it belongs. |
-| The map is blank in the app but fine on the website | The app has no server in front of it, so `infra/30-web.yaml`'s response headers never reach it. It needs its own `<meta http-equiv="Content-Security-Policy">` naming `https://tiles.openfreemap.org` in **both** `connect-src` and `img-src`. |
+| The map is blank in the app but fine on the website | The app has no server in front of it, so the response headers in `frontend/public/_headers` never reach it. It needs its own `<meta http-equiv="Content-Security-Policy">` naming `https://tiles.openfreemap.org` in **both** `connect-src` and `img-src`. |
 | A frame of cream before the dark theme paints | `script-src 'self'` with no hash killed the inline anti-flash block in `index.html`. That script exists on purpose; add its SHA-256 to `script-src` and a build check that the hash still matches, because it will drift the first time anyone edits it. |
 | A "save this route for offline" control that does nothing | Service workers do not register under `capacitor://localhost` — WKWebView only registers them on `http`/`https` secure origins, and `registerServiceWorker()` catches the failure and says nothing. **Still true on iOS after the web fix**, and deliberately so: the page-side store versions its bucket against the installed shell cache, and with no worker there is no shell cache, so it stores nothing rather than inventing a version. That keeps the web fix from silently starting to store on a platform nobody has tested it on. Re-base it on native storage or **remove the affordance** — a control that does nothing is the exact dishonesty this project refuses, and on iOS it still does nothing. |
 | The 200 m barrier warning is visible but silent | `navigator.vibrate` is not implemented in WKWebView. It does not throw; it does nothing. Use a native haptic and keep the `role="alert"` announcement and the visual. |

@@ -97,8 +97,8 @@ def test_a_hosted_deployment_still_demands_an_api_key(monkeypatch) -> None:
 def test_strict_startup_boots_without_the_optional_keys(monkeypatch) -> None:
     """The configuration the documentation actually tells you to deploy.
 
-    .env.example:75 says to set MEANDER_STRICT_STARTUP in production and
-    infra/20-services.yaml:272 does. A free-tier deployment normally has neither
+    .env.example:75 says to set MEANDER_STRICT_STARTUP in production, and
+    production does. A free-tier deployment normally has neither
     MAPILLARY_TOKEN nor ANTHROPIC_API_KEY — CLIP reads scores out of cache.db and
     narration is skipped without a key — so both are in missing_keys() and
     neither is in missing_required_keys().

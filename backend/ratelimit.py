@@ -56,11 +56,11 @@ class RateLimiter:
     # The UTC date, not a stopwatch started when the process did.
     #
     # A rolling 24-hour window anchored at process start means every deploy,
-    # crash or scale event hands the service a fresh daily quota — and on ECS
-    # that is a far more likely occurrence than the two-task case. It also made
-    # the ceiling unpredictable: "resets at midnight" is something an operator
-    # can reason about, "resets 24 hours after whenever this container last
-    # started" is not.
+    # crash or restart hands the service a fresh daily quota — and container
+    # replacement is routine, not rare. It also made the ceiling
+    # unpredictable: "resets at midnight" is something an operator can reason
+    # about, "resets 24 hours after whenever this container last started" is
+    # not.
     _day: str = field(default_factory=lambda: datetime.now(UTC).date().isoformat())
     _served_today: int = 0
 

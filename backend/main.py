@@ -174,10 +174,10 @@ def _check_startup() -> list[str]:
     its own docstring.
 
     The consequence was a boot loop in the one configuration most likely to hit
-    it: .env.example:75 tells you to set MEANDER_STRICT_STARTUP in production and
-    infra/20-services.yaml:272 does, so a deployment with no Mapillary or
-    Anthropic key — the normal case, and the documented free-tier one — would
-    refuse to start while being perfectly able to answer.
+    it: .env.example:75 tells you to set MEANDER_STRICT_STARTUP in production,
+    so a deployment with no Mapillary or Anthropic key — the normal case, and
+    the documented free-tier one — would refuse to start while being perfectly
+    able to answer.
 
     /readyz already used the required list. Only the boot decision did not.
     """
@@ -231,8 +231,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     )
     yield
 
-    # ECS sends SIGTERM and then SIGKILL. Everything below happens inside that
-    # window, so it is ordered by how bad losing it would be.
+    # The container runtime sends SIGTERM and then, after a grace period,
+    # SIGKILL. Everything below happens inside that window, so it is ordered
+    # by how bad losing it would be.
     from .fixtures import aclose_client
 
     # 1. Tell in-flight streams to stop. They check between events and emit a
@@ -275,8 +276,8 @@ app.add_middleware(
     allow_headers=["Content-Type", "Accept"],
     # Without this a cross-origin browser cannot read any of them at all, which
     # is why ApiError.retryAfter in frontend/src/api/client.js has always been 0
-    # and the backoff logic behind it has never once run. A split deployment —
-    # CloudFront for the site, an ALB for the API — is cross-origin by
+    # and the backoff logic behind it has never once run. The live deployment —
+    # Cloudflare Pages for the site, this VM for the API — is cross-origin by
     # construction, so this is the normal case rather than an edge one.
     expose_headers=["Retry-After", "X-Meander-Cache", "X-Request-Id"],
     max_age=600,
@@ -468,10 +469,10 @@ async def limit_body_size(request: Request, call_next: Any) -> Response:
     and a 5 MB chunked body was buffered and parsed in full.
 
     Caddy's `request_body max_size 64KB` covers the four allowlisted paths in
-    the VM deploy, but `infra/20-services.yaml` runs this container behind an
-    ALB with no Caddy and no body limit, so the bypass is live in the AWS path.
-    A limit the application states should not depend on which edge is in front
-    of it.
+    the VM deploy, but any topology that fronts this container with something
+    other than Caddy has no body limit at the edge, and the bypass is live
+    there. A limit the application states should not depend on which edge is
+    in front of it.
 
     So the body is counted as it arrives. The stream is consumed here and
     replayed downstream, which is the only way to bound something whose size is
@@ -1971,8 +1972,8 @@ async def prometheus_metrics() -> Response:
     figure or to anything outside this process.
 
     Unauthenticated, like `/healthz`, because it reveals no more than
-    `/api/health` does. Scrape it from inside the VPC; the load balancer in
-    infra/20-services.yaml has no rule that reaches it from outside.
+    `/api/health` does. Scrape it from the VM; the Caddyfile's allowlist has
+    no rule that reaches it from outside.
     """
     snapshot = metrics.snapshot()
 

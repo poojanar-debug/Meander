@@ -12,8 +12,9 @@
 #
 # The graph is a **build artifact**, not a runtime step. An import is 96 s for
 # the demo region set and about 31 minutes for countries; doing either inside a
-# container start means every task replacement is an outage of that length, and
-# ECS would kill the task before the second one finished.
+# container start means every container replacement is an outage of that
+# length, and any supervisor with a startup health deadline would kill the
+# container long before the second one finished.
 
 set -euo pipefail
 

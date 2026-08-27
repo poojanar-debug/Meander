@@ -21,7 +21,7 @@ MOCK_PORT   ?= 5199
 
 .DEFAULT_GOAL := help
 .PHONY: help venv install install-ci test test-frontend lint coverage build \
-        check run run-mock router infra-lint images compose-up compose-down \
+        check run run-mock router images compose-up compose-down \
         scrub clean dupes colour test-sandboxed torch-free gate
 
 help:  ## Show this list
@@ -57,9 +57,6 @@ test-frontend:  ## The frontend suite. TZ is pinned in vite.config.js, not here
 
 build:  ## Frontend build
 	cd $(FRONT) && npm run build
-
-infra-lint:  ## CloudFormation templates. Nothing is deployed; see infra/README.md
-	$(VENV)/bin/cfn-lint infra/*.yaml && echo "infra ok"
 
 dupes:  ## Duplicate top-level definitions — the damage a clean merge hides
 	$(PY) scripts/check_duplicate_defs.py
@@ -124,7 +121,7 @@ gate:  ## Headless-Chrome layout and a11y gate (needs Chrome; says so when skipp
 	    exit $$status ; \
 	fi
 
-check: lint dupes coverage test-frontend build colour infra-lint torch-free test-sandboxed gate  ## Everything CI runs, fastest failure first
+check: lint dupes coverage test-frontend build colour torch-free test-sandboxed gate  ## Everything CI runs, fastest failure first
 	@echo
 	@echo "  Green."
 	@echo
