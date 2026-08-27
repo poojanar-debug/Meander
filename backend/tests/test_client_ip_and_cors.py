@@ -141,12 +141,11 @@ def test_local_origins_can_still_be_opted_into(monkeypatch: pytest.MonkeyPatch) 
 # CORS for the native app
 #
 # DEPLOY.md used to say "there is no CORS step, and that is deliberate". That
-# was true of the web deployment and only of it: one CloudFront distribution
-# serves the site and proxies /api/*, so the browser never makes a cross-origin
-# request. The iOS app serves its own assets from `capacitor://localhost` and
-# calls https://<distribution>/api/*, which is cross-origin by any definition.
-# Preflight and CORS apply, and the allowlist has to name a scheme that is not
-# http or https.
+# was only ever true of a single-origin deployment, which is not the one that
+# serves traffic: the site is on Cloudflare Pages and the API on the VM, so
+# every browser call is cross-origin. The iOS app is more so — it serves its
+# own assets from `capacitor://localhost` and calls the API host, so the
+# allowlist has to name a scheme that is not http or https.
 # ---------------------------------------------------------------------------
 
 APP_ORIGIN = "capacitor://localhost"
@@ -183,8 +182,8 @@ def test_configuring_the_app_origin_stops_allowlisting_the_vite_dev_server(
     """The live defect this phase exists to close, pinned so it cannot return.
 
     `_resolve_origins` defaults MEANDER_ALLOW_LOCAL_ORIGINS to `not origins`.
-    infra/20-services.yaml shipped MEANDER_ALLOWED_ORIGINS as the empty string,
-    so the deployed task's allowlist was never empty — it was exactly
+    The since-removed deployment templates shipped MEANDER_ALLOWED_ORIGINS as
+    the empty string, so that allowlist was never empty — it was exactly
     ('http://localhost:5173', '127.0.0.1:5173'). Production allowlisted the Vite
     dev server, and nothing said so.
 
@@ -216,8 +215,8 @@ def test_an_empty_origin_list_still_means_local_development(
     What changed is the production half. This used to hold in live mode too, so
     a deployment that forgot MEANDER_ALLOWED_ORIGINS silently allowlisted the
     Vite dev server. That was documented rather than fixed, and closed only in
-    CloudFormation — which a compose deploy does not inherit. See
-    test_live_mode_never_allows_localhost_by_omission below.
+    deployment templates that no longer exist — a fix the compose deploy never
+    inherited. See test_live_mode_never_allows_localhost_by_omission below.
     """
     monkeypatch.setenv("MEANDER_ALLOWED_ORIGINS", "")
     monkeypatch.delenv("MEANDER_ALLOW_LOCAL_ORIGINS", raising=False)

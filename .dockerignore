@@ -37,7 +37,6 @@ fixtures/
 graphhopper/
 frontend/
 scripts/
-infra/
 docs/
 .env
 .env.*

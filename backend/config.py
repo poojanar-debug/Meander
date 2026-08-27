@@ -543,8 +543,9 @@ def _resolve_origins() -> tuple[str, ...]:
     # is better and still not right: an empty MEANDER_ALLOWED_ORIGINS is exactly
     # what a deployment that forgot to configure it looks like, and "forgot to
     # configure it" then got the dev-server allowlist rather than a closed door.
-    # The previous pass documented that rather than fixing it and closed the hole
-    # in CloudFormation instead — a fix a compose deploy does not inherit.
+    # The previous pass documented that rather than fixing it and closed the
+    # hole only in deployment templates that no longer exist — a fix the
+    # compose deploy never inherited.
     #
     # The default now keys off fixture mode, which is the one signal that is
     # already required to be correct and already differs between the two cases:

@@ -13,8 +13,8 @@ entirely somebody else's tail latency. The questions worth asking are:
   2. Does the rate limiter actually limit, and does it limit the right people?
   3. Does the app degrade rather than fail? A slow or dead upstream must
      produce a 200 with null fields, not a 500.
-  4. What is the p95, and is it the shape the alarm in infra/20-services.yaml
-     was sized for?
+  4. What is the p95, and is it still the shape the 15 s latency threshold in
+     docs/RUNBOOK.md was sized against?
 
 It reports percentiles rather than a mean. A mean over a distribution with a
 13 s tail describes nothing that ever happened.

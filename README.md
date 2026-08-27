@@ -183,12 +183,6 @@ working as intended rather than a defect.
 
 ### What is still unverified
 
-**Nothing is deployed, and the AWS stacks have never been applied.** All four
-CloudFormation templates validate and `cfn-lint` passes, which proves they are
-well-formed and nothing else. [`infra/README.md`](infra/README.md) lists
-seventeen gate items and marks every one UNVERIFIED with the command that would
-settle it.
-
 **The scenery scores are now real, and you should still read the caveats.**
 `data/cache.db` ships with 146 pre-warmed CLIP segments and `/api/routes`
 returns `scoring_method: "clip"` — but the prompt pair was chosen from three
@@ -220,7 +214,7 @@ safe-area insets and this frontend has no `env(safe-area-inset-*)` in it at all.
 
 ### What is deployed
 
-**All six objectives are live**, on a topology that is not the one in `infra/`:
+**All six objectives are live:**
 
 | | where | how it ships |
 |---|---|---|
@@ -233,19 +227,19 @@ default three are unchanged, and `frontend/scripts/live-gate.mjs` reports **28
 passed, 0 failed** against production in a real browser — CORS, CSP, the
 service worker, the offline open and a permalink among them.
 
-**Nothing from the map-layers round is deployed.** The basemaps, the follow-mode heading,
-viewpoints, and both photo endpoints are committed and unshipped, and the `Caddyfile` lines that
-make `/api/photos` and `/api/photo/*` public are committed too. Until the VM is redeployed the photo
-call 404s against the live API — which `client.js` degrades to a null response rather than an error
-box, so the route still draws with no photographs under it.
+**The map-layers round is now deployed too.** The paragraph that stood here said the basemaps,
+the follow-mode heading and both photo endpoints were committed and unshipped, with the photo call
+404ing against the live API until the VM was redeployed. The VM has since been redeployed:
+`POST /api/photos` answers `200` from the public host, and the app on Pages ships from `main`, so
+the two halves are the same commit's worth of behaviour again.
 
-**The AWS path in [`infra/`](infra/) is still unapplied.** Four CloudFormation
-stacks that would deploy it — ECS Fargate for the API and the router, CloudFront
-and S3 for the app, GitHub OIDC for CI with no stored AWS credentials — and none
-has been applied; `.github/workflows/deploy.yml` has never got past assuming its
-role, because the repository has no AWS secrets set. [DEPLOY.md](DEPLOY.md) is
-written to be followed without guessing, and documents the Cloudflare path that
-is actually serving traffic alongside it.
+**The AWS path is gone.** The repository used to carry four never-applied
+CloudFormation stacks in `infra/`, a `deploy.yml` workflow that never got past
+assuming its role, and a runbook written for the deployment they would have
+created. None of it ever served a request — the topology above is the
+deployment — so all of it has been removed rather than left to read like a
+second production. [DEPLOY.md](DEPLOY.md) now documents only the deployment
+that exists.
 
 This section said "Nothing" for several sessions after that stopped being true.
 [PROGRESS.md](PROGRESS.md) is the full build log, including the hostile
