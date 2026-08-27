@@ -75,10 +75,14 @@ describe('there is exactly one place that watches the position', () => {
     expect(watchers).toEqual(['lib/followTracking.js'])
   })
 
-  it('makes no request from the follow feature', () => {
-    // The privacy claim is that no request anywhere in this feature carries the
-    // live position, and it is stated in the UI at the moment tracking starts.
-    // This is the mechanised half of it.
+  it('makes no request from the tracking, the geometry, or the sheet', () => {
+    // The follow feature now has exactly ONE request — the reroute after a
+    // sustained wrong turn — and it lives in lib/useReroute.js, goes through
+    // the one API client, and is disclosed in the provenance line before it
+    // fires. Everything else stays absolute: the watch, every geometric
+    // answer derived from it, and the sheet that renders them must not be
+    // able to call anywhere, so the exception keeps its edges. This is the
+    // mechanised half of that claim.
     for (const rel of ['lib/followTracking.js', 'lib/follow.js', 'components/FollowMode.jsx']) {
       const src = read(rel)
       expect(src, `${rel} fetches`).not.toMatch(/\bfetch\(|XMLHttpRequest|navigator\.sendBeacon/)
@@ -91,6 +95,53 @@ describe('there is exactly one place that watches the position', () => {
     const src = read('lib/followTracking.js')
     expect(src).toMatch(/ACCURACY_LIMIT_M = 75/)
     expect(src).toMatch(/accuracyM > ACCURACY_LIMIT_M/)
+  })
+})
+
+describe('a wrong turn recalculates rather than lecturing', () => {
+  it('reroutes through the one API client, from the module that owns the exception', () => {
+    // The request has to exist — a follow mode that can only say "head back"
+    // is a map, not a guide — and it has to live in exactly one place, with a
+    // cooldown, so it can never fire once per GPS fix.
+    const src = read('lib/useReroute.js')
+    expect(src).toMatch(/buildRouteRequest/)
+    expect(src).toMatch(/fetchRoutes/)
+    expect(src).toMatch(/REROUTE_COOLDOWN_MS/)
+  })
+
+  it('App walks the recalculated line, not the planned one', () => {
+    // The reroute is useless if the tracking, the sheet or the map keeps
+    // reading the reducer's original route. All three read the same value.
+    const app = read('App.jsx')
+    expect(app).toMatch(/useReroute/)
+    expect(app).toMatch(/liveRoute \?\? followRoute/)
+    expect(app).toMatch(/useFollowTracking\(activeFollowRoute\)/)
+  })
+
+  it('the card says recalculating, and the foot says what that sends', () => {
+    // The reroute carries the live position off the phone, which the old
+    // provenance sentences promised never happened. Every sentence changed
+    // with the behaviour; a stale one here would be the app lying on the one
+    // screen where the claim is the point.
+    const src = read('components/FollowMode.jsx')
+    expect(src).toMatch(/Recalculating/)
+    expect(src).toMatch(/rerouting sends your position/)
+    expect(src).not.toMatch(/no recalculation in follow mode/)
+    expect(src).not.toMatch(/position never leaves this phone/)
+  })
+})
+
+describe('the chevrons point the way the route goes', () => {
+  it('draws the repeating chevron along the +x axis', () => {
+    // `symbol-placement: 'line'` rotates an icon so its x-axis follows the
+    // line, exactly as text glyphs flow along a street name. The chevron was
+    // first drawn pointing up, so every arrow on the walk rendered a
+    // quarter-turn anticlockwise of the direction of travel — pointing into
+    // the buildings on the one screen someone navigates by. Apex on +x is
+    // the fix, and this pins its two defining strokes.
+    const src = read('components/MapView.jsx')
+    expect(src).toMatch(/moveTo\(mid - 3, mid - 4\.6\)/)
+    expect(src).toMatch(/lineTo\(mid \+ 3, mid\)/)
   })
 })
 

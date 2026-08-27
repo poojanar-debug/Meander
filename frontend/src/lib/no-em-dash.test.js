@@ -127,8 +127,10 @@ const NOT_USER_VISIBLE = [
 /**
  * The dashes the design wrote. A dash-carrying line passes only when it
  * contains one of these substrings — each one a sentence (or the placeholder
- * declaration) from the approved 2026 copy, quoted from the spec rather than
- * paraphrased. A new dash anywhere else is still a failure.
+ * declaration) from the approved 2026 copy quoted verbatim, or from copy
+ * approved since: the reroute-era provenance sentences replaced the spec's
+ * "never leaves this phone" pair when recalculation shipped, because the old
+ * sentences stopped being true. A new dash anywhere else is still a failure.
  */
 const APPROVED_COPY = [
   // The unknown placeholder, by stated rule: unknown renders as the em dash.
@@ -146,8 +148,9 @@ const APPROVED_COPY = [
   ' — limit ',
   ' — {reason}',
   // Follow mode.
-  'position never leaves this phone — no network in follow mode',
-  'no recalculation in follow mode — your position never leaves this phone',
+  'position leaves this phone only to reroute you — nothing else is sent in follow mode',
+  'rerouting sends your position to the routing server — nothing else leaves this phone',
+  'the routing server could not be reached — position stays on this phone until it can',
   ' — it is about ',
   'Nothing was uploaded — this walk exists only',
 ]

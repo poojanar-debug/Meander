@@ -11,24 +11,31 @@ import { spokenLabel } from '../lib/amenities.js'
 
 /**
  * Walking a route: the next-turn banner, the dock, and the three cards that
- * replace or join them — barrier ahead, off route, arrived.
+ * replace or join them — barrier ahead, recalculating, arrived.
  *
  * ## Privacy
  *
- * **No request made anywhere in this feature carries the live position.** The
- * watch, and everything derived from it, lives in `lib/followTracking.js` so
- * that the map and this layer read one value instead of two; the privacy
- * argument is stated there in full. Nothing in this component fetches, and
- * nothing it is given came from a request made after follow mode started. The
- * provenance line at the foot of the screen says so at the moment tracking
- * runs, not only on a privacy page nobody opens while walking.
+ * **This component makes no request, and neither does the tracking under it.**
+ * The watch, and everything derived from it, lives in `lib/followTracking.js`
+ * so that the map and this layer read one value instead of two, and every
+ * calculation there runs against geometry downloaded before the walk began.
  *
- * That is still exactly true of this component and of the tracking under it.
- * It is no longer the whole story of the screen, because the map behind it can
- * be set to satellite, which fetches raster tiles as the walker moves. The
- * `basemapStreams` prop is how that fact reaches the sentence; see the note
- * above `PROVENANCE` for why the sentence has to change rather than be
- * defended.
+ * That is no longer the whole story of the screen, and the exceptions are
+ * named rather than defended:
+ *
+ * - **Rerouting.** A sustained wrong turn sends the live position — once per
+ *   attempt, never per fix — to the app's own routing server so the route can
+ *   be redrawn from where the walker stands. That request lives in
+ *   `lib/useReroute.js`, which states its whole contract; this component only
+ *   renders its three moments (the provenance line before, the recalculating
+ *   card during, the arrival count after).
+ * - **Satellite.** The map behind this layer can be set to imagery, which
+ *   fetches raster tiles as the walker moves. The `basemapStreams` prop is how
+ *   that fact reaches the sentence.
+ *
+ * A privacy line that is true for the default and false for one path is worse
+ * than no line at all, so every sentence below changes with what is actually
+ * being sent.
  *
  * ## The banner
  *
@@ -69,35 +76,61 @@ function sideOfRoute(position, target, headingDeg) {
 }
 
 /**
- * The two provenance sentences, and why there are two of each.
+ * The provenance sentences, and why each exists.
  *
- * The default basemap fetches nothing while following. That was measured, not
- * assumed: OpenFreeMap's vector source declares `maxzoom: 14`, so the z17
- * camera is served by overzooming tiles already held, and a full simulated
- * walk made three requests, all glyph ranges. "No network in follow mode" is
- * literally true there.
+ * The default basemap fetches nothing while the walker stays on the route.
+ * That was measured, not assumed: OpenFreeMap's vector source declares
+ * `maxzoom: 14`, so the z17 camera is served by overzooming tiles already
+ * held, and a full simulated walk made three requests, all glyph ranges.
  *
- * **It is not true under satellite.** Esri's imagery is raster and goes to
- * z19, so walking pulls tiles, and the sequence of those requests is the walk.
- * The position itself still never leaves the phone, and no recalculation
- * happens either, so it would be technically defensible to leave the sentence
- * alone. That defence is exactly the kind this project does not make: someone
- * reading "no network in follow mode" on the screen they are walking with will
- * conclude nothing is being disclosed, and under satellite something is.
+ * Two things do send, and the sentences name both rather than hedging:
  *
- * So the sentence changes with the basemap, and it names the host rather than
- * hedging. A privacy claim that is true for the default and false for one
- * setting is worse than no claim at all, because the setting is the case where
- * it matters.
+ * - **Rerouting.** Leaving the route sends the position to the routing server
+ *   so the way can be redrawn — that is the whole feature, and the footer line
+ *   says so before it ever happens rather than only while it does.
+ * - **Satellite.** Esri's imagery is raster to z19, so walking pulls tiles and
+ *   the sequence of those requests is the walk, whether or not a reroute ever
+ *   fires.
+ *
+ * A privacy claim that is true for the default and false for one setting is
+ * worse than no claim at all, because the setting is the case where it
+ * matters.
  */
 const PROVENANCE = {
-  quiet: 'position never leaves this phone — no network in follow mode',
+  quiet: 'position leaves this phone only to reroute you — nothing else is sent in follow mode',
   streaming: 'satellite tiles are fetched as you move, so the imagery host can infer where you are',
 }
 
 const OFF_ROUTE_FOOT = {
-  quiet: 'no recalculation in follow mode — your position never leaves this phone',
-  streaming: 'no recalculation in follow mode, but satellite tiles are being fetched as you move',
+  quiet: 'rerouting sends your position to the routing server — nothing else leaves this phone',
+  streaming: 'rerouting sends your position, and satellite tiles are fetched as you move',
+}
+
+/** When the reroute could not come back — offline, or the server is down —
+ *  the card falls back to directions a phone can give with no network at all,
+ *  and the foot says why it is not recalculating. */
+const OFF_ROUTE_FAILED_FOOT =
+  'the routing server could not be reached — position stays on this phone until it can'
+
+/**
+ * The arrival card's account of what this walk sent, which depends on what
+ * actually happened rather than on what usually does. A walk with no wrong
+ * turn still sent nothing; one that was recalculated sent a position per
+ * recalculation, and the sentence counts them instead of rounding to a
+ * reassurance.
+ */
+function uploadNote(rerouteCount, basemapStreams) {
+  if (rerouteCount > 0) {
+    const times = rerouteCount === 1 ? 'once' : `${rerouteCount} times`
+    return (
+      `The route was recalculated ${times}, which sent your position to the routing server` +
+      `${basemapStreams ? ', and satellite tiles were fetched along the way' : ''}. ` +
+      'Nothing else was uploaded.'
+    )
+  }
+  return basemapStreams
+    ? 'This walk was never uploaded. Satellite tiles were fetched along the way.'
+    : 'Nothing was uploaded, and this walk exists only on your phone.'
 }
 
 export default function FollowMode({
@@ -111,6 +144,11 @@ export default function FollowMode({
   // rather than read here, because `lib/basemap.js` owns the answer and this
   // component owns only the sentence.
   basemapStreams = false,
+  // The recalculation state from `lib/useReroute.js`: { rerouting, failed,
+  // count }. Threaded rather than computed here for the same reason as the
+  // tracking — the request lives beside App's other fetches, and this layer
+  // only renders its moments.
+  reroute = null,
 }) {
   const {
     at,
@@ -148,6 +186,17 @@ export default function FollowMode({
     endRef.current?.focus({ preventScroll: true })
   }, [])
 
+  // A recalculated route is a different list of steps, and its first turn must
+  // be spoken even when its index happens to equal the last one announced on
+  // the old line. Declared BEFORE the announce effect: React runs effects in
+  // declaration order, so on the commit that swaps the route this clears the
+  // ref and the announcement below then reads a clean slate — the other order
+  // would announce first and clear after, speaking the same turn twice on the
+  // next fix.
+  useEffect(() => {
+    announcedStep.current = -1
+  }, [route])
+
   // The turn ahead is announced through the app's single polite live region.
   // A second live region here would be two voices talking over each other on
   // every position update.
@@ -180,10 +229,16 @@ export default function FollowMode({
   // formatter: ±9 m must not be relabelled ±10 m.
   const gps = accuracyM != null ? `GPS ${formatAccuracy(accuracyM, units)}` : null
 
+  // Whether the wrong turn is being answered with a new route right now, or
+  // has to fall back to walking directions because the server is unreachable.
+  const recalculating = offRoute && reroute != null && !reroute.failed
+
   const dockSub = poorSignal
     ? `waiting for signal · GPS ${formatAccuracy(poorAccuracyM, units)}`
     : offRoute
-      ? ['paused off route', gps].filter(Boolean).join(' · ')
+      ? [recalculating ? 'recalculating the route' : 'paused off route', gps]
+          .filter(Boolean)
+          .join(' · ')
       : [arriveAt ? `arrive ${lowerClock(fmtClockIn(arriveAt, units))}` : null, gps]
           .filter(Boolean)
           .join(' · ')
@@ -215,9 +270,7 @@ export default function FollowMode({
             </p>
             <hr className="follow__rule" />
             <p className="follow__arrival-note">
-              {fmtDurSpoken(elapsedMin)} outside. {basemapStreams
-                ? 'This walk was never uploaded. Satellite tiles were fetched along the way.'
-                : 'Nothing was uploaded, and this walk exists only on your phone.'}
+              {fmtDurSpoken(elapsedMin)} outside. {uploadNote(reroute?.count ?? 0, basemapStreams)}
             </p>
             <button type="button" className="button-sky follow__done" onClick={onExit}>
               Done
@@ -237,23 +290,41 @@ export default function FollowMode({
           <p className="follow__off-body">{error}</p>
         </div>
       ) : offRoute ? (
-        <div className="follow__off" role="alert">
-          <p className="follow__off-title">
-            Off route for {offSeconds ?? 15} second{(offSeconds ?? 15) === 1 ? '' : 's'}
-          </p>
-          <p className="follow__off-body">
-            Head back toward the marked path
-            {offDistance
-              ? side
-                ? ` — it is about ${offDistance} to your ${side}.`
-                : ` — it is about ${offDistance} away.`
-              : '.'}
-          </p>
-          <hr className="follow__rule follow__rule--dark" />
-          <p className="follow__off-foot mono">
-            {basemapStreams ? OFF_ROUTE_FOOT.streaming : OFF_ROUTE_FOOT.quiet}
-          </p>
-        </div>
+        recalculating ? (
+          <div className="follow__off" role="alert">
+            <p className="follow__off-title">Recalculating…</p>
+            <p className="follow__off-body">
+              You have left the marked path, so a new route is being drawn from where
+              you are. Keep walking; the map will catch up.
+            </p>
+            <hr className="follow__rule follow__rule--dark" />
+            <p className="follow__off-foot mono">
+              {basemapStreams ? OFF_ROUTE_FOOT.streaming : OFF_ROUTE_FOOT.quiet}
+            </p>
+          </div>
+        ) : (
+          <div className="follow__off" role="alert">
+            <p className="follow__off-title">
+              Off route for {offSeconds ?? 15} second{(offSeconds ?? 15) === 1 ? '' : 's'}
+            </p>
+            <p className="follow__off-body">
+              Head back toward the marked path
+              {offDistance
+                ? side
+                  ? ` — it is about ${offDistance} to your ${side}.`
+                  : ` — it is about ${offDistance} away.`
+                : '.'}
+            </p>
+            <hr className="follow__rule follow__rule--dark" />
+            <p className="follow__off-foot mono">
+              {reroute?.failed
+                ? OFF_ROUTE_FAILED_FOOT
+                : basemapStreams
+                  ? OFF_ROUTE_FOOT.streaming
+                  : OFF_ROUTE_FOOT.quiet}
+            </p>
+          </div>
+        )
       ) : (
         nextStep && (
           <div className="follow__banner">

@@ -16,19 +16,21 @@ import {
  *
  * ## Privacy
  *
- * **No request made anywhere in this module carries the live position.**
- * Progress along the line, distance to the next turn, off-route detection and
- * barrier proximity are all computed in `lib/follow.js` against geometry the
- * app downloaded before follow mode started. There is no endpoint that could
- * log a coordinate even by accident, because there is no call. That claim is
- * the whole privacy position of the feature and it is said in the UI at the
- * moment tracking starts, not only on a privacy page nobody opens while
- * walking.
+ * **No request made in this module carries the live position — this file
+ * watches and computes, and never calls.** Progress along the line, distance
+ * to the next turn, off-route detection and barrier proximity are all
+ * computed in `lib/follow.js` against geometry the app downloaded before
+ * follow mode started, and both files are pinned fetch-free by
+ * `follow-contract.test.js`.
  *
- * It survives this file having moved out of `FollowMode`. The lift is why it
- * has to be restated here rather than left where it was: the coordinate now
- * passes through `App`, which is the component that owns every fetch in the
- * app, so the reader who needs this sentence is the one editing App.
+ * The feature as a whole has exactly one request, and it is deliberate:
+ * `lib/useReroute.js` sends the position to the app's own routing server to
+ * redraw the route after a sustained wrong turn — the `offRoute` flag
+ * computed here is what arms it. That exception lives in its own module
+ * precisely so this one can stay absolute, and the UI names it in the
+ * provenance line before it ever fires. The coordinate passes through `App`,
+ * which owns every fetch in the app, so the reader who needs this paragraph
+ * is the one editing App.
  *
  * ## Why this is a hook in App rather than state in FollowMode
  *

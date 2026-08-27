@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react'
 
 import { buildRouteRequest, fetchRoutes, usingMockApi } from './api/client.js'
+import DesktopNotice from './components/DesktopNotice.jsx'
 import FollowMode from './components/FollowMode.jsx'
 import MapView from './components/MapView.jsx'
 import PlaceSearch from './components/PlaceSearch.jsx'
@@ -19,6 +20,7 @@ import { MOBILE_LAYOUT, useMatchMedia } from './lib/media.js'
 import { cacheAgeMs, formatCacheAge } from './lib/offline.js'
 import { GEOLOCATED, decodeState, writeUrl } from './lib/permalink.js'
 import { initialUnits } from './lib/units.js'
+import { useReroute } from './lib/useReroute.js'
 
 const MIN_MINUTES = 20
 const MAX_MINUTES = 360
@@ -251,6 +253,13 @@ export default function App() {
   // basemaps that fetch nothing.
   const [layer, setLayer] = useState(DEFAULT_BASEMAP)
   const [follow, setFollow] = useState(null)
+  // The route actually being walked, once a wrong turn has redrawn it. Null
+  // until the first recalculation, and beside `follow` rather than inside the
+  // reducer: the planned set is the answer to the question asked on the plan
+  // screen, and the cards, the permalink and the offline store all hang off
+  // it — a route drawn "from here, now" belongs to this walk alone and is
+  // cleared with it.
+  const [liveRoute, setLiveRoute] = useState(null)
   const [detailOpen, setDetailOpen] = useState(false)
   // Which stretch of the selected route the map should emphasise, from the
   // step under the cursor. It changes on every mousemove across a list and
@@ -285,6 +294,15 @@ export default function App() {
   const announceTimer = useRef(null)
 
   const isMobile = useMatchMedia(MOBILE_LAYOUT)
+
+  // A screen that is clearly a computer: the desktop layout AND a mouse as
+  // the primary pointer. Width alone would lecture an iPad in landscape;
+  // pointer alone would put a scrim over the CI gate, which drives a
+  // desktop-class browser at phone widths. Dismissal is component state, not
+  // storage — RELEASE-SPECS R4 keeps localStorage to theme and units, so the
+  // card returns next visit rather than costing a third key.
+  const finePointer = useMatchMedia('(hover: hover) and (pointer: fine)')
+  const [deskNoticeSeen, setDeskNoticeSeen] = useState(false)
 
   // The straight line to the destination, which is what resolves `auto` once
   // there is one. Null for a loop, which puts effectiveMode back on the time
@@ -419,6 +437,9 @@ export default function App() {
   const hasRoutes = state.routes.length > 0
   const selectedRoute = state.routes.find((r) => r.id === selected) ?? null
   const followRoute = follow ? (state.routes.find((r) => r.id === follow) ?? null) : null
+  // What the map and the sheet walk by: the recalculated line once there is
+  // one, the planned one until then.
+  const activeFollowRoute = followRoute ? (liveRoute ?? followRoute) : null
   const isLoop = !state.dest
 
   // --- handlers ------------------------------------------------------------
@@ -519,8 +540,27 @@ export default function App() {
   // --- follow mode ---------------------------------------------------------
 
   // One watch, one position, read by both the overlay and the map. Passing
-  // null starts nothing.
-  const tracking = useFollowTracking(followRoute)
+  // null starts nothing. Tracks the LIVE route — the recalculated line once a
+  // wrong turn has produced one — so progress, the next turn and the barrier
+  // alerts all describe the way actually being walked.
+  const tracking = useFollowTracking(activeFollowRoute)
+
+  // Recalculation after a sustained wrong turn: the one follow-time request,
+  // with its contract stated in lib/useReroute.js. Success replaces the walked
+  // line; the planned set in the reducer is untouched behind it.
+  const reroute = useReroute({
+    route: activeFollowRoute,
+    mode: state.mode,
+    tracking,
+    onReroute: setLiveRoute,
+    onAnnounce: announceNow,
+  })
+
+  // Each walk starts on the route that was chosen for it, whatever the last
+  // one was redrawn into.
+  useEffect(() => {
+    setLiveRoute(null)
+  }, [follow])
 
   const returnFocusRef = useRef(null)
 
@@ -649,20 +689,21 @@ export default function App() {
           focus={detailOpen && Boolean(selectedRoute)}
           focusPoint={focusPoint}
           onSelect={onSelect}
-          follow={followRoute ? { route: followRoute, tracking } : null}
+          follow={activeFollowRoute ? { route: activeFollowRoute, tracking } : null}
           layer={layer}
           onLayer={setLayer}
         />
 
-        {followRoute && (
+        {activeFollowRoute && (
           <FollowMode
-            route={followRoute}
+            route={activeFollowRoute}
             units={units}
             isLoop={isLoop}
             tracking={tracking}
             onExit={onExitFollow}
             onAnnounce={announceNow}
             basemapStreams={streamsWhileFollowing(layer)}
+            reroute={reroute}
           />
         )}
       </div>
@@ -826,6 +867,12 @@ export default function App() {
         >
           Back to routes
         </button>
+      )}
+
+      {/* The app is built to be walked with; a computer should be told so
+          once, and then left alone. */}
+      {!isMobile && finePointer && !deskNoticeSeen && (
+        <DesktopNotice onClose={() => setDeskNoticeSeen(true)} />
       )}
     </div>
   )

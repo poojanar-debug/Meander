@@ -2,10 +2,13 @@
  * The geometry behind follow mode.
  *
  * **Every function here runs in the browser against geometry the app already
- * downloaded.** Nothing in this file makes a request, and nothing that calls it
- * may either. That is the whole privacy position of the feature: the live
- * position is used to answer "where am I on this line" and is never sent
- * anywhere, so there is no server that could log it even by accident.
+ * downloaded.** Nothing in this file makes a request: the live position is
+ * used to answer "where am I on this line" locally, on every fix, with no
+ * server in the loop. The one follow-time request the app does make — the
+ * reroute after a sustained wrong turn, in `lib/useReroute.js` — consumes
+ * this file's answers and is disclosed in the UI; it is the exception that
+ * lets everything here stay absolute, and the fetch-free property of this
+ * module is pinned by `follow-contract.test.js`.
  *
  * Coordinates are `[lon, lat]` pairs, matching the route geometry on the wire.
  */
