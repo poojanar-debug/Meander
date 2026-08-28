@@ -39,6 +39,12 @@ from backend.routing import OutsideCoverage
 # `describe()` renders "6°N to 55°N" here and "6°N to 53°N" from the cut union —
 # and 55 is what the screenshot shows, so this constant is the one that
 # reproduces what a user actually saw.
+#
+# The deployed graph outgrew this box on 2026-08-27 — the 82-region custom set
+# spans Honolulu to Trincomalee — but the tests below stub their own region
+# boxes to match this bbox, so the pair stays internally consistent: it is *a*
+# self-hosted graph these tests describe, the three-region one this module's
+# scenarios were measured against, not a claim about the one deployed today.
 DEMO_BBOX = [-1.449894, 6.379104, 80.389202, 54.991951]
 
 
@@ -245,7 +251,13 @@ async def test_an_unsnappable_point_on_a_finite_graph_does_not_say_move_a_little
 
     monkeypatch.setattr(routing, "_post_route", cannot_find_point)
 
-    req = RouteRequest(origin=Point(lat=48.8566, lon=2.3522), minutes=30)  # Paris
+    # Bourges: inside the union rectangle, inside none of the committed boxes.
+    # This point was Paris until the 83-region expansion — this test reads the
+    # real manifest rather than stubbing it, so the day Paris gained a box its
+    # "certainly not covered" scenario stopped being one, and the test moved to
+    # a city that still tells the story instead of quietly testing the other
+    # branch.
+    req = RouteRequest(origin=Point(lat=47.081, lon=2.399), minutes=30)
     with pytest.raises(OutsideCoverage) as caught:
         async for _ in main_mod.route_events(req):
             pass
@@ -342,18 +354,34 @@ def test_the_committed_manifest_matches_the_region_set_that_was_built() -> None:
     coverage.reset_region_cache()
     boxes = coverage.region_boxes()
     assert boxes is not None, "graphhopper/regions.manifest.json is missing"
-    assert len(boxes) == 3
+    assert len(boxes) == 83
 
-    # Ella is the location this whole region change was made for.
+    # Ella is the location the first coverage round was made for.
     assert coverage.inside_an_imported_region(6.87528, 81.03833) is True
     # Kandy, Galle and Jaffna came with it.
     assert coverage.inside_an_imported_region(7.290572, 80.633728) is True
-    # And the two European boxes are still there, which `custom` replacing
-    # `demo` rather than extending it makes a real risk.
+    # And the two original European boxes are still there, which `custom`
+    # replacing `demo` rather than extending it makes a real risk.
     assert coverage.inside_an_imported_region(51.507489, -0.162207) is True
     assert coverage.inside_an_imported_region(52.357197, 4.864119) is True
-    # Paris is in the rectangle and in none of the boxes.
-    assert coverage.inside_an_imported_region(48.8566, 2.3522) is False
+
+    # The second coverage round. Rotterdam and Den Haag were inside the claimed
+    # Noord-Holland box and absent from the graph — the zuid-holland line is
+    # what makes the old claim true.
+    assert coverage.inside_an_imported_region(51.9225, 4.47917) is True
+    assert coverage.inside_an_imported_region(52.0800, 4.3000) is True
+    # One per corner of the expansion: Central Park, Golden Gate Park.
+    assert coverage.inside_an_imported_region(40.7812, -73.9665) is True
+    assert coverage.inside_an_imported_region(37.7694, -122.4862) is True
+    # Paris spent two docstrings in this repo as the canonical place Meander
+    # does not cover. It is covered now, which is why the negative example
+    # below had to move.
+    assert coverage.inside_an_imported_region(48.8566, 2.3522) is True
+
+    # Still a union of boxes, not a continent: Bourges is inside the rectangle
+    # the boxes span and inside none of them, and so is the middle of Kansas.
+    assert coverage.inside_an_imported_region(47.081, 2.399) is False
+    assert coverage.inside_an_imported_region(39.0, -98.0) is False
 
 
 @pytest.mark.asyncio

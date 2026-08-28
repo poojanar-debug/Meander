@@ -20,6 +20,10 @@ services:
         GRAPH_SOURCE: local
     environment:
       GH_HEAP: ${GH_HEAP:-3g}
+      # Empty means config.yml's RAM_STORE, which is right for a demo-sized
+      # graph on a laptop. compose.prod.yml pins MMAP_STORE for the deployed
+      # graph, which is ten times the size; set it here only if yours is too.
+      GH_DATAACCESS: ${GH_DATAACCESS:-}
     # Not published to the host by default. The router is unauthenticated and
     # compute-unbounded; in production it lives in a private subnet with no
     # public ingress at all, and there is no reason for local development to be

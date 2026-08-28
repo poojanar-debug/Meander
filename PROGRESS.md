@@ -5347,3 +5347,135 @@ null response rather than an error box, so the route still draws.
 query, a Wikimedia Commons geosearch near Vondelpark, and Mapillary bbox queries
 at two sizes to find the one that answers. No GraphHopper credits: no routing
 call was made.
+
+# Coverage: three continents on one small VM — 2026-08-28
+
+## §19 — Sri Lanka stays whole, and the US and Europe arrive
+
+The brief: as much coverage as possible, Sri Lanka first, then the US, then
+Europe. Sri Lanka was already whole (§13.4). The other two continents cannot be
+imported as continents on this machine — BLOCKED §15 is that arithmetic, with
+Geofabrik's own listings (us 11.3 GB, europe 32.5 GB of extract) against a
+12 GB VM — so they arrive as what "as much as possible" actually affords:
+**83 regions**, Sri Lanka entire plus a box around every major metro from
+Honolulu to Athens, one comment per line in `graphhopper/regions.custom`
+saying why it is there.
+
+### Two defects found before anything was built
+
+**cut_and_merge overwrote same-extract cuts.** Cut files were named by extract
+path alone, so four Texas boxes were four writes to one filename and the merge
+saw only the last — three cities silently absent from a build that printed
+nothing but success. This round is the first to cut one extract more than
+once, so the bug had never fired; it would have fired now, silently. Cut files
+are numbered by line, and a box disjoint from its extract is a hard error at
+cut time rather than a hole discovered by a user.
+
+**The committed manifest overclaimed, in production, today.** Manifest rows
+recorded the *requested* box; the greater-london extract stops at the Greater
+London boundary but its row claimed the full degree square, so
+`backend/coverage.py` told Watford and Luton "on the map, try moving the start
+a little" — the precise sentence that module exists to prevent — for territory
+the graph never held. Noord-Holland was worse: the box spans 51.86–52.86 N,
+the province ends near 52.16, and Rotterdam, Den Haag, Leiden and Utrecht sat
+inside the claim and outside the graph. The fix is two-sided. clip_to_extract
+now intersects every manifest row with its extract's header bbox, so claims
+match what a cut can contain; and the region set imports zuid-holland and
+utrecht into the old box (plus an england line under the London box), so the
+old claims come true instead of merely shrinking. Den Haag needed the
+zuid-holland box's west edge at 4.0 E — the inherited 4.36 E misses the seat
+of government by six hundredths of a degree.
+
+### The -D flag that silently did nothing
+
+The plan for fitting a bigger graph was MMAP_STORE, passed as
+`-Ddw.graphhopper.graph.dataaccess.default_type=MMAP_STORE`. The JVM accepts
+that flag and GraphHopper ignores it: the import launched with it logged
+`foot,bike,car|RAM_STORE|3D` and wrote no graph file until the end, which is
+RAM_STORE's signature — while two-segment keys like `datareader.file` land
+fine the same way. The first "MMAP smoke test" had reported success because
+the only assertion was this script's own echo; the honest witnesses are
+GraphHopper's storage line and whether graph files grow during import, and
+both said RAM_STORE. A 9g-heap RAM_STORE import of what became a 13 GB graph
+dies late and confusingly; it was killed 24 minutes in instead. The override
+is now a rewritten config (`config_with_dataaccess` in the script, the same
+sed-and-verify in docker-entrypoint.sh), it refuses to run if the key it
+rewrites ever leaves config.yml, and the smoke test was re-run reading
+GraphHopper's own log line: `graph foot,bike,car|MMAP_STORE|3D`, 283 MB RSS
+where RAM_STORE holds 910 MB on the demo-sized graph.
+
+### The SRTM mirror, and a retry that was insurance by the time it ran
+
+The second import died at minute 24: `srtm.kurviger.de` answered HTTP 521 —
+Cloudflare's "origin down" — on the Edinburgh tile, after 66 tiles had
+downloaded fine. GraphHopper's tile fetch has no retry, so one flap costs a
+whole import. The response: the cache dir keeps raw `N56W003.hgt.zip` files,
+so all 197 cells the boxes touch were pre-fetched directly, with curl retries
+and continent-dir fallback (185 fetched, 12 misses that are all open ocean),
+and the import was relaunched inside a 4-attempt retry loop. It passed on
+attempt 1 — and pulled a further ~140 tiles on demand during pass2 for nodes
+that osmium's complete-ways extraction carries outside the boxes, any one of
+which could have been another 521. The retry loop stays.
+
+### The build, measured
+
+| | |
+|---|---|
+| extracts fetched | 64 distinct, ~24 GB, each verified against Geofabrik's md5 |
+| cuts | 82 boxes + Sri Lanka entire → 6.3 GB merged |
+| import | **12,720 s** (3 h 32 m) at `GH_IMPORT_HEAP=9g`, MMAP_STORE |
+| import memory | peak **9.9 GB RSS + 9.4 GB swap** (12 GB swapfile added for the window) |
+| graph | **13 GB** — 2.06x the merged extract, on this config (3 profiles, LM each, elevation, no CH) |
+| production during all of it | serving, untouched, healthy |
+
+The demo-era ratios (§13.4: 436 MB merged → 623 MB graph) do not extrapolate:
+this is 2.06x where that was 1.43x, and the miss was in the projection this
+round was planned with. The projection said ~9 GB; the measured answer is 13.
+
+### Validation, before it went anywhere near production
+
+Served from the build directory at `GH_DATAACCESS=MMAP_STORE GH_HEAP=4g`:
+
+- `/info` bbox: `[-158.279125, 5.919332, 81.877776, 60.777027]` — Honolulu to
+  Trincomalee. The 60.777 exceeds the Oslo box's deliberate 59.999 ceiling
+  (SRTM ends at 60 N) because complete-ways extraction overruns cuts, §13.4's
+  phenomenon again; the *elevation* inside the box is real, which is what the
+  ceiling protects.
+- **116/116 hand-picked probes route** — one street-level point per city, plus
+  every seam where a metro box crosses an extract boundary: Jersey City,
+  Stamford, Gary, Wilmington, Trenton, Alexandria, Vancouver WA, Potsdam,
+  Monaco, Terneuzen, Malmö, Lund among them. 23 s for the sweep cold,
+  ~20 ms per route warm, 1.8 GB RSS after all of it.
+- **verify_selfhosted: all 8 locations pass** — the original four plus Central
+  Park, Golden Gate Park, the Jardin du Luxembourg and the Brandenburg Gate.
+  Edinburgh checked for the first time since the script was written.
+- Two rules in that script needed honesty upgrades the new continents forced:
+  `accessible` returning *no route* is the README's own promised behaviour,
+  now reported as blocked rather than failed (measured: the middle of the
+  Tiergarten blocks; the Brandenburg Gate routes, so Berlin's spot moved and
+  the routing path stays exercised) — and identical-to-fastest now fails only
+  when **every** steered preset collapses at once, because Central Park's
+  loop is already step-free, smooth and tree-lined, and `accessible` and
+  `shade` were being failed there for having nothing to improve. The collapse
+  signature, which is what the check exists for, still fails loudly.
+- Paris — this repo's canonical "inside the union rectangle, inside none of
+  the boxes" example, in two docstrings and a test — is now covered. The
+  negative examples moved to Bourges and mid-Kansas, and
+  test_coverage.py:test_an_unsnappable_point... moved with them, because it
+  reads the real committed manifest and its Paris scenario silently became
+  the other branch the day Paris gained a box.
+
+Suites after all edits: **853 backend passed, 2 skipped** (both torch,
+pre-existing), **676 frontend passed**, statement coverage 87.44% against the
+85% floor — frontend run in the main checkout, which this branch's frontend
+is byte-identical to (zero frontend files changed).
+
+### What this round did not do
+
+No CLIP scoring for any new city — every route outside Colombo, London and
+Amsterdam reports `scoring_method: "geometry_only"`, correctly and honestly,
+because nothing has scored those streets. The pre-warm (batch_score against
+Mapillary, torch, a laptop) is unchanged work waiting for whoever wants the
+new cities' scenery scored. And no country is whole except Sri Lanka:
+BLOCKED §15 has the ceiling, and §6 is struck through in passing — the push
+credential it says is missing has existed for some time.

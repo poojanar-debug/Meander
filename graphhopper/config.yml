@@ -13,6 +13,23 @@ graphhopper:
   datareader.file: data/meander-regions.osm.pbf
   graph.location: data/graph-cache
 
+  # Storage backing for the graph's arrays. RAM_STORE loads every byte into
+  # heap, which is right for a demo-sized graph and is the arithmetic behind
+  # every heap figure in scripts/graphhopper.sh; MMAP_STORE pages the files
+  # from disk on demand, which is what lets the 83-region custom graph run on
+  # the 12 GB deployment VM.
+  #
+  # ⚠ Overridden by rewriting this file, never by a -D flag. The obvious
+  # `-Ddw.graphhopper.graph.dataaccess.default_type=…` is accepted by the JVM
+  # and silently does nothing: the import that was meant to prove MMAP worked
+  # logged `foot,bike,car|RAM_STORE|3D` with the flag right there on its
+  # command line, and wrote no graph file until the end — RAM_STORE's
+  # signature, and the log line is the only honest witness. (Two-segment keys
+  # like datareader.file do land; this one does not, and nothing errors.)
+  # scripts/graphhopper.sh and docker-entrypoint.sh both honour GH_DATAACCESS /
+  # GH_IMPORT_DATAACCESS by generating a rewritten copy of this file.
+  graph.dataaccess.default_type: RAM_STORE
+
   # Only these three profiles exist, matching backend/models.py's EffectiveMode.
   # The *_elevation custom models make foot and bike prefer flatter ways, which
   # matters for a routing app whose accessible preset rejects gradients over 8%.

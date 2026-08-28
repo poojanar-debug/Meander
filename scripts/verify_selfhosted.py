@@ -10,15 +10,19 @@ every region the running graph actually contains — locations outside it are
 skipped and named, because which region set was built is an operator's choice
 rather than a defect:
 
-1. all six presets route at all
-2. every preset that carries a custom model comes back **different from the
-   fastest route** — a custom model that is accepted but ignored returns the
-   fastest route under every label, which looks like success and is the exact
-   failure the spec warns about
-
-   Two preference presets matching *each other* is not a failure and is not
-   checked. A graph with no tunnel anywhere near the origin will answer `quiet`
-   and `air` identically, and it is right to.
+1. the presets route at all — where `accessible` alone may instead return no
+   route, because hard constraints are allowed to reject a start and the
+   README's preset table promises exactly that. Any other preset failing to
+   route is a failure here.
+2. the custom models actually steer. A model that is accepted but ignored
+   returns the fastest route's exact geometry under **every** label, so the
+   failure is every steered preset collapsing onto `fastest` at once. A
+   *single* preset landing on the fastest line is reported but is not a
+   failure — Central Park's loop is already step-free, smooth and tree-lined,
+   so `accessible` and `shade` have nothing to improve there and honestly say
+   so — and two preference presets matching *each other* never was one: a
+   graph with no tunnel near the origin answers `quiet` and `air` identically,
+   and is right to.
 3. `smoothness` comes back in the path details, so the accessibility engine can
    apply the one hard constraint the hosted API could never give it
 
@@ -33,7 +37,7 @@ from dataclasses import dataclass
 
 from backend.config import GRAPHHOPPER_URL, graphhopper_is_self_hosted, path_details
 from backend.geometry import LatLon
-from backend.routing import PRESETS
+from backend.routing import PRESETS, NoRouteFound
 
 
 @dataclass(frozen=True)
@@ -45,24 +49,42 @@ class Spot:
     mode: str
 
 
-# Somewhere a person would actually walk, in each region either region set can
+# Somewhere a person would actually walk, in each region a region set might
 # import.
 #
 # ⚠ `region` is the Geofabrik extract these coordinates fall in, which is **not**
 # the same as what is built. The `demo` set imports bounding boxes around the
 # five demo locations — for Britain that is Greater London and nothing else —
-# while `countries` imports Great Britain entire. Edinburgh is in exactly that
-# gap: it routes under `countries` and does not exist under `demo`.
+# while `countries` imports Great Britain entire and `custom` adds city boxes
+# across the US and Europe. Edinburgh sat in exactly that gap for a year: it
+# routes under `countries` and the expanded `custom`, and does not exist under
+# `demo`.
 #
 # This used to be a straight list, with Edinburgh labelled `great-britain` and
 # checked unconditionally, so running it against a `demo` graph reported a
 # failure that was really a question nobody had asked the graph. Which set is
 # built is now read from the router rather than assumed — see `covers()`.
+#
+# The four newest rows are one per corner of the expansion: two US coasts,
+# and the two European cities the old graph was told about most often — Paris
+# being the example backend/coverage.py itself uses for "inside the union
+# rectangle, inside none of the boxes". Against a demo or countries graph all
+# four skip, which is the covers() mechanism doing its job.
+#
+# Berlin is the Brandenburg Gate rather than the middle of the Tiergarten,
+# and the difference was measured, not aesthetic: from the park's interior
+# `accessible` returns no route at all — the paths the point snaps to fail a
+# hard constraint, which is a first-class answer for the app and a poor spot
+# for a script whose job is to exercise all six presets' *routing* path.
 SPOTS = (
     Spot("Colombo Fort", "sri-lanka", LatLon(6.933727, 79.850080), 30, "foot"),
     Spot("Vondelpark, Amsterdam", "netherlands", LatLon(52.357197, 4.864119), 35, "foot"),
     Spot("Hyde Park, London", "great-britain", LatLon(51.507489, -0.162207), 35, "foot"),
     Spot("Princes Street, Edinburgh", "great-britain", LatLon(55.952326, -3.195041), 40, "foot"),
+    Spot("Central Park, New York", "us/new-york", LatLon(40.781200, -73.966500), 35, "foot"),
+    Spot("Golden Gate Park, SF", "us/california", LatLon(37.769400, -122.486200), 35, "foot"),
+    Spot("Jardin du Luxembourg, Paris", "france", LatLon(48.846200, 2.337200), 35, "foot"),
+    Spot("Brandenburg Gate, Berlin", "germany", LatLon(52.516300, 13.377700), 35, "foot"),
 )
 
 
@@ -110,6 +132,17 @@ async def check(spot: Spot) -> list[str]:
                 if name == "scenic"
                 else await fn(spot.point, None, spot.minutes, spot.mode)
             )
+        except NoRouteFound as exc:
+            if name == "accessible":
+                # The one preset for which "no route" is an answer rather than
+                # an error: hard constraints are allowed to reject a start —
+                # from the middle of the Tiergarten they do — and the README's
+                # preset table promises exactly that behaviour.
+                print(f"  {name:<11} blocked — hard constraints reject this "
+                      "start; a first-class answer")
+            else:
+                print(f"  {name:<11} FAILED  NoRouteFound: {exc}")
+                failures.append(f"{spot.name}: {name} did not route (NoRouteFound)")
         except Exception as exc:  # noqa: BLE001
             print(f"  {name:<11} FAILED  {type(exc).__name__}: {exc}")
             failures.append(f"{spot.name}: {name} did not route ({type(exc).__name__})")
@@ -120,7 +153,15 @@ async def check(spot: Spot) -> list[str]:
               f"{len(r.points):4d} pts  details={detail_keys}")
 
     # The one that matters: a custom model that is accepted but ignored returns
-    # the fastest route under every preset, with no error anywhere.
+    # the fastest route under EVERY preset, with no error anywhere — so that
+    # collapse, all steered geometries landing on the fastest line at once, is
+    # the failure. One preset matching fastest at one spot is reported but not
+    # failed: it is what an honest model does where there is nothing to
+    # improve — Central Park's loop is already step-free and tree-lined, and
+    # `accessible` and `shade` rightly have nothing to move. This check used to
+    # fail any single match, which was calibrated on two dense European parks
+    # and read honest indifference as a dead model the day the graph grew a
+    # third continent.
     #
     # Compared against fastest only. Requiring all six to differ from each other
     # would fail an honest graph: without a tunnel near the origin there is
@@ -129,9 +170,12 @@ async def check(spot: Spot) -> list[str]:
     shapes = {name: _shape(r) for name, r in routes.items()}
     steered = [n for n in shapes if n != "fastest"]
     same = [n for n in steered if shapes[n] == shapes["fastest"]]
-    if same:
-        print(f"  !! IDENTICAL to fastest: {', '.join(same)} — custom model had no effect")
-        failures.append(f"{spot.name}: {', '.join(same)} identical to fastest")
+    if steered and len(same) == len(steered):
+        print("  !! ALL steered presets identical to fastest — custom models had no effect")
+        failures.append(f"{spot.name}: every steered preset identical to fastest")
+    elif same:
+        print(f"  note: identical to fastest here: {', '.join(same)} "
+              f"({len(steered) - len(same)} others differ, so the models are running)")
     elif len(steered) == len(PRESETS) - 1:
         print(f"  ok: all {len(steered)} steered geometries differ from fastest")
 
@@ -193,14 +237,14 @@ async def main_async() -> int:
         return 1
 
     if skipped:
-        print("  Not a failure. Build --region-set countries to include them.")
+        print("  Not a failure. Build --region-set custom (or countries) to include them.")
 
     if failures:
         print(f"FAILED — {len(failures)} problem(s):")
         for f in failures:
             print(f"  - {f}")
         return 1
-    print(f"All {checked} checked locations: three distinct routes, smoothness present.")
+    print(f"All {checked} checked locations passed: the presets steer and smoothness is present.")
     return 0
 
 

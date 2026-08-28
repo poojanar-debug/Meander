@@ -433,9 +433,14 @@ rather than needing a browser at all.
 
 The CI jobs that graded the dropped code went with it. They come back with it.
 
-## 6 · The deployment VM has no credential for `git push`
+## 6 · ~~The deployment VM has no credential for `git push`~~ — RESOLVED
 
 **Discovered:** 2026-08-09, on the first commit of the deployment session.
+**Resolved:** by 2026-08-28, when the coverage round noticed pushes just work.
+The second remedy below is the one that was applied: `~/.ssh/github_deploy`
+exists, `origin` is `git@github.com:poojanar-debug/Meander.git`, and `gh` is
+installed and authenticated besides. The table below describes a machine that
+no longer exists; it stays because the diagnosis method is the reusable part.
 
 The repository on this VM is a working clone on `main`, tracking
 `origin/main` at `https://github.com/poojanar-debug/Meander.git`. Commits work.
@@ -1154,3 +1159,49 @@ this in one command:
 ```bash
 make test-sandboxed
 ```
+
+---
+
+## 15 · Whole-country coverage of the US and Europe does not fit this VM — OPEN, and it is arithmetic
+
+**Discovered:** 2026-08-28, sizing the coverage expansion. The brief was "as
+much coverage as possible, Sri Lanka then the US then Europe", and the honest
+version of "as much as possible" is a measured ceiling, not a mood.
+
+What shipped is Sri Lanka entire plus 82 city boxes — every major metro from
+Honolulu to Athens, the full list with a reason per line in
+`graphhopper/regions.custom`. What did not ship, and cannot on this machine:
+
+| | extract (Geofabrik's own listing) | graph, extrapolated |
+|---|---|---|
+| what shipped (83 regions) | 6.3 GB merged | **13 GB, measured** |
+| `north-america/us` entire | 11.3 GB | ~23 GB |
+| `europe` entire | 32.5 GB | ~67 GB |
+| both | 43.8 GB | ~90 GB |
+
+The measured ratio is 2.06 GB of graph per GB of merged extract (13 / 6.3, on
+this exact config: three profiles, LM preparation for each, elevation, no CH).
+The VM has 11,927 MB of RAM, two vCPUs and a 96 GB disk that already holds the
+deployment.
+
+- **Serving** stopped being the blocker this round: `GH_DATAACCESS=MMAP_STORE`
+  serves the 13 GB graph from a 4g heap at 1.8 GB RSS, and would serve a
+  bigger one — the graph no longer has to fit in RAM, only on disk with
+  tolerable paging. That was the countries-set blocker in §13.4's arithmetic,
+  and it is gone.
+- **Importing** is the wall now. The 6.3 GB merge peaked at 9.9 GB RSS plus
+  9.4 GB of swap over 3.5 hours with a 9g heap under MMAP import. Import
+  memory grows with node count; the US alone is ~2x this build's input, Europe
+  ~5x, and a swap-backed import that thrashes for a day on 2 vCPUs is not a
+  deploy path anyone should repeat monthly.
+- **Disk** closes the door regardless: extracts + merge + graph + the staged
+  copy publish_graph makes + the image the graph is baked into, times the ~7x
+  size multiple of "both continents", does not fit in 96 GB.
+
+What would lift it: a build machine (import elsewhere, ship the graph via the
+`GRAPH_S3_URI` path the container already supports — the entrypoint's fetch
+half is written and tested against exactly this shape of future), more disk,
+or accepting per-country regional deployments. Until one of those happens,
+new coverage is added a metro box at a time in `regions.custom`, which costs
+roughly 150 MB of graph per box on this build's average and one
+`fetch`+`import` on the VM.

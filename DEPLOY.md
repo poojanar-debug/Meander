@@ -229,8 +229,22 @@ scripts/publish_graph.sh --local                 # stages it for the image build
 
 That gives a 485 MB graph covering bounding boxes around the five demo
 locations. `--region-set countries` gives Sri Lanka, the Netherlands and Great
-Britain entire: 6.6 GB, a 31-minute import and a 20 GB serve heap, which is a
-different `RouterMemory` and a different cost conversation.
+Britain entire: 6.6 GB, a 31-minute import and a 20 GB serve heap under
+RAM_STORE, which is a different `RouterMemory` and a different cost
+conversation — or `GH_DATAACCESS=MMAP_STORE`, which is how the deployment
+escapes that conversation entirely.
+
+What production actually builds is `--region-set custom`: Sri Lanka entire
+plus 82 metro boxes across the US and Europe, read from
+`graphhopper/regions.custom`. Measured on the VM itself on 2026-08-28: 24 GB
+of extracts fetched, 6.3 GB merged, a 12,720 s import at
+`GH_IMPORT_HEAP=9g GH_IMPORT_DATAACCESS=MMAP_STORE` (peak 9.9 GB RSS plus
+9.4 GB of a temporary swapfile, with production serving beside it), and a
+13 GB graph that `GH_DATAACCESS: MMAP_STORE` in compose.prod.yml serves from a
+4g heap. Use `fetch` first if you are changing the set — it prints the merged
+size, which is the honest predictor of what the import will cost — and
+`import` to build from an existing fetch, which is also the retry path after
+a failed import.
 
 CI cannot do this — a GitHub runner would have to import the graph first — so
 the router image is built from a workstation, or on the VM itself. The
