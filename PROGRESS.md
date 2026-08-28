@@ -5479,3 +5479,38 @@ Mapillary, torch, a laptop) is unchanged work waiting for whoever wants the
 new cities' scenery scored. And no country is whole except Sri Lanka:
 BLOCKED §15 has the ceiling, and §6 is struck through in passing — the push
 credential it says is missing has existed for some time.
+
+### The deploy that would not fit, and the design that had to give
+
+The first deployment attempt of the 13 GB graph followed the runbook:
+`publish_graph.sh --local`, then `provision-vm.sh deploy --with-router`. It
+failed with `no space left on device` inside the image build — twice, in two
+different places. The first failure was the `COPY graphhopper/graph-dist/`
+layer; 10 GB was freed (the merged extract, the builder cache) and the second
+attempt got further, through a 524-second context transfer and a 517-second
+COPY, and then died *unpacking the finished image*, with the disk at
+100 % and `df` reporting zero bytes free. Production was untouched both
+times — the failure sat entirely in the build — but the second failure is the
+one that named the real problem.
+
+Count the copies the bake-in design wants for one deploy: the build
+directory's graph, the graph-dist staging copy, BuildKit's context store, the
+exported layer blob, and the unpacked snapshot the container would run from.
+Five, at 13 GB each, on a 96 GB disk that also holds the deployment. The
+design was written when the graph was 485 MB and the target was ECS — an
+image that carries everything is the right shape for a task scheduler pulling
+from a registry. The AWS path was deleted two rounds ago; the constraint it
+justified outlived it by exactly one graph size.
+
+So the graph stopped being image payload. Production now keeps **one** copy,
+at `/home/ubuntu/meander-graph`, bind-mounted over the router's `/data`;
+compose.prod.yml builds the image with `GRAPH_SOURCE: none`; and the
+entrypoint's first branch — "graph: already present", gated on the same
+completion marker every other path checks — serves it. `publish_graph.sh
+--dir` is the new staging verb (copy beside, swap with two renames, so the
+live graph is never half-copied), the mount is owned by uid 10001 because
+the entrypoint writes its runtime config into `/data`, and the bake-in flow
+survives untouched for the demo-sized graphs it was right for. A router
+recreate stops being a multi-minute unpack and becomes seconds of MMAP open —
+which also retires provision-vm.sh's standing warning that `--with-router`
+means a multi-minute routing outage.

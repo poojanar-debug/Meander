@@ -78,8 +78,11 @@ RUN useradd --system --uid 10001 --create-home gh \
 # which is time a task spends not serving.
 
 FROM runtime AS graph-none
-# Nothing. The entrypoint fetches from GRAPH_S3_URI, or refuses to start and
-# says how to give it a graph.
+# Nothing. The entrypoint serves whatever a volume mounted at /data already
+# holds (the production path — compose.prod.yml mounts the VM's single graph
+# copy, because baking 13 GB into a layer wants five copies of it on one
+# disk), fetches from GRAPH_S3_URI, or refuses to start and says how to give
+# it a graph.
 
 FROM runtime AS graph-local
 # The build context must contain graphhopper/graph-dist/graph-cache — see

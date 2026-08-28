@@ -77,10 +77,15 @@ No graph, and no GRAPH_S3_URI to fetch one from.
 
 This image never imports — that is a build step. Either:
 
-  build with the graph baked in
+  build with the graph baked in (right at demo scale, wrong past a few GB —
+  a baked graph exists five times over on the build machine's disk)
     scripts/graphhopper.sh setup --region-set demo
     scripts/publish_graph.sh --local
     docker build --build-arg GRAPH_SOURCE=local -f graphhopper/Dockerfile .
+
+  or mount one — what the single-VM production deployment does
+    scripts/publish_graph.sh --dir /home/ubuntu/meander-graph
+    docker run -v /home/ubuntu/meander-graph:/data ...   # see compose.prod.yml
 
   or publish it and point the container at it
     scripts/publish_graph.sh --s3 s3://your-bucket/graph-demo.tar.zst

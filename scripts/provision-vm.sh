@@ -225,12 +225,15 @@ deploy() {
   require_running graphhopper
 
   # The router is NOT rebuilt or recreated by default, and this is the one
-  # judgement call in the file. It loads a 485 MB graph into RAM at boot with a
-  # 120 s healthcheck start_period, so recreating it is a multi-minute routing
-  # outage. A backend or Caddyfile change cannot possibly require that.
-  # --with-router is for when graphhopper/ or the staged graph actually changed.
+  # judgement call in the file. A backend or Caddyfile change cannot require
+  # touching it, so it is left alone; --with-router is for when graphhopper/
+  # itself changed. The outage used to be the multi-minute reload of a graph
+  # baked into the image; since the graph moved to a bind mount
+  # (compose.prod.yml) a recreate is seconds of MMAP open, and the graph is
+  # swapped without touching the image at all — publish_graph.sh --dir, then
+  # a recreate.
   if (( with_router )); then
-    warn "rebuilding the router. Expect a routing outage of a minute or more."
+    warn "rebuilding the router. Routing pauses for the recreate (seconds, now that the graph is a mount)."
     "${COMPOSE[@]}" build graphhopper
     "${COMPOSE[@]}" up -d --force-recreate --no-deps graphhopper
     say ""
@@ -270,8 +273,11 @@ scripts/provision-vm.sh — redeploy this VM, and prove the redeploy landed.
 
   deploy [--with-router]   Rebuild the API image, recreate Caddy, then verify.
                            Does not run `git pull` for you, and leaves the
-                           router alone unless --with-router is given, because
-                           recreating it is a multi-minute routing outage.
+                           router alone unless --with-router is given — a
+                           backend change never requires touching it. With the
+                           graph on a bind mount the recreate itself is
+                           seconds; swapping the graph is publish_graph.sh
+                           --dir plus this flag.
 
   verify                   Compare the working tree against what the running
                            containers actually hold. Read-only. This is the

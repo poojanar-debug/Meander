@@ -56,6 +56,33 @@ services:
     # the boundary. The base file does not publish either port; nothing below
     # adds them. Verified with `docker compose ps` and from outside the VM,
     # not by re-reading this comment.
+    #
+    # The graph arrives by bind mount, not by image layer, and the build-arg
+    # override below is the other half of that one decision. The bake-in flow
+    # (the base file's GRAPH_SOURCE=local) was designed for a graph the size
+    # of the demo set, and at 485 MB it was right; at 13 GB it wants five
+    # concurrent copies of the graph on one 96 GB disk — the build dir, the
+    # graph-dist staging copy, BuildKit's context store, the exported layer
+    # and the unpacked snapshot — and the deploy that discovered this filled
+    # the disk to zero twice without ever reaching a container. So production
+    # keeps ONE copy, at /home/ubuntu/meander-graph, and the image is built
+    # empty: the entrypoint's "graph: already present" branch serves whatever
+    # the mount holds, gated on the same completion marker as every other
+    # path. Recreating the router is now seconds of MMAP open instead of
+    # minutes of layer unpack, which retires this file's old caveat that a
+    # router recreate is a multi-minute outage.
+    #
+    # The mount is read-write for two reasons that are really one: the
+    # entrypoint writes its rewritten runtime config into /data, and the
+    # directory is owned by uid 10001 — the image's `gh` user — which is what
+    # `scripts/publish_graph.sh --dir` tells you to chown after staging.
+    build:
+      context: .
+      dockerfile: graphhopper/Dockerfile
+      args:
+        GRAPH_SOURCE: none
+    volumes:
+      - /home/ubuntu/meander-graph:/data
     environment:
       # Pinned rather than inherited. The base file reads ${GH_HEAP:-3g}, which
       # means a stray GH_HEAP in the deploying shell silently re-sizes the JVM
