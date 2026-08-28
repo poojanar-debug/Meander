@@ -246,8 +246,28 @@ size, which is the honest predictor of what the import will cost — and
 `import` to build from an existing fetch, which is also the retry path after
 a failed import.
 
-CI cannot do this — a GitHub runner would have to import the graph first — so
-the router image is built from a workstation, or on the VM itself. The
+**At that size the graph does not go into the image.** `--local` bakes it in,
+which is right at demo scale and was the production path while the graph was
+623 MB; at 13 GB the bake wants five concurrent copies on one disk — the
+build dir, the staging copy, BuildKit's context store, the exported layer and
+the unpacked snapshot — and the deploy that discovered this filled a 96 GB
+disk to zero twice without ever reaching a container. Production instead
+keeps one copy at `/home/ubuntu/meander-graph`, bind-mounted over the
+router's `/data` by compose.prod.yml, with the image built empty
+(`GRAPH_SOURCE: none`):
+
+```bash
+GH_DATA_DIR=<build dir> scripts/publish_graph.sh --dir /home/ubuntu/meander-graph
+sudo chown -R 10001:10001 /home/ubuntu/meander-graph   # the image's gh user
+scripts/provision-vm.sh deploy --with-router
+```
+
+The entrypoint's marker check applies to the mount exactly as it did to the
+baked layer, and a router recreate is now seconds of MMAP open rather than
+minutes of layer unpack.
+
+CI cannot build graphs — a GitHub runner would have to import one first — so
+graphs are built on a workstation or on the VM itself. The remaining
 alternative is `scripts/publish_graph.sh --s3 <uri>` plus `GRAPH_S3_URI` and
 `GRAPH_SHA256` in the environment: the container then fetches the published
 archive at start (over the AWS CLI if present, plain `curl` otherwise) and
