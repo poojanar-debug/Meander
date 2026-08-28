@@ -249,6 +249,21 @@ still told the truth: "Meander does not cover that area yet", and
 [BLOCKED.md](BLOCKED.md) §15 is the arithmetic for why whole countries at US
 or European scale cannot fit this machine.
 
+Verified on 2026-08-28, deployed — after the graph moved from image layer to
+bind mount, because baking 13 GB wants five copies of it on one disk and the
+first two deploy attempts proved that by filling it (PROGRESS §19). The
+whole cutover took 57 seconds, the router was healthy in 29 of them
+(`graph: already present (13G)`, `MMAP_STORE`, 58.7 M edges), and then:
+`POST /api/routes` returns real routes for Central Park, the Jardin du
+Luxembourg, Princes Street and Honolulu from the API, and for the
+Brandenburg Gate through the public host — where `accessible` came back
+**blocked on two gates across the path**, named at their coordinates, which
+is the promise at the top of this page being kept in a city the graph could
+not see a day earlier. `frontend/scripts/live-gate.mjs`: **28 passed, 0
+failed** against production. Every route outside the three pre-warmed cities
+reports `scoring_method: "geometry_only"`, which is the honest label until
+someone runs the batch scorer over the new streets.
+
 **The map-layers round is now deployed too.** The paragraph that stood here said the basemaps,
 the follow-mode heading and both photo endpoints were committed and unshipped, with the photo call
 404ing against the live API until the VM was redeployed. The VM has since been redeployed:

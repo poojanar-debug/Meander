@@ -5514,3 +5514,27 @@ survives untouched for the demo-sized graphs it was right for. A router
 recreate stops being a multi-minute unpack and becomes seconds of MMAP open —
 which also retires provision-vm.sh's standing warning that `--with-router`
 means a multi-minute routing outage.
+
+### Deployed, and the numbers that came back
+
+The redesigned deploy ran on 2026-08-28: **57 seconds** from start to
+verified, the router **healthy in 29 s** serving the mount — the entrypoint's
+log reads `graph: already present (13G)`, `dataaccess: MMAP_STORE (rewritten
+into the runtime config)`, and GraphHopper's own line reports 58,716,876
+edges and 44,628,203 nodes against the old graph's 2.7 M, bounds
+-158.28 to 81.88 east-west. provision-vm.sh `verify` green on both digests.
+
+Through the deployed API: Central Park, the Jardin du Luxembourg, Princes
+Street and Honolulu all return `fastest` and `scenic` with
+`synthetic_upstream: false` and `scoring_method: "geometry_only"`, and the
+Brandenburg Gate answers through the public HTTPS host with the Pages origin —
+`fastest` 27.2 min, `scenic` 22.7, and `accessible` **blocked on two gates
+across the path at named coordinates**, which is the accessibility engine
+reading barriers it could not see a day earlier and refusing rather than
+guessing, exactly as at Hyde Park. `live-gate.mjs`: 28 passed, 0 failed.
+
+House-keeping after: the 12 GB import swapfile is gone (swap back to the
+standing 4 GB), the build directory keeps only the SRTM zips a future import
+would want, and the disk rests at 38 GB used with the graph as its single
+copy at /home/ubuntu/meander-graph. Import-scale work still wants the
+swapfile back first; DEPLOY.md Step 0 says so.
