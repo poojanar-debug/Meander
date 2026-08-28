@@ -56,11 +56,11 @@ lists the seven pieces of it that have to come back, and why each one is wanted.
 
 ### What is proven
 
-**845 backend tests and 651 frontend tests pass offline**, at 87.46% statement coverage against an
+**853 backend tests and 676 frontend tests pass offline**, at 87.44% statement coverage against an
 85% floor. Two backend tests skip; both are torch-related and both pre-date this tree. (Those first
-two numbers said 706 and 442, then 787 and 597, for several sessions after each pair stopped being
-true; these are what the suites report today, and the coverage figure was re-run rather than
-carried forward.) The suite never opens a socket, and a job in CI runs it under `unshare -n` to prove
+two numbers said 706 and 442, then 787 and 597, then 845 and 651, for several sessions after each
+pair stopped being true; these are what the suites report today, and the coverage figure was re-run
+rather than carried forward.) The suite never opens a socket, and a job in CI runs it under `unshare -n` to prove
 that rather than trust it. The deploy image imports with torch absent, checked against the real
 requirements file, and `backend.main` is imported in that environment to prove absence is not the
 only thing being measured. (`make test-sandboxed` could not be run in the environment this round's
@@ -109,15 +109,23 @@ used to sit here said axe-core was "still a devDependency and nothing runs it", 
 the gate left the tree in the reconciliation merge and stopped being true when it came back.
 
 All six presets route against a self-hosted server. `scripts/verify_selfhosted.py` asserts it at
-**three** of its four locations under the default `demo` region set: every preset answers, all five
-steered geometries differ from `fastest`, and `smoothness` comes back as a path detail — which is the
-fifth hard accessibility constraint, and the one the hosted API cannot supply at all.
+all **eight** of its locations against the deployed `custom` region set — Colombo Fort, Vondelpark,
+Hyde Park, Princes Street, Central Park, Golden Gate Park, the Jardin du Luxembourg and the
+Brandenburg Gate: every preset answers, the steered geometries differ from `fastest`, and
+`smoothness` comes back as a path detail — which is the fifth hard accessibility constraint, and
+the one the hosted API cannot supply at all.
 
 It compares each steered preset against `fastest` rather than all of them against each other. Two
 preference presets landing on the same line is honest — without a tunnel near the origin there is
-nothing for `air` and `shade` to disagree about, and at Hyde Park `quiet` and `air` do return the
-same route — where either one matching `fastest` is the custom-model-ignored failure the script
-exists to catch.
+nothing for `air` and `shade` to disagree about — and the failure the script hunts is every steered
+preset collapsing onto the fastest line at once, the signature of a custom model accepted and
+ignored. A *single* preset landing there is reported rather than failed: Central Park's loop is
+already step-free, smooth and tree-lined, so `accessible` and `shade` honestly have nothing to
+move, and the run prints a note saying so. The check used to fail any single match — calibrated on
+two dense European parks, it read honest indifference as a dead model the day the graph grew a
+third continent. `accessible` alone may also answer with no route at all, which is it keeping its
+promise from the table at the top of this page, not an error; from the middle of the Tiergarten it
+does exactly that, which is why Berlin's spot is the Brandenburg Gate.
 
 **That run is what caught the worst defect in the three new presets.** They shipped their first
 version sending one round-trip request and keeping it, and the synthetic fixtures made that look
@@ -126,11 +134,12 @@ Quiet, 118 for Shade and 115 for Clean air. They search three round-trip lengths
 best fit, which is 18 minutes there — the same 18-minute loop Scenic returns, because that is what
 that network has. [docs/adr/0007](docs/adr/0007-preference-presets-are-proxies.md) has the table.
 
-The fourth, Edinburgh, is skipped rather than failed, and `scripts/verify_selfhosted.py:43-55`
-explains why. `demo` imports three bounding boxes — Sri Lanka, Greater London, Noord-Holland — while
-Edinburgh exists only under the `countries` set, which builds Great Britain entire and needs a 20 GB
-serve heap. "You did not import Scotland" is a fact about the region set, not a defect in the router,
-so the script asks the running graph what it covers instead of assuming.
+Edinburgh had been skipped on every one of those runs since the script was written: `demo` imports
+three bounding boxes — Sri Lanka, Greater London, Noord-Holland — and the first `custom` set kept
+the same two European boxes, so Scotland was simply never imported, and the script asks the running
+graph what it covers instead of assuming. The 83-region set closed that gap: Princes Street is now
+checked like everywhere else, and the skip machinery still earns its keep for anyone running the
+script against a demo-sized graph.
 
 **The frontend answers "when should I go?" and "which way, exactly?"** — a best-departure window,
 sunrise and sunset computed in the browser, turn-by-turn directions with a barrier rendered inside
@@ -226,6 +235,19 @@ returns real routes for `quiet`, `shade` and `air` from the public host, the
 default three are unchanged, and `frontend/scripts/live-gate.mjs` reports **28
 passed, 0 failed** against production in a real browser — CORS, CSP, the
 service worker, the offline open and a permalink among them.
+
+**Coverage is 83 regions across three continents.** Sri Lanka entire, and a
+box around every major metro from Honolulu to Athens — the full list, with a
+reason on every line, is `graphhopper/regions.custom`. Measured before it
+shipped, against the built graph served on the deployment VM: all eight
+`verify_selfhosted.py` locations pass, and 116 hand-picked probes — one per
+city, plus the seams where a metro crosses a border, Jersey City to Terneuzen
+to Malmö — every one answers a foot round trip, warm in ~20 ms. The graph is
+13 GB against the VM's 12 GB of RAM, which is what `GH_DATAACCESS: MMAP_STORE`
+in `compose.prod.yml` exists to make possible. What is outside the boxes is
+still told the truth: "Meander does not cover that area yet", and
+[BLOCKED.md](BLOCKED.md) §15 is the arithmetic for why whole countries at US
+or European scale cannot fit this machine.
 
 **The map-layers round is now deployed too.** The paragraph that stood here said the basemaps,
 the follow-mode heading and both photo endpoints were committed and unshipped, with the photo call
@@ -404,8 +426,13 @@ scripts/graphhopper.sh setup
 
 Downloads the OSM extracts, merges them into one graph and builds it. Needs a
 JDK 21+ and `osmium-tool` (`brew install openjdk@21 osmium-tool`); the script
-checks and tells you if either is missing. The build is the slow part — minutes
-to tens of minutes depending on how much of the world you asked for.
+checks and tells you if either is missing. The build is the slow part — four
+minutes for `demo`, and three and a half hours for the deployed 83-region set
+on the 2-vCPU VM. `fetch` does everything except the import and prints what an
+import would cost before you pay for one; `import` builds from an existing
+fetch, which is also the retry path. A graph bigger than your RAM wants
+`GH_DATAACCESS=MMAP_STORE` (and `GH_IMPORT_DATAACCESS=MMAP_STORE` to build) —
+the arithmetic and the measurements are beside those variables in the script.
 
 ```bash
 scripts/graphhopper.sh serve
@@ -417,10 +444,15 @@ Then point Meander at it, in `.env`:
 MEANDER_GRAPHHOPPER_URL=http://localhost:8989/route
 ```
 
-Only places **inside the imported extracts** can be routed. The regions are the
-`REGIONS` list at the top of `scripts/graphhopper.sh`; add a Geofabrik path and
-re-run `setup` to widen coverage. `scripts/graphhopper.sh regions` prints what
-is currently built in.
+Only places **inside the imported extracts** can be routed. Which extracts is a
+*region set*: `demo` is small boxes around the five demo locations, `countries`
+is three whole countries, and `custom` — what the deployment builds — is read
+from `graphhopper/regions.custom`, one Geofabrik path and optional bounding box
+per line, with a comment on every line saying why it is there. Add a line and
+re-run `setup` to widen coverage; `scripts/graphhopper.sh regions` prints what
+is currently built in, and `fetch` prints what a set would cost before you pay
+for the import. (This paragraph used to point at a `REGIONS` list at the top of
+the script, which had not existed for some time.)
 
 Two things stay optional:
 

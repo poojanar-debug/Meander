@@ -59,15 +59,32 @@ services:
     environment:
       # Pinned rather than inherited. The base file reads ${GH_HEAP:-3g}, which
       # means a stray GH_HEAP in the deploying shell silently re-sizes the JVM
-      # of a production router. 3g is the docker-compose.yml default and serves
-      # the demo graph with room over the 2 GB floor recorded at
-      # PROGRESS.md:1404.
-      GH_HEAP: 3g
-    # Sized from measurement, not from the numbers already in the repo — see
-    # the note at the bottom of this file for why those do not answer the
-    # question. Headroom over the 3g heap for metaspace, thread stacks, code
-    # cache and the JVM's own off-heap allocations.
-    mem_limit: 5g
+      # of a production router.
+      #
+      # 4g, not the base file's 3g, because the graph this deployment serves is
+      # no longer the one that heap was sized for: the 83-region custom set is
+      # a 13 GB graph against the 623 MB those pins were measured on. Under
+      # MMAP_STORE (below) the heap holds query state rather than the graph,
+      # so it does not scale with the import — 4g is the old 3g plus headroom
+      # for queries that now walk metro-sized search spaces. Measured after a
+      # 116-city probe sweep: 1.8 GB of RSS.
+      GH_HEAP: 4g
+      # The line that makes a 13 GB graph fit a 12 GB VM — the graph is now
+      # bigger than the machine. RAM_STORE loads every graph byte into heap;
+      # the arithmetic in scripts/graphhopper.sh prices this graph's RAM_STORE
+      # serve heap near 20 GB, which no amount of rearranging this host
+      # produces. MMAP_STORE maps the files and lets the kernel page them in
+      # as queries touch them. The cost is honest and local: the first route
+      # in a cold city reads from disk (a few hundred ms); a hot city stays in
+      # page cache (~20 ms). Routes themselves are identical — the bytes on
+      # disk are the same either way.
+      GH_DATAACCESS: MMAP_STORE
+    # The heap plus the JVM's own overhead plus room for the page cache that
+    # mmap'd graph reads are charged to this cgroup. Page cache is reclaimable,
+    # so a tight limit here does not OOM the router — it shrinks the hot set
+    # and turns cache hits into disk reads. 7g leaves the host ~2 GB of slack
+    # under the full stack (api 1g + caddy 256m + system) on the 12 GB VM.
+    mem_limit: 7g
     logging: &logging
       driver: json-file
       options:

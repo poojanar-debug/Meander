@@ -15,6 +15,13 @@ set -euo pipefail
 
 GH_DATA="${GH_DATA:-/data}"
 GH_HEAP="${GH_HEAP:-3g}"
+# Unset means config.yml's RAM_STORE, which loads the whole graph into heap and
+# is right for a demo-sized graph. MMAP_STORE pages the graph from disk on
+# demand, which is what lets the 60-region custom graph run in the same
+# container that used to hold 623 MB — the heap arithmetic is in
+# scripts/graphhopper.sh next to GH_DATAACCESS, and compose.prod.yml sets this
+# explicitly for the deployment.
+GH_DATAACCESS="${GH_DATAACCESS:-}"
 GRAPH_MARKER="${GRAPH_MARKER:-.meander-graph-complete}"
 GRAPH_DIR="$GH_DATA/graph-cache"
 CONFIG_SRC="/app/config.yml"
@@ -96,6 +103,23 @@ fi
 # local `scripts/graphhopper.sh serve` keeps its loopback-only default.
 sed 's/bind_host: 127\.0\.0\.1/bind_host: 0.0.0.0/' "$CONFIG_SRC" > "$CONFIG"
 echo "bind: 0.0.0.0 (was 127.0.0.1 — see the comment in this entrypoint)"
+
+# Same mechanism, same reason, for the storage mode. A
+# -Ddw.graphhopper.graph.dataaccess.default_type flag is accepted by the JVM
+# and silently ignored (measured — see the key's comment in config.yml), so
+# the override has to be the config itself. The grep is the difference between
+# an override and a hope: if the key ever leaves config.yml, this container
+# refuses to start rather than serve a 6+ GB graph RAM_STORE into a 4 GB heap
+# and die minutes later with an OutOfMemoryError that looks like a leak.
+if [ -n "$GH_DATAACCESS" ]; then
+  sed -i "s/^  graph\.dataaccess\.default_type:.*/  graph.dataaccess.default_type: $GH_DATAACCESS/" "$CONFIG"
+  grep -q "^  graph\.dataaccess\.default_type: $GH_DATAACCESS\$" "$CONFIG" || {
+    echo "config.yml no longer carries graph.dataaccess.default_type, so" >&2
+    echo "GH_DATAACCESS=$GH_DATAACCESS would silently do nothing. Refusing." >&2
+    exit 1
+  }
+  echo "dataaccess: $GH_DATAACCESS (rewritten into the runtime config)"
+fi
 
 exec java \
   -Xmx"$GH_HEAP" \

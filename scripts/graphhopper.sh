@@ -7,6 +7,11 @@
 # OSM extracts, merges them into one graph, and starts the server.
 #
 #   scripts/graphhopper.sh setup [--region-set NAME]   download, merge, build
+#   scripts/graphhopper.sh fetch [--region-set NAME]   download and merge ONLY —
+#                                                      what an import would cost,
+#                                                      before paying for one
+#   scripts/graphhopper.sh import [--region-set NAME]  build from an existing
+#                                                      fetch; the retry path
 #   scripts/graphhopper.sh serve                       run the server on :8989
 #   scripts/graphhopper.sh status                      is it up, and what does it know
 #   scripts/graphhopper.sh regions                     what is currently built in
@@ -17,11 +22,14 @@
 # you import:
 #
 #   demo       bounding boxes around the five TEST_LOCATIONS only, cut from
-#              small Geofabrik sub-extracts. The default, and what a deployment
-#              should use.
+#              small Geofabrik sub-extracts. The default, and the cheapest
+#              thing that exercises every code path.
 #   countries  Sri Lanka + the Netherlands + Great Britain entire. Full
-#              coverage, and a graph that needs a large-memory machine.
-#   custom     bboxes read from graphhopper/regions.custom
+#              coverage of three countries, and a graph that needs a
+#              large-memory machine — or the MMAP knob below.
+#   custom     read from graphhopper/regions.custom. What the deployment
+#              actually builds: Sri Lanka entire plus city boxes across the
+#              US and Europe. That file says why each line is there.
 #
 # Then point Meander at it, in .env:
 #
@@ -71,6 +79,53 @@ GRAPH_MARKER_NAME=".meander-graph-complete"
 #   GH_IMPORT_HEAP=24g GH_HEAP=20g GH_REGION_SET=countries scripts/graphhopper.sh setup
 IMPORT_HEAP="${GH_IMPORT_HEAP:-8g}"
 SERVE_HEAP="${GH_HEAP:-3g}"
+
+# Storage backing for the graph's arrays: unset means config.yml's default
+# (RAM_STORE), MMAP_STORE means the OS pages them from disk on demand. This is
+# what lets a graph bigger than the machine's RAM be imported and served at
+# all — the RAM_STORE arithmetic above is heap ∝ graph size, and it is the
+# reason the `countries` set "needs a large-memory machine" while the
+# 83-region custom set, a graph TWICE its size, runs on the 12 GB deployment
+# VM.
+#
+# Measured there, building that set on 2026-08-28 (6.3 GB merged extract,
+# 13 GB graph): the import ran 12,720 s at GH_IMPORT_HEAP=9g under
+# GH_IMPORT_DATAACCESS=MMAP_STORE, peaking at 9.9 GB of RSS plus 9.4 GB of a
+# temporary swapfile, with production serving beside it the whole time — where
+# the RAM_STORE arithmetic above prices the same graph's *serve* heap alone
+# near 20 GB. Serving it at GH_DATAACCESS=MMAP_STORE with a 4g heap sat at
+# 1.8 GB of RSS after a 116-city probe sweep; a warm city answers a foot round
+# trip in ~20 ms and a cold one in a few hundred, because the cost of MMAP is
+# honest: the first route in a cold city reads from disk. The two modes are
+# independent — a graph imported under MMAP_STORE serves fine under RAM_STORE
+# and vice versa; the files on disk are identical.
+DATAACCESS="${GH_DATAACCESS:-}"
+IMPORT_DATAACCESS="${GH_IMPORT_DATAACCESS:-}"
+
+# The override is a rewritten config, never a -D flag. The obvious
+# `-Ddw.graphhopper.graph.dataaccess.default_type=…` is accepted by the JVM and
+# silently does nothing — measured on this machine: the import it was meant to
+# steer logged `foot,bike,car|RAM_STORE|3D` with the flag right there on its
+# command line, and wrote not one graph file until the end, which is
+# RAM_STORE's signature. Two-segment keys like datareader.file do land as
+# flags; this one does not, and nothing errors. So the only honest override is
+# to hand the JVM a config that says what we mean — and to fail loudly here if
+# the rewrite found nothing to rewrite, because a sed that matches nothing is
+# how this becomes a silent no-op with a different address.
+config_with_dataaccess() {
+  local want="$1" tag="$2" out
+  [ -n "$want" ] || { echo "$CONFIG"; return; }
+  out="$DATA_DIR/config.$tag.yml"
+  sed "s/^  graph\.dataaccess\.default_type:.*/  graph.dataaccess.default_type: $want/" \
+    "$CONFIG" > "$out"
+  grep -q "^  graph\.dataaccess\.default_type: $want\$" "$out" || {
+    echo "config.yml no longer carries graph.dataaccess.default_type, so the" >&2
+    echo "GH_DATAACCESS override would silently do nothing. Refusing to run" >&2
+    echo "with a control that does not control anything." >&2
+    exit 1
+  }
+  echo "$out"
+}
 
 REGION_SET="${GH_REGION_SET:-demo}"
 
@@ -257,6 +312,14 @@ require_tools() {
   [ "$missing" -eq 0 ] || exit 1
 }
 
+ensure_jar() {
+  [ -f "$GH_JAR" ] || {
+    echo "  fetching GraphHopper $GH_VERSION…"
+    curl -fL --progress-bar -o "$GH_JAR" \
+      "https://repo1.maven.org/maven2/com/graphhopper/graphhopper-web/${GH_VERSION}/graphhopper-web-${GH_VERSION}.jar"
+  }
+}
+
 # ---------------------------------------------------------------------------
 # download, verify, cut, merge
 # ---------------------------------------------------------------------------
@@ -340,13 +403,49 @@ download_extracts() {
   done < <(regions_for_set "$REGION_SET")
 }
 
+# The requested box clipped to the extract's own header box, or nothing when
+# they do not touch. Two callers, two reasons. cut_and_merge: a box disjoint
+# from its extract cuts an empty file, merges fine, imports fine, and leaves a
+# silent hole where a region was supposed to be — so it must be a hard error at
+# the moment the line is wrong, not a discovery some user makes later.
+# write_region_manifest: the committed boxes are what backend/coverage.py tells
+# users is covered, and the *requested* box can claim territory its extract
+# never held — the original Greater London line requested a full degree square
+# while the extract stops at the Greater London boundary, so the manifest
+# promised Luton and Watford and the graph had neither. The intersection is the
+# most that can actually be in the cut.
+clip_to_extract() {
+  local bbox="$1" file="$2" header
+  header="$(osmium fileinfo -g header.boxes "$file" 2>/dev/null | head -1 | tr -d '() ')"
+  # No header box: nothing to clip against, so the request stands. Geofabrik
+  # writes one on every extract, but a hand-built input may not.
+  [ -n "$header" ] || { echo "$bbox"; return; }
+  awk -v a="$bbox" -v b="$header" 'BEGIN {
+    split(a, x, ","); split(b, y, ",")
+    lo1 = (x[1] > y[1]) ? x[1] : y[1]; la1 = (x[2] > y[2]) ? x[2] : y[2]
+    lo2 = (x[3] < y[3]) ? x[3] : y[3]; la2 = (x[4] < y[4]) ? x[4] : y[4]
+    if (lo1 < lo2 && la1 < la2) printf "%s,%s,%s,%s", lo1, la1, lo2, la2
+  }'
+}
+
 cut_and_merge() {
-  local inputs=() region bbox file cut
+  local inputs=() region bbox file cut n=0
   while IFS='|' read -r region bbox; do
     [ -n "$region" ] || continue
+    n=$((n + 1))
     file="$DATA_DIR/$(echo "$region" | tr '/' '-')-latest.osm.pbf"
     if [ -n "$bbox" ]; then
-      cut="$DATA_DIR/$(echo "$region" | tr '/' '-')-cut.osm.pbf"
+      # Numbered, because the region path alone is not unique any more: four
+      # boxes cut from the one Texas extract used to be four writes to the same
+      # file name, and the merge saw only the last of them — three cities
+      # silently missing from a graph whose build printed nothing but success.
+      cut="$DATA_DIR/$(echo "$region" | tr '/' '-')-cut-$n.osm.pbf"
+      if [ -z "$(clip_to_extract "$bbox" "$file")" ]; then
+        echo "  DISJOINT: line $n requests $bbox from $region, whose extract" >&2
+        echo "  does not touch that box. The cut would be empty and the region" >&2
+        echo "  silently absent. The bbox or the region path is wrong." >&2
+        exit 1
+      fi
       echo "  cut   $(basename "$file") to $bbox…"
       osmium extract --overwrite --bbox "$bbox" -o "$cut" "$file"
       echo "        -> $(du -h "$cut" | cut -f1)"
@@ -384,6 +483,8 @@ cut_and_merge() {
 #
 # For a whole-extract line the box is the extract's own header bbox, read with
 # `osmium fileinfo` — header only, so it costs nothing even on a 143 MB file.
+# For a bbox line it is the request clipped to that same header bbox — see
+# clip_to_extract for the Greater London line this stops from lying.
 write_region_manifest() {
   local out="$GH_DIR/regions.manifest.json" region bbox file first=1
   {
@@ -398,6 +499,16 @@ write_region_manifest() {
         # "(minlon,minlat,maxlon,maxlat)" out of osmium's header dump.
         bbox="$(osmium fileinfo -g header.boxes "$file" 2>/dev/null \
                  | head -1 | tr -d '() ' )"
+      else
+        bbox="$(clip_to_extract "$bbox" "$file")"
+        # Disjoint lines were already a hard error in cut_and_merge; an empty
+        # intersection here means the manifest is being regenerated against a
+        # data dir that no longer holds this extract. Say so rather than emit
+        # a row with no box, which backend/coverage.py would skip silently.
+        [ -n "$bbox" ] || {
+          echo "  manifest: no extract data for '$region' in $DATA_DIR" >&2
+          exit 1
+        }
       fi
       [ $first -eq 1 ] || printf ',\n'
       first=0
@@ -409,10 +520,11 @@ write_region_manifest() {
 }
 
 build_graph() {
-  local java started elapsed
+  local java started elapsed import_config
+  import_config="$(config_with_dataaccess "$IMPORT_DATAACCESS" import)"
   java="$(find_java)"
   rm -rf "$DATA_DIR/graph-cache"
-  echo "  building the routing graph — this is the slow part…"
+  echo "  building the routing graph with ${IMPORT_DATAACCESS:-RAM_STORE} — this is the slow part…"
   started="$(date +%s)"
   # graph.location and the SRTM cache are passed explicitly rather than left to
   # the relative paths in config.yml, so GH_DATA_DIR actually redirects them.
@@ -420,7 +532,7 @@ build_graph() {
       -Ddw.graphhopper.datareader.file="$MERGED" \
       -Ddw.graphhopper.graph.location="$DATA_DIR/graph-cache" \
       -Ddw.graphhopper.graph.elevation.cache_dir="$DATA_DIR/srtm" \
-      -jar "$GH_JAR" import "$CONFIG" )
+      -jar "$GH_JAR" import "$import_config" )
   elapsed=$(( $(date +%s) - started ))
 
   # Only now, and only because the import returned 0.
@@ -430,6 +542,7 @@ graphhopper=$GH_VERSION
 built_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 import_seconds=$elapsed
 import_heap=$IMPORT_HEAP
+import_dataaccess=${IMPORT_DATAACCESS:-RAM_STORE}
 EOF
   echo
   echo "  graph:  $(du -sh "$DATA_DIR/graph-cache" | cut -f1)"
@@ -451,11 +564,7 @@ case "${1:-}" in
     regions_for_set "$REGION_SET" >/dev/null   # fail fast on a bad name
     echo "  region set: $REGION_SET"
     require_tools
-    [ -f "$GH_JAR" ] || {
-      echo "  fetching GraphHopper $GH_VERSION…"
-      curl -fL --progress-bar -o "$GH_JAR" \
-        "https://repo1.maven.org/maven2/com/graphhopper/graphhopper-web/${GH_VERSION}/graphhopper-web-${GH_VERSION}.jar"
-    }
+    ensure_jar
     download_extracts
     cut_and_merge
     build_graph
@@ -466,6 +575,61 @@ case "${1:-}" in
     echo "Done. Start it with:  scripts/graphhopper.sh serve"
     echo "Then add to .env:     MEANDER_GRAPHHOPPER_URL=http://localhost:$PORT/route"
     echo "                      MEANDER_GRAPHHOPPER_SELF_HOSTED=1"
+    ;;
+
+  fetch)
+    # Everything setup does except the import: download, verify, cut, merge.
+    # The point is the last line it prints — the merged size is the honest
+    # predictor of what an import will cost in heap and hours, and finding out
+    # *before* committing a machine to one is what lets a region set be trimmed
+    # on measurement rather than on guesswork. Downloads are kept, so the setup
+    # that follows re-cuts and re-merges but fetches nothing twice.
+    shift || true
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        --region-set) REGION_SET="${2:?--region-set needs a name}"; shift 2 ;;
+        --region-set=*) REGION_SET="${1#*=}"; shift ;;
+        *) echo "Unknown option: $1" >&2; exit 1 ;;
+      esac
+    done
+    regions_for_set "$REGION_SET" >/dev/null
+    echo "  region set: $REGION_SET"
+    require_tools
+    download_extracts
+    cut_and_merge
+    echo
+    echo "Fetched and merged: $(du -h "$MERGED" | cut -f1). No graph was built."
+    echo "Import it with:  scripts/graphhopper.sh import --region-set $REGION_SET"
+    ;;
+
+  import)
+    # build_graph without the fetch: the second half of `fetch`, and the retry
+    # path after a failed import — re-cutting tens of GB of extracts to retry
+    # the step that comes after the cutting is an hour nobody needs to spend.
+    # The merged file must exist; the extracts must still be on disk too,
+    # because the manifest reads their header boxes.
+    shift || true
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        --region-set) REGION_SET="${2:?--region-set needs a name}"; shift 2 ;;
+        --region-set=*) REGION_SET="${1#*=}"; shift ;;
+        *) echo "Unknown option: $1" >&2; exit 1 ;;
+      esac
+    done
+    regions_for_set "$REGION_SET" >/dev/null
+    echo "  region set: $REGION_SET"
+    require_tools
+    ensure_jar
+    [ -s "$MERGED" ] || {
+      echo "No merged extract at $MERGED." >&2
+      echo "Run:  scripts/graphhopper.sh fetch --region-set $REGION_SET" >&2
+      exit 1
+    }
+    echo "  merged extract: $(du -h "$MERGED" | cut -f1) (from an earlier fetch)"
+    build_graph
+    write_region_manifest
+    echo
+    echo "Done. Start it with:  scripts/graphhopper.sh serve"
     ;;
 
   serve)
@@ -481,13 +645,14 @@ case "${1:-}" in
       exit 1
     }
     local_java="$(find_java)"
+    serve_config="$(config_with_dataaccess "$DATAACCESS" serve)"
     cd "$GH_DIR"
-    echo "  serving with a ${SERVE_HEAP} heap (graph is $(du -sh "$DATA_DIR/graph-cache" | cut -f1))"
+    echo "  serving with a ${SERVE_HEAP} heap, ${DATAACCESS:-RAM_STORE} (graph is $(du -sh "$DATA_DIR/graph-cache" | cut -f1))"
     sed 's/^/  /' "$DATA_DIR/graph-cache/$GRAPH_MARKER_NAME"
     exec "$local_java" -Xmx"$SERVE_HEAP" -Xms2g \
       -Ddw.graphhopper.graph.location="$DATA_DIR/graph-cache" \
       -Ddw.graphhopper.graph.elevation.cache_dir="$DATA_DIR/srtm" \
-      -jar "$GH_JAR" server "$CONFIG"
+      -jar "$GH_JAR" server "$serve_config"
     ;;
 
   status)
@@ -529,7 +694,11 @@ case "${1:-}" in
     ;;
 
   *)
-    sed -n '2,32p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
+    # The range ends at the blank line before `set -euo pipefail`, found rather
+    # than hardcoded: the last hardcoded range in this repo (provision-vm.sh's
+    # old `sed -n '2,52p'`) silently printed the wrong thing the first time its
+    # header grew, and this header has just grown.
+    awk 'NR < 2 { next } /^$/ { exit } { sub(/^# ?/, ""); print }' "${BASH_SOURCE[0]}"
     exit 1
     ;;
 esac
