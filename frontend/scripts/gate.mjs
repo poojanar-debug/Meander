@@ -914,6 +914,16 @@ await cdp.evaluate(
   `(()=>{const b=[...document.querySelectorAll('button')].find(x=>/start follow mode/i.test(x.textContent||''));if(b){b.scrollIntoView({block:'center'});b.click()}})()`,
 )
 const followUp = await waitFor(`!!document.querySelector('.follow')`, 40, 100)
+// The overlay is FollowMode.jsx and the compass is MapView.jsx: two
+// components, two render passes, and `.follow` appearing first is not a
+// promise the compass has mounted yet. Counting at overlay-appearance + 0 ms
+// lost this race intermittently — 1 of 94 FAILED on runs whose frontend was
+// byte-identical to passing ones. So wait for the compass too, with the same
+// budget. The manifest check below is untouched: if the compass genuinely
+// never mounts, this line burns its four seconds and the zero-match still
+// fails, which is the gate's rule — a slow selector is waited for, a missing
+// one is never excused.
+await waitFor(`!!document.querySelector('.map__compass')`, 40, 100)
 const followCounts = await countSelectors(FOLLOW_MANIFEST)
 const followOk = checkManifest('follow', FOLLOW_MANIFEST, followCounts)
 check('[follow] entered from the detail', followUp)
